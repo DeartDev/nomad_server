@@ -1,0 +1,42 @@
+# ===========================================================================
+#  nomad_server — configuración del túnel de Cloudflare
+#  Destino  : ${CF_CONFIG_DIR}/config.yml
+#  Generado por scripts/11_cloudflared.sh
+#  Capítulo : docs/11_cloudflared_y_dominio.md
+#
+#  Fíjate en lo corto que es: hay UNA sola regla de entrada. Todo el tráfico
+#  del túnel se entrega a Traefik, que decide a qué contenedor va según el
+#  nombre de host. Añadir un proyecto nuevo NO toca este archivo (§ 3.3).
+# ===========================================================================
+
+tunnel: ${CF_TUNEL_ID}
+credentials-file: /etc/cloudflared/${CF_TUNEL_ID}.json
+
+# Métricas internas del túnel. Se usan para la comprobación de salud del
+# contenedor y para el diagnóstico. No salen del contenedor.
+metrics: 0.0.0.0:2000
+
+# Las actualizaciones las gestiona la etiqueta de imagen del compose, no el
+# propio binario: así la versión que corre es la que dice el fichero compose.
+no-autoupdate: true
+
+# Cuántas conexiones simultáneas mantiene con el borde de Cloudflare.
+# Cuatro es el valor por omisión y va sobrado para un servidor doméstico.
+protocol: quic
+
+originRequest:
+  connectTimeout: 30s
+  # El origen es Traefik, dentro de la red de contenedores: HTTP en claro y
+  # sin certificados que verificar (capítulo 10 § 3.5).
+  noTLSVerify: false
+  # No se define httpHostHeader a propósito: sin esa opción, cloudflared
+  # conserva el nombre de host original, que es justo lo que Traefik necesita
+  # para decidir el destino.
+
+ingress:
+  # Regla única: todo va a Traefik.
+  - service: http://traefik:80
+
+  # 'ingress' exige una regla final sin condición. La anterior ya lo es, así
+  # que esta línea no llega a usarse nunca; se deja documentado el motivo.
+  # Si algún host llega sin router en Traefik, Traefik responde 404.

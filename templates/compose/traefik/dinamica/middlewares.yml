@@ -1,0 +1,100 @@
+# ===========================================================================
+#  nomad_server — middlewares reutilizables de Traefik
+#  Destino  : ${DATOS_RAIZ}/traefik/config/dinamica/middlewares.yml
+#  Generado por scripts/10_traefik.sh
+#  Capítulo : docs/10_traefik.md § 3.4
+#
+#  «Dinámica» significa que Traefik recarga este archivo al guardarlo, sin
+#  reiniciar. Se referencian desde las etiquetas de los proyectos con el
+#  sufijo @file, por ejemplo:  middlewares=seguridad@file,compresion@file
+# ===========================================================================
+
+http:
+  middlewares:
+
+    # --- Cabeceras de seguridad ----------------------------------------
+    # Se aplican a TODO el tráfico público desde el punto de entrada 'web'.
+    seguridad:
+      headers:
+        # El navegador no intenta adivinar el tipo de contenido: cierra una
+        # vía clásica de XSS con archivos subidos por usuarios.
+        contentTypeNosniff: true
+
+        # La página no se puede incrustar en un iframe de otro sitio
+        # (protección contra clickjacking).
+        frameDeny: true
+
+        # No filtrar la URL completa al navegar a otro dominio.
+        referrerPolicy: "strict-origin-when-cross-origin"
+
+        # Desactivar APIs del navegador que ningún proyecto de este servidor
+        # necesita por omisión.
+        permissionsPolicy: "camera=(), microphone=(), geolocation=(), payment=()"
+
+        # HSTS: obliga al navegador a usar HTTPS durante un año.
+        # OJO: es difícil de revertir. Si un subdominio tuviera que servirse
+        # por HTTP, el navegador se negaría durante todo ese año.
+        # includeSubDomains queda desactivado a propósito para no arrastrar a
+        # subdominios que aún no existen.
+        stsSeconds: 31536000
+        stsIncludeSubdomains: false
+        stsPreload: false
+
+        # Ocultar el servidor de origen.
+        customResponseHeaders:
+          Server: ""
+          X-Powered-By: ""
+
+    # --- Compresión ------------------------------------------------------
+    compresion:
+      compress:
+        # No comprimir lo que ya viene comprimido.
+        excludedContentTypes:
+          - image/png
+          - image/jpeg
+          - image/webp
+          - video/mp4
+          - application/zip
+          - application/gzip
+
+    # --- Limitación de peticiones ----------------------------------------
+    # No se aplica por omisión: se añade por proyecto cuando tenga sentido.
+    # Cloudflare ya filtra buena parte del abuso antes de llegar aquí.
+    limite-peticiones:
+      rateLimit:
+        average: 100
+        burst: 50
+        period: 1m
+
+    # Variante estricta para formularios de acceso o APIs sensibles.
+    limite-estricto:
+      rateLimit:
+        average: 10
+        burst: 5
+        period: 1m
+
+    # --- Solo desde la red privada ---------------------------------------
+    # Restringe un servicio a las redes internas. Se usa como segunda barrera
+    # en las herramientas de operación (capítulo 13).
+    solo-privada:
+      ipAllowList:
+        sourceRange:
+          - "127.0.0.1/32"
+          - "${LAN_CIDR}"
+          - "${TS_CIDR}"
+          - "${DOCKER_RED_PROXY_SUBRED}"
+
+    # --- Cadenas de uso frecuente ----------------------------------------
+    publico:
+      chain:
+        middlewares:
+          - seguridad
+          - compresion
+          - limite-peticiones
+
+    interno:
+      chain:
+        middlewares:
+          - seguridad
+          - compresion
+          - solo-privada

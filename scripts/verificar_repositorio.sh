@@ -249,7 +249,11 @@ comprobar_docs() {
     while read -r archivo; do
         [[ -n "${archivo}" ]] || continue
 
-        usadas="$(grep -ohE '\$\{[A-Z][A-Z0-9_]*\}' "${archivo}" 2>/dev/null \
+        # Se descartan primero las secuencias '$${VAR}': en un fichero compose
+        # ese doble dólar es el escape que deja la variable para el contenedor,
+        # no para envsubst.
+        usadas="$(sed -E 's/\$\$\{[A-Z][A-Z0-9_]*\}//g' "${archivo}" 2>/dev/null \
+                  | grep -ohE '\$\{[A-Z][A-Z0-9_]*\}' \
                   | sed -E 's/^\$\{//; s/\}$//' | sort -u || true)"
 
         # Variables asignadas dentro del propio archivo (ejemplos de shell que

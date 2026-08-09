@@ -1,0 +1,131 @@
+# ===========================================================================
+#  nomad_server — plantilla de proyecto
+#  Destino  : ${DATOS_RAIZ}/<proyecto>/docker-compose.yml
+#  Capítulo : docs/12_despliegue_de_proyectos.md
+#
+#  Copia este archivo a tu proyecto y ajusta lo marcado con «CAMBIAR».
+#  Todo lo demás son decisiones del servidor que conviene no tocar.
+#
+#  LA REGLA QUE NO SE ROMPE: no hay sección 'ports:'. El acceso público llega
+#  por Traefik a través del túnel; el acceso privado, por el punto de entrada
+#  interno. Publicar un puerto aquí saltaría el cortafuegos (capítulo 09 § 3.2).
+# ===========================================================================
+
+services:
+
+  # -----------------------------------------------------------------------
+  #  Aplicación web
+  # -----------------------------------------------------------------------
+  web:
+    # CAMBIAR: imagen del proyecto. Fija siempre una versión concreta:
+    # 'latest' hace que un despliegue rutinario traiga una versión nueva sin
+    # avisar, y que el mismo compose produzca resultados distintos según el día.
+    image: nginx:1.29-alpine
+
+    # Alternativa si el proyecto se construye desde su código fuente:
+    # build:
+    #   context: ./codigo
+    #   dockerfile: Dockerfile
+
+    container_name: proyecto-ejemplo
+
+    # Vuelve a arrancar tras un corte de luz o un reinicio, pero respeta lo
+    # que hayas parado a mano (capítulo 09 § 3.8).
+    restart: unless-stopped
+
+    env_file:
+      # Solo en el servidor, permisos 600, nunca en git.
+      - .env
+
+    volumes:
+      # Los datos viven dentro del directorio del proyecto: así el respaldo
+      # del capítulo 14 los recoge sin configuración adicional y se pueden
+      # inspeccionar con ls (capítulo 12 § 3.3).
+      - ./datos:/usr/share/nginx/html:ro
+
+    networks:
+      # Red compartida: es la que permite a Traefik alcanzar este contenedor.
+      - proxy
+      # Red privada del proyecto, para hablar con su base de datos.
+      - interna
+
+    security_opt:
+      # Impide que un proceso dentro del contenedor gane privilegios con
+      # binarios setuid. Es gratis y corta una vía de escalada.
+      - no-new-privileges:true
+
+    # Un contenedor sin healthcheck siempre parece «en marcha», aunque su
+    # proceso esté colgado. El script de despliegue usa esto para decidir si
+    # el despliegue ha salido bien.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    labels:
+      - "traefik.enable=true"
+
+      # --- Enrutado público -------------------------------------------
+      # CAMBIAR: el subdominio. Debe existir su registro DNS:
+      #     ./scripts/11_cloudflared.sh --ruta ejemplo
+      - "traefik.http.routers.ejemplo.rule=Host(`ejemplo.${DOMINIO_PUBLICO}`)"
+      - "traefik.http.routers.ejemplo.entrypoints=web"
+      - "traefik.http.services.ejemplo.loadbalancer.server.port=80"
+
+      # Cadena de middlewares: cabeceras de seguridad, compresión y límite de
+      # peticiones. Definidos una sola vez en Traefik (capítulo 10 § 3.4).
+      - "traefik.http.routers.ejemplo.middlewares=publico@file"
+
+      # --- Si el proyecto fuera PRIVADO -------------------------------
+      # Sustituye las tres líneas de enrutado por estas, y NO crees registro
+      # DNS público. Se llegará por el punto de entrada interno.
+      # - "traefik.http.routers.ejemplo.entrypoints=interna"
+      # - "traefik.http.routers.ejemplo.middlewares=interno@file"
+
+  # -----------------------------------------------------------------------
+  #  Base de datos (ejemplo: eliminar si el proyecto no la necesita)
+  # -----------------------------------------------------------------------
+  #  Fíjate en que NO está en la red 'proxy': Traefik no puede alcanzarla, y
+  #  ningún otro proyecto tampoco. Solo la ve el servicio 'web'.
+  # -----------------------------------------------------------------------
+  db:
+    image: postgres:17-alpine
+    container_name: proyecto-ejemplo-db
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    volumes:
+      - ./datos-db:/var/lib/postgresql/data
+
+    networks:
+      - interna
+
+    security_opt:
+      - no-new-privileges:true
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+    # Sin etiquetas de Traefik: esta base de datos no se publica de ninguna
+    # forma, ni pública ni privada.
+    labels:
+      - "traefik.enable=false"
+
+networks:
+  proxy:
+    external: true
+    name: ${DOCKER_RED_PROXY}
+
+  interna:
+    driver: bridge
+    # Sin salida a internet: si la base de datos se comprometiera, no podría
+    # comunicarse con el exterior.
+    internal: true

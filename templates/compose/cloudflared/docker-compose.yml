@@ -1,0 +1,49 @@
+# ===========================================================================
+#  nomad_server — túnel de Cloudflare
+#  Destino  : ${CF_CONFIG_DIR}/docker-compose.yml
+#  Generado por scripts/11_cloudflared.sh
+#  Capítulo : docs/11_cloudflared_y_dominio.md
+#
+#  Este contenedor es el ÚNICO que recibe tráfico de internet, y lo recibe por
+#  una conexión que él mismo inicia hacia fuera. No publica ningún puerto: un
+#  escaneo a tu IP doméstica no encuentra absolutamente nada.
+# ===========================================================================
+
+services:
+
+  cloudflared:
+    # Versión fijada: 'latest' podría traer un cambio incompatible en el
+    # formato de configuración y dejar todos los proyectos sin publicar.
+    image: cloudflare/cloudflared:2026.7.3
+    container_name: cloudflared
+    restart: unless-stopped
+
+    command: tunnel --config /etc/cloudflared/config.yml run
+
+    volumes:
+      # Configuración y credenciales del túnel, en solo lectura.
+      # El archivo <UUID>.json es un secreto: permisos 600 y nunca en git.
+      - ./config.yml:/etc/cloudflared/config.yml:ro
+      - ./${CF_TUNEL_ID}.json:/etc/cloudflared/${CF_TUNEL_ID}.json:ro
+
+    networks:
+      - proxy
+
+    security_opt:
+      - no-new-privileges:true
+
+    # El túnel expone su estado en /ready: 200 cuando hay al menos una
+    # conexión establecida con el borde de Cloudflare.
+    healthcheck:
+      test: ["CMD", "cloudflared", "--metrics", "127.0.0.1:2000", "tunnel", "ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+    # Sin etiquetas de Traefik: cloudflared no se publica, publica a los demás.
+
+networks:
+  proxy:
+    external: true
+    name: ${DOCKER_RED_PROXY}

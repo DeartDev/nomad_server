@@ -1,0 +1,96 @@
+# ===========================================================================
+#  nomad_server — configuración estática de Traefik v3
+#  Destino  : ${DATOS_RAIZ}/traefik/config/traefik.yml
+#  Generado por scripts/10_traefik.sh
+#  Capítulo : docs/10_traefik.md
+#
+#  «Estática» significa que un cambio aquí exige reiniciar Traefik. Las reglas
+#  de enrutado NO van aquí: las descubre Traefik solo, leyendo las etiquetas de
+#  los contenedores.
+# ===========================================================================
+
+global:
+  # Sin comprobación de versiones ni telemetría: este servidor no habla con
+  # nadie que no necesite.
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+# --- Puntos de entrada -----------------------------------------------------
+entryPoints:
+
+  # Tráfico público. NO se publica en el host: solo lo alcanza cloudflared
+  # desde dentro de la red de contenedores (capítulo 09 § 3.2).
+  web:
+    address: ":80"
+    # Cloudflare es quien ve la IP real del visitante y la reenvía en las
+    # cabeceras. Sin esta lista, Traefik registraría siempre la IP del túnel.
+    forwardedHeaders:
+      trustedIPs:
+        - "${DOCKER_RED_PROXY_SUBRED}"
+    http:
+      middlewares:
+        - seguridad@file
+        - compresion@file
+
+  # Herramientas de operación (panel, logs, monitor). Se publica en el host
+  # atado a ${TRAEFIK_BIND_INTERNA}, nunca en 0.0.0.0.
+  interna:
+    address: ":8080"
+
+# --- Proveedores -----------------------------------------------------------
+providers:
+
+  docker:
+    # No se habla con /var/run/docker.sock directamente: se pasa por un
+    # intermediario que solo permite consultas de lectura (capítulo 10 § 3.2).
+    endpoint: "tcp://socket-proxy:2375"
+
+    # Solo se enrutan los contenedores que lo pidan explícitamente con
+    # traefik.enable=true. Sin esto, cualquier contenedor nuevo quedaría
+    # publicado sin que nadie lo decidiera.
+    exposedByDefault: false
+
+    # Red por la que Traefik llega a los contenedores. Si un contenedor está
+    # en varias redes, esta desambigua.
+    network: "${DOCKER_RED_PROXY}"
+
+    watch: true
+
+  # Middlewares reutilizables, definidos en archivos.
+  file:
+    directory: "/etc/traefik/dinamica"
+    watch: true
+
+# --- Registro --------------------------------------------------------------
+log:
+  level: INFO
+  format: common
+
+accessLog:
+  format: common
+  filters:
+    # Registrar solo lo que interesa: errores y peticiones lentas. Sin este
+    # filtro, el registro de accesos crece sin control.
+    statusCodes:
+      - "400-599"
+    retryAttempts: true
+    minDuration: "1s"
+  fields:
+    headers:
+      defaultMode: drop
+      names:
+        User-Agent: keep
+        X-Forwarded-For: keep
+        Cf-Connecting-Ip: keep
+
+# --- Panel de control ------------------------------------------------------
+api:
+  dashboard: true
+  # 'insecure' expondría el panel en su propio puerto sin control de acceso.
+  # Aquí se publica mediante un router en el punto de entrada interno, que ya
+  # está atado a una dirección privada.
+  insecure: false
+
+# --- Comprobación de salud -------------------------------------------------
+ping:
+  entryPoint: interna

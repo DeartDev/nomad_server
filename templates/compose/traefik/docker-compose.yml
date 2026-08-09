@@ -1,0 +1,134 @@
+# ===========================================================================
+#  nomad_server — Traefik y su intermediario del socket
+#  Destino  : ${DATOS_RAIZ}/traefik/docker-compose.yml
+#  Generado por scripts/10_traefik.sh
+#  Capítulo : docs/10_traefik.md
+#
+#  Fíjate en lo que NO hay: el servicio 'traefik' no publica el puerto 80 en
+#  el host. Solo lo alcanza cloudflared desde dentro de la red 'proxy'.
+#  El único puerto publicado es el interno, atado a una dirección privada.
+# ===========================================================================
+
+services:
+
+  # -----------------------------------------------------------------------
+  #  Intermediario del socket de Docker
+  # -----------------------------------------------------------------------
+  #  Traefik necesita consultar la lista de contenedores. Montarle el socket
+  #  directamente le daría la API completa de Docker, con la que se puede
+  #  arrancar un contenedor privilegiado y tomar el host entero.
+  #
+  #  Montar el socket con ':ro' NO lo impide: ':ro' impide escribir en el
+  #  archivo, no impide hacer peticiones de escritura a la API. Es un error
+  #  muy extendido (capítulo 10 § 3.2).
+  #
+  #  Este intermediario expone únicamente los puntos de la API que Traefik
+  #  necesita, todos de lectura.
+  # -----------------------------------------------------------------------
+  socket-proxy:
+    # Versión fijada a propósito: en la infraestructura no se usa 'latest'
+    # (capítulo 10 § 3.6).
+    image: tecnativa/docker-socket-proxy:v0.5.0
+    container_name: socket-proxy
+    restart: unless-stopped
+    environment:
+      # Lo único que se permite:
+      CONTAINERS: 1
+      # Todo lo demás, denegado explícitamente:
+      POST: 0
+      BUILD: 0
+      COMMIT: 0
+      CONFIGS: 0
+      EXEC: 0
+      IMAGES: 0
+      INFO: 0
+      NETWORKS: 0
+      NODES: 0
+      PLUGINS: 0
+      SECRETS: 0
+      SERVICES: 0
+      SESSION: 0
+      SWARM: 0
+      SYSTEM: 0
+      TASKS: 0
+      VOLUMES: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - socket
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:2375/v1.24/containers/json"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # -----------------------------------------------------------------------
+  #  Traefik
+  # -----------------------------------------------------------------------
+  traefik:
+    # Se fija la línea menor (v3.7), no 'latest' ni 'v3': así se reciben
+    # parches sin sorpresas de una versión mayor (capítulo 10 § 3.6).
+    image: traefik:v3.7
+    container_name: traefik
+    restart: unless-stopped
+    depends_on:
+      socket-proxy:
+        condition: service_started
+
+    # ÚNICO puerto publicado de todo el servidor, y atado a una dirección
+    # privada: 127.0.0.1 (se llega por túnel SSH) o la IP de Tailscale.
+    # NUNCA 0.0.0.0.
+    ports:
+      - "${TRAEFIK_BIND_INTERNA}:${TRAEFIK_PUERTO_INTERNA}:8080"
+
+    volumes:
+      - ./config/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./config/dinamica:/etc/traefik/dinamica:ro
+      # El registro va a la salida estándar del contenedor: así lo recoge
+      # Docker (con la rotación del capítulo 09) y lo muestra Dozzle
+      # (capítulo 13). No hace falta ningún volumen para logs.
+
+    networks:
+      - proxy
+      - socket
+
+    security_opt:
+      - no-new-privileges:true
+
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    labels:
+      - "traefik.enable=true"
+
+      # Panel de control, solo en el punto de entrada interno.
+      # Se puede llegar de dos formas:
+      #   · por nombre:  http://${TRAEFIK_DASHBOARD_HOST}:${TRAEFIK_PUERTO_INTERNA}/
+      #   · por ruta:    http://<ip-privada>:${TRAEFIK_PUERTO_INTERNA}/dashboard/
+      # La segunda funciona sin configurar DNS, que es lo que hace falta la
+      # primera vez.
+      - "traefik.http.routers.panel.rule=Host(`${TRAEFIK_DASHBOARD_HOST}`) || PathPrefix(`/dashboard`) || PathPrefix(`/api`)"
+      - "traefik.http.routers.panel.entrypoints=interna"
+      - "traefik.http.routers.panel.service=api@internal"
+      - "traefik.http.routers.panel.middlewares=solo-privada@file"
+
+networks:
+  # Red compartida con los proyectos y con cloudflared. Se crea fuera de este
+  # fichero (capítulo 09) y se declara externa para que 'docker compose down'
+  # no pueda borrarla.
+  proxy:
+    external: true
+    name: ${DOCKER_RED_PROXY}
+
+  # Red aislada entre Traefik y el intermediario del socket. 'internal: true'
+  # significa que no tiene salida a internet: aunque alguien tomara el
+  # intermediario, no podría hablar con el exterior.
+  socket:
+    driver: bridge
+    internal: true

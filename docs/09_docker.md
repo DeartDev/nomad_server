@@ -68,12 +68,21 @@ Los contenedores se comunican **por nombre** dentro de la red `${DOCKER_RED_PROX
 `proyecto-a:3000` sin que ese puerto exista en el host. Y el único que recibe tráfico de fuera es
 `cloudflared`, que lo recibe por un túnel que él mismo inicia.
 
+**La única excepción, y es acotada:** el punto de entrada *interno* de Traefik (capítulo 10) sí se
+publica, pero **nunca en `0.0.0.0`**. Se ata a `127.0.0.1` —accesible solo mediante un túnel SSH— o
+a la dirección de Tailscale del servidor, accesible solo desde tu red privada. En ninguno de los dos
+casos queda expuesto a la red local ni a internet.
+
+Enunciada con precisión, la regla es: **ningún contenedor publica un puerto en `0.0.0.0`**. Es
+exactamente lo que comprueba la validación de la sección 7, y la comprobación se repite en todos los
+capítulos posteriores.
+
 **Consecuencia práctica**: para depurar un servicio desde tu equipo se usa un túnel SSH, no un
 puerto abierto:
 
 ```bash
 # [cliente]
-ssh -L 8080:localhost:8080 nomad
+ssh -L 8080:127.0.0.1:8080 nomad
 ```
 
 ### 3.3 Subredes que no colisionan con la LAN
