@@ -1,0 +1,94 @@
+# ===========================================================================
+#  nomad_server — herramientas de operación
+#  Destino  : ${DATOS_RAIZ}/observabilidad/docker-compose.yml
+#  Generado por scripts/13_observabilidad.sh
+#  Capítulo : docs/13_observabilidad.md
+#
+#  Ambos servicios se publican SOLO en el punto de entrada 'interna' de
+#  Traefik, que está atado a una dirección privada. No existe ningún registro
+#  DNS público que lleve hasta aquí, y el middleware 'interno@file' añade una
+#  segunda barrera por dirección de origen.
+# ===========================================================================
+
+services:
+
+  # -----------------------------------------------------------------------
+  #  Dozzle — registros de todos los contenedores en una interfaz web
+  # -----------------------------------------------------------------------
+  #  Lee los registros a través del MISMO intermediario del socket que usa
+  #  Traefik: nunca toca /var/run/docker.sock directamente (capítulo 10 § 3.2).
+  # -----------------------------------------------------------------------
+  dozzle:
+    image: amir20/dozzle:v10.7.0
+    container_name: dozzle
+    restart: unless-stopped
+
+    environment:
+      DOZZLE_REMOTE_HOST: tcp://socket-proxy:2375
+      DOZZLE_NO_ANALYTICS: "true"
+      # Dozzle no guarda nada: lee del socket y muestra. Sin base de datos,
+      # sin volumen y sin nada que respaldar.
+      DOZZLE_LEVEL: info
+
+    networks:
+      - proxy
+      - socket
+
+    security_opt:
+      - no-new-privileges:true
+
+    healthcheck:
+      test: ["CMD", "/dozzle", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dozzle.rule=Host(`${DOZZLE_HOST}`)"
+      - "traefik.http.routers.dozzle.entrypoints=interna"
+      - "traefik.http.routers.dozzle.middlewares=interno@file"
+      - "traefik.http.services.dozzle.loadbalancer.server.port=8080"
+
+  # -----------------------------------------------------------------------
+  #  Uptime Kuma — vigilancia de servicios y avisos
+  # -----------------------------------------------------------------------
+  uptime-kuma:
+    image: louislam/uptime-kuma:2.5.0
+    container_name: uptime-kuma
+    restart: unless-stopped
+
+    volumes:
+      # Configuración, monitores e histórico. Va dentro del directorio del
+      # proyecto para que el respaldo del capítulo 14 lo recoja.
+      - ./datos-kuma:/app/data
+
+    networks:
+      - proxy
+
+    security_opt:
+      - no-new-privileges:true
+
+    healthcheck:
+      test: ["CMD", "extra/healthcheck"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.kuma.rule=Host(`${UPTIME_KUMA_HOST}`)"
+      - "traefik.http.routers.kuma.entrypoints=interna"
+      - "traefik.http.routers.kuma.middlewares=interno@file"
+      - "traefik.http.services.kuma.loadbalancer.server.port=3001"
+
+networks:
+  proxy:
+    external: true
+    name: ${DOCKER_RED_PROXY}
+
+  socket:
+    external: true
+    name: ${DOCKER_RED_SOCKET}

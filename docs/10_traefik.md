@@ -445,7 +445,7 @@ cadenas.
 
 ```bash
 # [servidor] — la red del intermediario no tiene salida a internet
-docker network inspect traefik_socket --format '{{.Internal}}'
+docker network inspect ${DOCKER_RED_SOCKET} --format '{{.Internal}}'
 ```
 
 Criterio de aceptación: `true`.

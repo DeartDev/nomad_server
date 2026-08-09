@@ -1,0 +1,63 @@
+# ===========================================================================
+#  nomad_server — exclusiones del respaldo
+#  Destino  : /etc/nomad/restic-excluir.txt
+#  Generado por scripts/14_restic.sh
+#  Capítulo : docs/14_respaldos_restic.md § 3.2
+#
+#  Todo lo que se pueda volver a generar con un comando NO se respalda:
+#  ocupa espacio, alarga el respaldo y no aporta nada que no se recupere solo.
+# ===========================================================================
+
+# --- Dependencias reinstalables --------------------------------------------
+node_modules
+vendor
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+target/debug
+target/release
+
+# --- Cachés ----------------------------------------------------------------
+.cache
+.npm
+.yarn/cache
+.pnpm-store
+.next/cache
+.nuxt
+.parcel-cache
+.gradle
+.m2/repository
+
+# --- Artefactos de construcción --------------------------------------------
+# Ojo: si algún proyecto SIRVE su directorio dist/ y no lo reconstruye al
+# desplegar, quita la línea correspondiente o el sitio quedará vacío tras
+# restaurar.
+dist
+build
+.output
+
+# --- Temporales ------------------------------------------------------------
+*.tmp
+*.swp
+*~
+.DS_Store
+Thumbs.db
+tmp/
+temp/
+
+# --- Registros -------------------------------------------------------------
+# Los registros de los contenedores los gestiona Docker con rotación, y los
+# del sistema están en el journal, que sí se respalda dentro de /var/log.
+*.log
+logs/
+
+# --- Copias de seguridad propias -------------------------------------------
+# Evita respaldar los .bak-<fecha> que dejan los scripts: son copias de
+# archivos que ya se están respaldando.
+*.bak
+*.bak-*
+
+# --- Sockets y dispositivos ------------------------------------------------
+*.sock

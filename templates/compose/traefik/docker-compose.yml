@@ -126,9 +126,11 @@ networks:
     external: true
     name: ${DOCKER_RED_PROXY}
 
-  # Red aislada entre Traefik y el intermediario del socket. 'internal: true'
-  # significa que no tiene salida a internet: aunque alguien tomara el
-  # intermediario, no podría hablar con el exterior.
+  # Red aislada entre el intermediario del socket y quienes lo consultan.
+  # Se crea también en el capítulo 09, marcada como 'internal': no tiene
+  # salida a internet, así que aunque alguien tomara el intermediario no
+  # podría hablar con el exterior.
+  # Es externa porque Dozzle (capítulo 13) también se conecta a ella.
   socket:
-    driver: bridge
-    internal: true
+    external: true
+    name: ${DOCKER_RED_SOCKET}

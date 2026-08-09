@@ -309,19 +309,37 @@ Criterio de aceptación: `docker ps` funciona **sin `sudo`**.
 
 Recuerda 3.6: esto equivale a tener root sin contraseña.
 
-### Paso 6 — Crea la red compartida
+### Paso 6 — Crea las redes compartidas
 
 ```bash
-# [servidor]
+# [servidor] — red por la que Traefik alcanza los proyectos
 docker network create \
     --driver bridge \
     --subnet ${DOCKER_RED_PROXY_SUBRED} \
     ${DOCKER_RED_PROXY}
-docker network ls
-docker network inspect ${DOCKER_RED_PROXY} | jq '.[0].IPAM.Config'
 ```
 
-Criterio de aceptación: la red existe con la subred indicada.
+```bash
+# [servidor] — red aislada del intermediario del socket de Docker
+docker network create \
+    --driver bridge --internal \
+    --subnet ${DOCKER_RED_SOCKET_SUBRED} \
+    ${DOCKER_RED_SOCKET}
+```
+
+```bash
+# [servidor]
+docker network ls
+docker network inspect ${DOCKER_RED_PROXY} | jq '.[0].IPAM.Config'
+docker network inspect ${DOCKER_RED_SOCKET} --format '{{.Internal}}'
+```
+
+Criterio de aceptación: ambas redes existen con sus subredes, y la segunda
+devuelve `true` en `Internal`.
+
+La red `${DOCKER_RED_SOCKET}` se crea aquí, y no dentro de un fichero compose, porque la comparten
+Traefik (capítulo 10) y Dozzle (capítulo 13). `--internal` significa que **no tiene salida a
+internet**: los contenedores conectados solo pueden hablar entre sí.
 
 ### Paso 7 — Prepara el directorio de proyectos
 

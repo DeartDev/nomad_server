@@ -61,8 +61,9 @@ log_paso "Comprobaciones previas"
 requerir_no_root
 cargar_entorno
 requerir_variables DATOS_RAIZ DOCKER_RED_PROXY DOCKER_RED_PROXY_SUBRED \
-                   TRAEFIK_BIND_INTERNA TRAEFIK_PUERTO_INTERNA \
-                   TRAEFIK_DASHBOARD_HOST LAN_CIDR TS_CIDR
+                   DOCKER_RED_SOCKET TRAEFIK_BIND_INTERNA \
+                   TRAEFIK_PUERTO_INTERNA TRAEFIK_DASHBOARD_HOST \
+                   LAN_CIDR TS_CIDR
 requerir_comandos docker
 
 docker ps >/dev/null 2>&1 \
@@ -75,9 +76,18 @@ DIR_TRAEFIK="${DATOS_RAIZ}/traefik"
 # ===========================================================================
 log_paso "1/5 · Condiciones previas"
 
-docker network inspect "${DOCKER_RED_PROXY}" >/dev/null 2>&1 \
-    || die "La red '${DOCKER_RED_PROXY}' no existe. Ejecuta antes: sudo ./scripts/09_docker.sh"
-log_ok "La red '${DOCKER_RED_PROXY}' existe."
+for red in "${DOCKER_RED_PROXY}" "${DOCKER_RED_SOCKET}"; do
+    docker network inspect "${red}" >/dev/null 2>&1 \
+        || die "La red '${red}' no existe. Ejecuta antes: sudo ./scripts/09_docker.sh"
+    log_ok "La red '${red}' existe."
+done
+
+if [[ "$(docker network inspect "${DOCKER_RED_SOCKET}" --format '{{.Internal}}')" == "true" ]]; then
+    log_ok "La red '${DOCKER_RED_SOCKET}' es interna (sin salida a internet)."
+else
+    log_aviso "La red '${DOCKER_RED_SOCKET}' NO es interna: el intermediario del socket"
+    log_aviso "podría hablar con el exterior. Recréala con --internal."
+fi
 
 # La dirección de publicación nunca debe ser pública.
 case "${TRAEFIK_BIND_INTERNA}" in

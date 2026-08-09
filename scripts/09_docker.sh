@@ -68,7 +68,8 @@ requerir_root "$@"
 requerir_debian "trixie"
 cargar_entorno
 requerir_variables ADMIN_USUARIO DEBIAN_SUITE DOCKER_RED_PROXY \
-                   DOCKER_RED_PROXY_SUBRED DOCKER_LOG_MAX_SIZE \
+                   DOCKER_RED_PROXY_SUBRED DOCKER_RED_SOCKET \
+                   DOCKER_RED_SOCKET_SUBRED DOCKER_LOG_MAX_SIZE \
                    DOCKER_LOG_MAX_FILE DATOS_RAIZ LAN_CIDR
 requerir_internet "download.docker.com"
 
@@ -215,6 +216,19 @@ else
         --subnet "${DOCKER_RED_PROXY_SUBRED}" "${DOCKER_RED_PROXY}"
     marcar_cambio
     log_ok "Red '${DOCKER_RED_PROXY}' creada."
+fi
+
+# Red aislada del intermediario del socket. La usan Traefik (capítulo 10) y
+# Dozzle (capítulo 13); por eso se crea aquí y no dentro de un compose.
+if (( MODO_CHECK == 1 )); then
+    log_check "crearía la red interna ${DOCKER_RED_SOCKET} (${DOCKER_RED_SOCKET_SUBRED})"
+elif docker network inspect "${DOCKER_RED_SOCKET}" >/dev/null 2>&1; then
+    log_sinca "La red '${DOCKER_RED_SOCKET}' ya existe."
+else
+    docker network create --driver bridge --internal \
+        --subnet "${DOCKER_RED_SOCKET_SUBRED}" "${DOCKER_RED_SOCKET}"
+    marcar_cambio
+    log_ok "Red interna '${DOCKER_RED_SOCKET}' creada (sin salida a internet)."
 fi
 
 if [[ -d "${DATOS_RAIZ}" ]]; then
