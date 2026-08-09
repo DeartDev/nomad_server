@@ -1,0 +1,571 @@
+# 15 — Mantenimiento y actualizaciones
+
+> Lo que hay que hacer para que dentro de tres años el servidor siga siendo el mismo servidor y no
+> una acumulación de parches que nadie se atreve a tocar.
+
+---
+
+## 1. Objetivo
+
+Al terminar tendrás una rutina concreta —semanal, mensual y trimestral— con comandos exactos, sabrás
+actualizar contenedores y ampliar volúmenes sin sustos, y tendrás el procedimiento para subir de
+versión mayor de Debian cuando llegue el momento.
+
+---
+
+## 2. Requisitos previos
+
+**Capítulos previos:** [14 — Respaldos con restic](14_respaldos_restic.md). La rutina incluye
+verificar los respaldos, así que tienen que existir.
+
+**Necesitas a mano:**
+
+- Acceso por SSH.
+- Un recordatorio en el calendario. Es la parte que más se incumple, y el único requisito que no
+  depende del servidor.
+
+**Tiempo estimado:** 15 minutos al mes en régimen normal.
+
+---
+
+## 3. Decisiones y por qué
+
+### 3.1 Lo automático y lo manual, separados a propósito
+
+**Decisión: el sistema se parchea solo; los contenedores se actualizan a mano.**
+
+| Qué | Cómo | Por qué |
+|---|---|---|
+| Parches de seguridad de Debian | Automático (capítulo 07) | Bajo riesgo de rotura, alto coste de no aplicarlos |
+| Kernel y reinicio | Automático, a las 04:00 | Un parche de kernel sin reiniciar no protege |
+| Imágenes de contenedor | **Manual** | Una versión mayor puede cambiar el formato de datos o la configuración |
+| Versiones mayores de Debian | **Manual**, cada 2–3 años | Requiere leer las notas de publicación |
+
+La línea divisoria es sencilla: **se automatiza lo que rara vez rompe algo, y se hace a mano lo que
+puede romperlo de forma difícil de deshacer.**
+
+### 3.2 Tres frecuencias, no una
+
+**Decisión: rutina semanal, mensual y trimestral.**
+
+Una sola lista mensual con veinte comprobaciones se acaba saltando. Tres listas cortas, cada una con
+lo que corresponde a su frecuencia, se cumplen.
+
+| Frecuencia | Duración | Qué responde |
+|---|---|---|
+| Semanal | 2 minutos | «¿Está todo en marcha y queda espacio?» |
+| Mensual | 15 minutos | «¿Hay actualizaciones? ¿Los respaldos sirven?» |
+| Trimestral | 45 minutos | «¿Ha empeorado algo sin que me diera cuenta?» |
+
+### 3.3 Actualizar contenedores de uno en uno
+
+**Decisión: nunca actualizar todas las imágenes a la vez.**
+
+Actualizar cinco proyectos en una tarde y descubrir que algo falla deja la pregunta de cuál de los
+cinco fue. De uno en uno, con su comprobación, el diagnóstico es inmediato.
+
+El orden importa: primero la infraestructura (Traefik, cloudflared), después los proyectos. Si
+Traefik falla, todo cae, y conviene descubrirlo con un cambio a la vez.
+
+### 3.4 Respaldar antes de actualizar
+
+**Decisión: `restic` inmediatamente antes de cualquier actualización que toque datos.**
+
+El respaldo nocturno puede tener hasta 24 horas. Si una migración de base de datos sale mal a las
+11 de la mañana, restaurar la copia de anoche pierde el trabajo del día.
+
+```bash
+sudo ./scripts/14_restic.sh --ahora
+```
+
+Tarda segundos gracias a la deduplicación. No hay excusa para saltárselo.
+
+### 3.5 Limpiar Docker con criterio
+
+**Decisión: `docker system prune` sin `-a`, salvo cuando hace falta espacio.**
+
+| Comando | Qué borra | Riesgo |
+|---|---|---|
+| `docker system prune` | Contenedores parados, redes sin usar, caché de construcción | Bajo |
+| `docker system prune -a` | Además, **todas las imágenes sin contenedor en marcha** | Hay que volver a descargarlo todo; con red lenta, el arranque tras un reinicio se alarga mucho |
+| `docker volume prune` | Volúmenes sin usar | **Puede borrar datos.** Este montaje usa montajes de directorio, así que no debería haber volúmenes con datos, pero conviene revisar antes |
+
+### 3.6 Ampliar volúmenes en caliente
+
+**Decisión: dejar espacio sin asignar en el grupo de volúmenes y ampliar cuando haga falta.**
+
+Es la razón por la que se usó LVM en el capítulo 03. Ampliar `/var` o `/srv` no requiere reiniciar,
+ni parar servicios, ni desmontar nada:
+
+```bash
+sudo lvextend -r -L +20G /dev/vg0/var
+```
+
+`-r` redimensiona el sistema de archivos en el mismo paso.
+
+**Reducir sí es arriesgado**, y por eso el capítulo 03 asignó tamaños conservadores: siempre es
+mejor crecer que tener que encoger.
+
+---
+
+## 4. Variables usadas
+
+Este capítulo no consume variables nuevas. Los comandos usan las ya definidas: `${DATOS_RAIZ}`,
+`${RESTIC_REPO_LOCAL}`, `${DOMINIO_PUBLICO}`.
+
+---
+
+## 5. Procedimiento
+
+### 5.1 Rutina semanal — 2 minutos
+
+```bash
+# [servidor]
+./scripts/verificar_sistema.sh --rapido
+```
+
+Y si prefieres hacerlo a mano:
+
+```bash
+# [servidor] — ¿está todo en marcha?
+docker ps --format 'table {{.Names}}\t{{.Status}}'
+```
+
+Criterio: todos `Up` y `(healthy)`.
+
+```bash
+# [servidor] — ¿queda espacio?
+df -h / /var /srv ${RESTIC_USB_MOUNT}
+```
+
+Criterio: ninguno por encima del 80 %.
+
+```bash
+# [servidor] — ¿se hizo el respaldo de anoche?
+sudo ./scripts/14_restic.sh --estado
+```
+
+Criterio: la última copia tiene menos de 30 horas.
+
+```bash
+# [servidor] — ¿hay errores nuevos?
+journalctl -p err --since "7 days ago" --no-pager | tail -20
+```
+
+### 5.2 Rutina mensual — 15 minutos
+
+**Paso 1 — Respaldar antes de tocar nada.**
+
+```bash
+# [servidor]
+sudo ./scripts/14_restic.sh --ahora
+```
+
+**Paso 2 — Comprobar el sistema base.**
+
+```bash
+# [servidor]
+sudo apt update
+apt list --upgradable
+```
+
+Las actualizaciones de seguridad ya se aplicaron solas. Aquí aparece lo que `unattended-upgrades` no
+toca: paquetes que requieren instalar o eliminar otros.
+
+```bash
+# [servidor]
+sudo apt full-upgrade
+sudo apt autoremove --purge
+```
+
+```bash
+# [servidor] — ¿queda algún reinicio pendiente?
+[ -f /var/run/reboot-required ] && cat /var/run/reboot-required.pkgs
+```
+
+**Paso 3 — Actualizar la infraestructura**, de una en una.
+
+```bash
+# [servidor] — Traefik
+cd ${DATOS_RAIZ}/traefik
+# Consulta la versión actual en https://github.com/traefik/traefik/releases
+vim docker-compose.yml          # cambia la etiqueta: v3.7 → v3.8
+docker compose pull
+docker compose up -d
+docker compose ps
+```
+
+Y comprueba antes de seguir:
+
+```bash
+# [servidor]
+docker exec traefik traefik healthcheck --ping
+curl -sI https://prueba.${DOMINIO_PUBLICO} | head -1
+```
+
+```bash
+# [servidor] — cloudflared
+cd ${CF_CONFIG_DIR}
+vim docker-compose.yml
+docker compose pull && docker compose up -d
+docker logs cloudflared | grep -c 'Registered tunnel connection'
+```
+
+```bash
+# [servidor] — observabilidad
+cd ${DATOS_RAIZ}/observabilidad
+vim docker-compose.yml
+docker compose pull && docker compose up -d
+```
+
+**Paso 4 — Actualizar los proyectos.**
+
+```bash
+# [servidor]
+./scripts/deploy.sh --listar
+./scripts/deploy.sh mi-proyecto
+```
+
+**Paso 5 — Limpiar.**
+
+```bash
+# [servidor] — qué está ocupando espacio
+docker system df
+```
+
+```bash
+# [servidor] — limpieza segura
+docker system prune -f
+```
+
+```bash
+# [servidor] — ¿hay volúmenes huérfanos?
+docker volume ls -f dangling=true
+```
+
+Revísalos **antes** de borrarlos. Este montaje usa montajes de directorio, así que no debería haber
+volúmenes con datos.
+
+**Paso 6 — Verificar los respaldos.**
+
+```bash
+# [servidor]
+sudo ./scripts/14_restic.sh --verificar
+```
+
+**Paso 7 — Revisar los registros.**
+
+```bash
+# [servidor] — accesos rechazados por el cortafuegos
+sudo journalctl -k --since "30 days ago" | grep -c 'nomad-descartado'
+
+# [servidor] — intentos de acceso bloqueados
+sudo fail2ban-client status sshd
+
+# [servidor] — errores de Traefik
+docker logs traefik --since 720h 2>&1 | grep -i error | tail -20
+```
+
+### 5.3 Rutina trimestral — 45 minutos
+
+**Paso 1 — La prueba de restauración.**
+
+```bash
+# [servidor]
+sudo ./scripts/14_restic.sh --probar
+```
+
+Esto es lo más importante de la rutina trimestral. Un respaldo que no se restaura desde hace meses
+es un respaldo cuya validez es una suposición.
+
+**Paso 2 — Verificación profunda del repositorio.**
+
+```bash
+# [servidor]
+sudo ./scripts/14_restic.sh --verificar-datos
+```
+
+Lee y descifra una muestra real: es lo único que detecta un disco degradándose en silencio.
+
+**Paso 3 — Salud del hardware.**
+
+```bash
+# [servidor]
+sudo smartctl -H /dev/sda
+sudo smartctl -A /dev/sda | grep -E 'Reallocated|Pending|Wear|Percent'
+sensors 2>/dev/null || echo "(ejecuta sensors-detect si quieres temperaturas)"
+```
+
+**Paso 4 — Comparar la auditoría de seguridad.**
+
+```bash
+# [servidor]
+sudo lynis audit system --quick --quiet \
+    --report-file ~/nomad_server/inventario/lynis-$(date +%F).dat
+grep '^hardening_index' ~/nomad_server/inventario/lynis-*.dat | tail -5
+```
+
+El número absoluto no dice nada. **Que haya bajado sí**: significa que algo se desactivó por el
+camino.
+
+**Paso 5 — Revisar la superficie expuesta.**
+
+```bash
+# [servidor]
+sudo ss -tulpn | grep LISTEN
+docker ps --format 'table {{.Names}}\t{{.Ports}}'
+sudo nft list ruleset | head -40
+```
+
+Criterio: solo SSH y el punto de entrada interno de Traefik en su dirección privada. Ningún
+contenedor publicando en `0.0.0.0`.
+
+```bash
+# [cliente, desde fuera de tu red]
+nmap -Pn -F <tu-ip-publica>
+```
+
+Criterio: nada abierto.
+
+**Paso 6 — Revisar accesos y credenciales.**
+
+```bash
+# [servidor] — llaves SSH autorizadas
+ssh-keygen -lf ~/.ssh/authorized_keys
+```
+
+¿Reconoces todas? Elimina las de equipos que ya no uses.
+
+En <https://login.tailscale.com/admin/machines>: elimina los dispositivos que ya no existan y
+comprueba que el servidor sigue con la caducidad de clave desactivada.
+
+En Cloudflare, **DNS → Records**: elimina los registros de proyectos que ya no estén desplegados.
+
+**Paso 7 — Revisar el espacio a medio plazo.**
+
+```bash
+# [servidor]
+sudo vgs
+sudo lvs
+df -h
+sudo ncdu /var --exclude /var/lib/docker
+```
+
+Si algún volumen supera el 70 %, amplíalo ahora en lugar de esperar a que se llene:
+
+```bash
+# [servidor]
+sudo lvextend -r -L +20G /dev/vg0/var
+df -h /var
+```
+
+### 5.4 Subir de versión mayor de Debian
+
+Cada 2–3 años. Debian 13 tiene soporte estándar hasta agosto de 2028 y LTS hasta junio de 2030: no
+hay ninguna prisa.
+
+**Antes de empezar:**
+
+```bash
+# [servidor]
+sudo ./scripts/14_restic.sh --ahora
+sudo ./scripts/14_restic.sh --probar
+```
+
+Lee las notas de publicación de la versión de destino **enteras**. No es un formalismo: ahí están
+los cambios que romperán algo.
+
+```bash
+# [servidor] — 1. partir de un sistema completamente al día
+sudo apt update && sudo apt full-upgrade
+sudo apt autoremove --purge
+sudo reboot
+```
+
+```bash
+# [servidor] — 2. comprobar que no hay paquetes retenidos ni a medio configurar
+dpkg --audit
+apt-mark showhold
+```
+
+```bash
+# [servidor] — 3. cambiar la suite en los repositorios
+sudo cp /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list.d/debian.sources.bak-$(date +%F)
+sudo sed -i 's/trixie/forky/g' /etc/apt/sources.list.d/debian.sources
+sudo apt update
+```
+
+```bash
+# [servidor] — 4. actualización en dos fases
+sudo apt upgrade --without-new-pkgs
+sudo apt full-upgrade
+sudo reboot
+```
+
+La primera fase actualiza lo que no requiere instalar paquetes nuevos, lo que reduce mucho el riesgo
+de dejar el sistema a medias.
+
+```bash
+# [servidor] — 5. después
+cat /etc/os-release | grep VERSION
+sudo apt autoremove --purge
+./scripts/verificar_sistema.sh
+```
+
+Y actualiza `DEBIAN_SUITE` en `config/servidor.env`, además de los repositorios de Docker y
+Tailscale, que también llevan el nombre de la suite:
+
+```bash
+# [servidor]
+sudo sed -i 's/trixie/forky/' /etc/apt/sources.list.d/docker.sources
+sudo sed -i 's/trixie/forky/' /etc/apt/sources.list.d/tailscale.sources
+sudo apt update
+```
+
+---
+
+## 6. Script asociado
+
+`scripts/verificar_sistema.sh` recorre todas las comprobaciones de los capítulos 04 a 14 y da un
+veredicto único.
+
+```bash
+# [servidor]
+./scripts/verificar_sistema.sh --help
+./scripts/verificar_sistema.sh --rapido       # rutina semanal, 2 minutos
+./scripts/verificar_sistema.sh                # completo, para la rutina mensual
+./scripts/verificar_sistema.sh --seccion red  # solo un bloque
+```
+
+Comprueba, por bloques:
+
+| Bloque | Qué verifica |
+|---|---|
+| `sistema` | Versión, reinicios pendientes, actualizaciones, hora, suspensión |
+| `seguridad` | SSH, fail2ban, AppArmor, actualizaciones automáticas, puertos en escucha |
+| `red` | Cortafuegos con política `drop`, IP estática, DNS, Tailscale |
+| `docker` | Demonio, redes, contenedores sanos, puertos publicados |
+| `publicacion` | Traefik, túnel, respuesta de un subdominio |
+| `respaldos` | Disco montado, temporizador, antigüedad de la última copia |
+
+No modifica nada: solo lee.
+
+---
+
+## 7. Validación
+
+```bash
+# [servidor]
+./scripts/verificar_sistema.sh
+```
+
+Criterio de aceptación: termina con `Todas las comprobaciones han pasado` y código de salida 0.
+
+```bash
+# [servidor] — el sistema está al día
+apt-get -s upgrade 2>/dev/null | grep -c '^Inst'
+```
+
+Criterio de aceptación: `0`.
+
+```bash
+# [servidor] — el respaldo es reciente
+sudo ./scripts/14_restic.sh --estado | grep 'Última copia'
+```
+
+Criterio de aceptación: menos de 30 horas.
+
+```bash
+# [servidor] — el disco no está cerca de llenarse
+df -h / /var /srv | awk 'NR>1 {gsub("%","",$5); if ($5+0 > 80) print "LLENO: " $6 " " $5 "%"}'
+```
+
+Criterio de aceptación: no imprime nada.
+
+```bash
+# [servidor] — el índice de endurecimiento no ha bajado
+grep '^hardening_index' ~/nomad_server/inventario/lynis-*.dat | tail -3
+```
+
+Criterio de aceptación: la tendencia es estable o al alza.
+
+**Comprobaciones de calendario, que son las que fallan:**
+
+- [ ] Tengo un recordatorio mensual en el calendario.
+- [ ] Tengo un recordatorio trimestral.
+- [ ] La última prueba de restauración fue hace menos de tres meses.
+
+---
+
+## 8. Reversión
+
+Este capítulo no aplica configuración: describe una rutina. Lo que sí conviene saber revertir es
+cada operación de mantenimiento.
+
+**Una actualización de contenedor que ha salido mal:**
+
+```bash
+# [servidor]
+cd ${DATOS_RAIZ}/<proyecto>
+vim docker-compose.yml          # vuelve a la etiqueta anterior
+docker compose up -d
+```
+
+Si la versión nueva migró datos, volver a la anterior puede no bastar: restaura desde el respaldo
+(capítulo [16](16_recuperacion_ante_desastres.md)).
+
+**Una actualización del sistema que ha roto algo:**
+
+```bash
+# [servidor] — arrancar con el kernel anterior
+# En el menú de GRUB: Advanced options → una versión anterior
+```
+
+Debian no admite revertir paquetes de forma segura. Si el sistema queda inservible, la vía es la
+reconstrucción del capítulo 16, que con los respaldos al día lleva unas dos horas.
+
+**Una subida de versión mayor a medias:**
+
+```bash
+# [servidor]
+sudo dpkg --configure -a
+sudo apt --fix-broken install
+```
+
+Si no se recupera, restaura desde el respaldo. Es la razón por la que el paso previo a la subida es
+respaldar **y probar la restauración**.
+
+---
+
+## 9. Errores frecuentes
+
+| Síntoma | Causa probable | Solución | Documentación |
+|---|---|---|---|
+| `/var` se llena de golpe | Imágenes antiguas y caché de construcción | `docker system df` y luego `docker system prune -f` | § 3.5 |
+| `/boot` se llena al actualizar el kernel | Kernels antiguos sin eliminar | `sudo apt autoremove --purge`. Verifica `Remove-Unused-Kernel-Packages` | Capítulo [07](07_endurecimiento_del_sistema.md) |
+| `docker system prune -a` dejó el servidor sin imágenes | `-a` elimina todas las que no tengan contenedor en marcha | Se vuelven a descargar solas al levantar. Evita `-a` salvo emergencia de espacio | § 3.5 |
+| Un contenedor no arranca tras actualizar | Cambio incompatible en la versión nueva | Vuelve a la etiqueta anterior. Lee las notas de publicación antes de subir | § 3.3 |
+| La base de datos no arranca tras actualizar su imagen | Cambio de versión mayor con otro formato de datos | Restaura el respaldo previo a la actualización | Capítulo [16](16_recuperacion_ante_desastres.md) |
+| `apt` avisa de paquetes retenidos | `unattended-upgrades` no instala cambios que requieran eliminar paquetes | `sudo apt full-upgrade` en la rutina mensual | § 5.2 |
+| El respaldo tiene más de 30 horas | El temporizador no se ejecutó, o el disco estaba desconectado | `journalctl -u nomad-respaldo -n 50` | Capítulo [14](14_respaldos_restic.md) |
+| `lvextend` dice «Insufficient free space» | El grupo de volúmenes está agotado | `sudo vgs` para verlo. Habría que añadir un disco al grupo | [Debian Wiki — LVM](https://wiki.debian.org/LVM) |
+| Tras `lvextend` el espacio no aparece | Falta redimensionar el sistema de archivos | Usa `-r`, o `sudo resize2fs /dev/vg0/var` después | [`lvextend(8)`](https://manpages.debian.org/trixie/lvm2/lvextend.8.en.html) |
+| Tras subir de versión mayor, Docker o Tailscale no actualizan | Sus repositorios siguen apuntando a la suite antigua | Cambia la suite en sus `.sources` | § 5.4 |
+| El índice de Lynis ha bajado varios puntos | Algo se desactivó por el camino | `sudo lynis show suggestions` y compara con el informe anterior | Capítulo [07](07_endurecimiento_del_sistema.md) |
+| Llevo meses sin hacer la rutina | Sin recordatorio en el calendario | Ponlo ahora. Es el único requisito que no depende del servidor | § 7 |
+
+---
+
+## 10. Referencias
+
+- [Debian — Notas de publicación de Trixie](https://www.debian.org/releases/trixie/releasenotes)
+- [Debian — Actualizar desde la versión anterior](https://www.debian.org/releases/trixie/amd64/release-notes/ch-upgrading.html)
+- [Debian Wiki — UnattendedUpgrades](https://wiki.debian.org/UnattendedUpgrades)
+- [Debian Wiki — LVM](https://wiki.debian.org/LVM)
+- [Docker — Limpieza de recursos](https://docs.docker.com/engine/manage-resources/pruning/)
+- [restic — Trabajar con repositorios](https://restic.readthedocs.io/en/stable/045_working_with_repos.html)
+- [Traefik — Notas de publicación](https://github.com/traefik/traefik/releases)
+
+---
+
+**Anterior:** [14 — Respaldos con restic](14_respaldos_restic.md) · **Siguiente:** [16 — Recuperación ante desastres](16_recuperacion_ante_desastres.md)

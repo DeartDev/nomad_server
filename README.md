@@ -194,12 +194,28 @@ Todos los capítulos tienen exactamente las mismas 10 secciones, en el mismo ord
 ```
 nomad_server/
 ├── config/servidor.env.example   Todas las variables del despliegue, comentadas
-├── docs/                         Los 17 capítulos
-├── scripts/                      Automatización idempotente (bash, sin dependencias)
+├── docs/                         Los 18 capítulos
+├── scripts/
 │   ├── lib/common.sh             Biblioteca compartida: registro, validaciones, idempotencia
+│   ├── 01…14_*.sh                Un script por capítulo, idempotente y con --check
+│   ├── deploy.sh                 Despliegue de proyectos, con reversión automática
+│   ├── verificar_sistema.sh      Estado del servidor: lo que se ejecuta cada semana
 │   └── verificar_repositorio.sh  Lo que ejecuta 'make check'
-├── templates/                    Archivos de configuración y ficheros compose parametrizados
+├── templates/                    Configuración del sistema y ficheros compose parametrizados
+│   ├── etc/                      nftables, sshd, sysctl, journald, respaldo…
+│   ├── systemd/                  Unidades de servicio y temporizadores
+│   └── compose/                  Traefik, cloudflared, observabilidad, proyecto de ejemplo
 └── checklists/                   Listas de comprobación imprimibles
+```
+
+### Los tres scripts que se usan a diario
+
+Cuando el montaje termina, estos son los que quedan:
+
+```bash
+./scripts/verificar_sistema.sh --rapido   # ¿está todo bien? (2 min, semanal)
+./scripts/deploy.sh <proyecto>            # actualizar un proyecto
+sudo ./scripts/14_restic.sh --probar      # ¿sirven mis respaldos? (trimestral)
 ```
 
 ---

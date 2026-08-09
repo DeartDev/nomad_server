@@ -326,11 +326,13 @@ comprobar_secretos() {
     fi
 
     # Patrones de material sensible en archivos versionados.
+    # Se exige una longitud mínima para que los marcadores de la documentación
+    # (tskey-auth-XXXXX, CAMBIAME) no se confundan con credenciales reales.
     local patrones=(
         'BEGIN (RSA|OPENSSH|EC|PGP) PRIVATE KEY'
         'AccountTag'
         'TunnelSecret'
-        'tskey-[a-z]+-[A-Za-z0-9]'
+        'tskey-[a-z]+-[A-Za-z0-9]{16,}'
         'ghp_[A-Za-z0-9]{20,}'
         'AKIA[0-9A-Z]{16}'
     )
