@@ -28,7 +28,7 @@ esa opción, *cómo verificar* que funcionó y *qué hacer* cuando falla.
 | Principio | Cómo se materializa |
 |---|---|
 | **Reproducibilidad** | Cero valores inventados sobre la marcha: todo sale de `config/servidor.env`. Cada paso tiene comando exacto y salida esperada. |
-| **Consistencia** | Los 17 capítulos comparten la misma estructura de 10 secciones. Siempre sabes dónde mirar. |
+| **Consistencia** | Los 17 capítulos de procedimiento comparten la misma estructura de 10 secciones. Siempre sabes dónde mirar. |
 | **Robustez** | Todo script es idempotente y admite `--check` para simular. Nada se sobrescribe sin copia de seguridad previa. |
 | **Seguridad** | Nada se expone a internet. SSH solo con llaves. Firewall con política de denegación por defecto. Ningún contenedor publica puertos al host. |
 | **Verificabilidad** | Cada capítulo termina con comandos de validación y un criterio de aceptación explícito. Un paso sin validación no está terminado. |
@@ -194,7 +194,7 @@ Todos los capítulos tienen exactamente las mismas 10 secciones, en el mismo ord
 ```
 nomad_server/
 ├── config/servidor.env.example   Todas las variables del despliegue, comentadas
-├── docs/                         Los 18 capítulos
+├── docs/                         Los 17 capítulos + el glosario
 ├── scripts/
 │   ├── lib/common.sh             Biblioteca compartida: registro, validaciones, idempotencia
 │   ├── 01…14_*.sh                Un script por capítulo, idempotente y con --check
