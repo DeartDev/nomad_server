@@ -1,0 +1,53 @@
+# ---------------------------------------------------------------------------
+# Secretos: NUNCA deben versionarse.
+# La convención del proyecto es que los .env viven solo en el servidor con
+# permisos 600 y se respaldan con restic (ver docs/14_respaldos_restic.md).
+# Solo se versionan los *.env.example con valores ficticios.
+# ---------------------------------------------------------------------------
+*.env
+.env
+.env.*
+!*.env.example
+!.env.example
+
+# Credenciales y material criptográfico
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+*.kdbx
+credenciales/
+secretos/
+
+# Credenciales específicas de servicios
+**/cloudflared/*.json
+!**/cloudflared/*.example.json
+**/tailscale/authkey*
+.restic-password
+
+# Configuración local ya instanciada (la plantilla sí se versiona)
+config/servidor.env
+
+# ---------------------------------------------------------------------------
+# Artefactos locales
+# ---------------------------------------------------------------------------
+*.iso
+*.img
+*.log
+*.bak
+*.bak-*
+*.tmp
+*.swp
+*~
+.DS_Store
+
+# Inventarios de hardware generados en el equipo real (pueden contener seriales)
+inventario/
+*.inventario.txt
+
+# Salidas de herramientas
+.lycheecache
+report/

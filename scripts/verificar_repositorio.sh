@@ -1,0 +1,322 @@
+#!/usr/bin/env bash
+# ===========================================================================
+#  nomad_server — validación del repositorio
+# ===========================================================================
+#  Propósito : comprobar la coherencia interna del repositorio SIN necesidad de
+#              un servidor: sintaxis de los scripts, estructura de la
+#              documentación, variables declaradas y ausencia de secretos.
+#  Uso       : make check     |     scripts/verificar_repositorio.sh [--solo X]
+#  Capítulo  : transversal (ver docs/00_planificacion.md § Criterios de "hecho")
+#
+#  Este script NO modifica nada. Se puede ejecutar siempre, sin privilegios.
+# ===========================================================================
+set -euo pipefail
+
+# shellcheck source=lib/common.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
+
+mostrar_ayuda() {
+    cat <<'AYUDA'
+Uso: scripts/verificar_repositorio.sh [opciones]
+
+Valida el repositorio de documentación. No modifica nada ni necesita servidor.
+
+Opciones:
+  --solo <grupo>   Ejecuta solo un grupo de comprobaciones.
+                   Grupos: scripts | docs | secretos | estructura
+  -h, --help       Muestra esta ayuda.
+
+Código de salida:
+  0  todas las comprobaciones pasaron
+  1  al menos una comprobación falló
+AYUDA
+}
+
+# --- Argumentos --------------------------------------------------------------
+SOLO="todo"
+while (( $# > 0 )); do
+    case "$1" in
+        --solo) SOLO="${2:-}"; shift ;;
+        -h|--help) mostrar_ayuda; exit 0 ;;
+        *) die "Opción desconocida: $1 (usa --help)" ;;
+    esac
+    shift
+done
+
+cd "${NOMAD_RAIZ}"
+
+FALLOS=0
+fallo() { log_error "$*"; FALLOS=$((FALLOS + 1)); }
+
+# Secciones obligatorias de todo capítulo (ver docs/00_planificacion.md).
+SECCIONES_OBLIGATORIAS=(
+    "Objetivo"
+    "Requisitos previos"
+    "Decisiones y por qué"
+    "Variables usadas"
+    "Procedimiento"
+    "Script asociado"
+    "Validación"
+    "Reversión"
+    "Errores frecuentes"
+    "Referencias"
+)
+
+# Variables de entorno ajenas a config/servidor.env que pueden aparecer
+# legítimamente en los ejemplos de la documentación.
+VARIABLES_PERMITIDAS=(
+    HOME PATH USER SHELL EDITOR PWD UID EUID HOSTNAME TERM LANG PS1
+    BASH_SOURCE FUNCNAME PIPESTATUS RANDOM
+    UUID DEVICE INTERFAZ ARCHIVO DISCO PROYECTO DOMINIO SUBDOMINIO
+    VERSION ARCH CODENAME FECHA NOMBRE PUERTO IP RUTA
+)
+
+# ===========================================================================
+#  1. ESTRUCTURA
+# ===========================================================================
+comprobar_estructura() {
+    log_paso "Estructura del repositorio"
+
+    local obligatorios=(
+        README.md LICENSE .gitignore Makefile
+        config/servidor.env.example
+        scripts/lib/common.sh
+    )
+    local ruta
+    for ruta in "${obligatorios[@]}"; do
+        if [[ -e "${ruta}" ]]; then
+            log_ok "existe ${ruta}"
+        else
+            fallo "falta ${ruta}"
+        fi
+    done
+
+    local dir
+    for dir in docs scripts templates checklists config; do
+        [[ -d "${dir}" ]] || fallo "falta el directorio ${dir}/"
+    done
+
+    # Todo capítulo debe estar enlazado desde el README y viceversa.
+    local doc base
+    for doc in docs/[0-9]*.md; do
+        [[ -e "${doc}" ]] || continue
+        base="$(basename "${doc}")"
+        if grep -q "${base}" README.md; then
+            log_ok "${base} enlazado desde README.md"
+        else
+            fallo "${base} no aparece en README.md"
+        fi
+    done
+
+    local enlace
+    while read -r enlace; do
+        [[ -n "${enlace}" ]] || continue
+        if [[ ! -e "${enlace}" ]]; then
+            fallo "README.md enlaza a '${enlace}', que no existe"
+        fi
+    done < <(grep -oE '\]\((docs|scripts|templates|checklists|config)/[^)#]+\)' README.md \
+             | sed -E 's/^\]\(//; s/\)$//' | sort -u)
+}
+
+# ===========================================================================
+#  2. SCRIPTS
+# ===========================================================================
+comprobar_scripts() {
+    log_paso "Scripts"
+
+    local hay_shellcheck=0
+    if command -v shellcheck >/dev/null 2>&1; then
+        hay_shellcheck=1
+    else
+        log_aviso "shellcheck no está instalado: se omite el análisis estático."
+        log_aviso "Instálalo con 'sudo apt install shellcheck' (ver 'make herramientas')."
+    fi
+
+    local script
+    while read -r script; do
+        [[ -n "${script}" ]] || continue
+
+        # Sintaxis
+        if bash -n "${script}" 2>/dev/null; then
+            log_ok "sintaxis correcta: ${script}"
+        else
+            fallo "error de sintaxis en ${script}"
+            bash -n "${script}" || true
+            continue
+        fi
+
+        # Cabecera documental obligatoria
+        grep -q 'Propósito' "${script}" || fallo "${script} no tiene cabecera con 'Propósito'"
+
+        # Bibliotecas: no necesitan set -euo pipefail ni ser ejecutables
+        if [[ "${script}" == scripts/lib/* ]]; then
+            continue
+        fi
+
+        grep -qE '^set -euo pipefail' "${script}" \
+            || fallo "${script} no declara 'set -euo pipefail'"
+
+        [[ -x "${script}" ]] || fallo "${script} no tiene permiso de ejecución (chmod +x)"
+
+        grep -q 'mostrar_ayuda' "${script}" \
+            || fallo "${script} no define mostrar_ayuda() (--help es obligatorio)"
+
+        if (( hay_shellcheck == 1 )); then
+            if shellcheck -x -S warning "${script}" >/dev/null 2>&1; then
+                log_ok "shellcheck limpio: ${script}"
+            else
+                fallo "shellcheck reporta hallazgos en ${script}"
+                shellcheck -x -S warning "${script}" || true
+            fi
+        fi
+    done < <(find scripts -name '*.sh' -type f | sort)
+}
+
+# ===========================================================================
+#  3. DOCUMENTACIÓN
+# ===========================================================================
+comprobar_docs() {
+    log_paso "Documentación: plantilla de secciones"
+
+    local doc seccion
+    for doc in docs/[0-9]*.md; do
+        [[ -e "${doc}" ]] || continue
+
+        # 99_glosario es un anexo, no un capítulo de procedimiento.
+        if [[ "$(basename "${doc}")" == 99_* ]]; then
+            log_sinca "$(basename "${doc}") es un anexo: no se le exige la plantilla."
+            continue
+        fi
+
+        local faltantes=()
+        for seccion in "${SECCIONES_OBLIGATORIAS[@]}"; do
+            grep -qE "^## [0-9]+\. ${seccion}" "${doc}" || faltantes+=("${seccion}")
+        done
+
+        if (( ${#faltantes[@]} == 0 )); then
+            log_ok "$(basename "${doc}") tiene las 10 secciones"
+        else
+            fallo "$(basename "${doc}") no tiene: ${faltantes[*]}"
+        fi
+
+        # Un único título de nivel 1
+        local titulos
+        titulos="$(grep -c '^# ' "${doc}" || true)"
+        [[ "${titulos}" == "1" ]] \
+            || fallo "$(basename "${doc}") tiene ${titulos} títulos de nivel 1 (debe haber exactamente 1)"
+    done
+
+    log_paso "Documentación: variables"
+
+    local definidas
+    definidas="$(grep -oE '^[A-Z][A-Z0-9_]*=' config/servidor.env.example | tr -d '=' | sort -u)"
+
+    local usadas variable
+    usadas="$(grep -rhoE '\$\{[A-Z][A-Z0-9_]*\}' docs/ templates/ 2>/dev/null \
+              | sed -E 's/^\$\{//; s/\}$//' | sort -u || true)"
+
+    for variable in ${usadas}; do
+        if grep -qx "${variable}" <<<"${definidas}"; then
+            continue
+        fi
+        if printf '%s\n' "${VARIABLES_PERMITIDAS[@]}" | grep -qx "${variable}"; then
+            continue
+        fi
+        fallo "la variable \${${variable}} se usa pero no está en config/servidor.env.example"
+    done
+    log_ok "variables usadas en docs/ y templates/ contrastadas con la plantilla"
+
+    log_paso "Documentación: enlaces"
+
+    if command -v lychee >/dev/null 2>&1; then
+        if lychee --no-progress --offline docs/ README.md >/dev/null 2>&1; then
+            log_ok "enlaces internos correctos"
+        else
+            fallo "hay enlaces internos rotos (ejecuta: lychee --offline docs/ README.md)"
+        fi
+    else
+        # Verificación mínima sin dependencias: enlaces relativos entre capítulos.
+        local origen destino
+        while read -r origen destino; do
+            [[ -n "${destino}" ]] || continue
+            if [[ ! -e "docs/${destino}" && ! -e "${destino}" ]]; then
+                fallo "${origen} enlaza a '${destino}', que no existe"
+            fi
+        done < <(grep -roE '\]\([0-9A-Za-z_./-]+\.md\)' docs/ \
+                 | sed -E 's/:\]\(/ /; s/\)$//' || true)
+        log_ok "enlaces relativos entre capítulos verificados"
+        log_aviso "lychee no está instalado: no se comprueban los enlaces externos."
+    fi
+
+    log_paso "Documentación: marcadores pendientes"
+
+    if grep -rnE '\b(TODO|TBD|PENDIENTE|FIXME|XXX)\b' docs/ README.md 2>/dev/null; then
+        fallo "hay marcadores pendientes en la documentación (arriba)"
+    else
+        log_ok "sin marcadores pendientes"
+    fi
+}
+
+# ===========================================================================
+#  4. SECRETOS
+# ===========================================================================
+comprobar_secretos() {
+    log_paso "Secretos"
+
+    # config/servidor.env nunca debe estar versionado.
+    if git ls-files --error-unmatch config/servidor.env >/dev/null 2>&1; then
+        fallo "¡config/servidor.env está versionado en git! Elimínalo del índice."
+    else
+        log_ok "config/servidor.env no está versionado"
+    fi
+
+    # Patrones de material sensible en archivos versionados.
+    local patrones=(
+        'BEGIN (RSA|OPENSSH|EC|PGP) PRIVATE KEY'
+        'AccountTag'
+        'TunnelSecret'
+        'tskey-[a-z]+-[A-Za-z0-9]'
+        'ghp_[A-Za-z0-9]{20,}'
+        'AKIA[0-9A-Z]{16}'
+    )
+    local patron encontrado=0
+    for patron in "${patrones[@]}"; do
+        if git grep -InE "${patron}" -- ':!*.example' ':!scripts/verificar_repositorio.sh' >/dev/null 2>&1; then
+            fallo "posible secreto versionado (patrón: ${patron})"
+            git grep -InE "${patron}" -- ':!*.example' ':!scripts/verificar_repositorio.sh' || true
+            encontrado=1
+        fi
+    done
+    (( encontrado == 0 )) && log_ok "no se han encontrado secretos versionados"
+
+    # Permisos del archivo de configuración local, si existe.
+    if [[ -f config/servidor.env ]]; then
+        local permisos
+        permisos="$(stat -c '%a' config/servidor.env)"
+        if [[ "${permisos}" == "600" ]]; then
+            log_ok "config/servidor.env tiene permisos 600"
+        else
+            fallo "config/servidor.env tiene permisos ${permisos}; deben ser 600"
+        fi
+    fi
+}
+
+# ===========================================================================
+#  EJECUCIÓN
+# ===========================================================================
+case "${SOLO}" in
+    todo)        comprobar_estructura; comprobar_scripts; comprobar_docs; comprobar_secretos ;;
+    estructura)  comprobar_estructura ;;
+    scripts)     comprobar_scripts ;;
+    docs)        comprobar_docs ;;
+    secretos)    comprobar_secretos ;;
+    *)           die "Grupo desconocido: '${SOLO}'. Usa: scripts | docs | secretos | estructura" ;;
+esac
+
+echo
+if (( FALLOS == 0 )); then
+    log_ok "Todas las comprobaciones han pasado."
+    exit 0
+fi
+log_error "Comprobaciones fallidas: ${FALLOS}"
+exit 1
