@@ -131,13 +131,36 @@ comprobar_estructura() {
 comprobar_scripts() {
     log_paso "Scripts"
 
+    # El analizador estático puede estar instalado en el sistema, o ejecutarse
+    # en contenedor si ya hay imagen descargada. Nunca se descarga nada.
     local hay_shellcheck=0
+    local motor=""
     if command -v shellcheck >/dev/null 2>&1; then
         hay_shellcheck=1
     else
-        log_aviso "shellcheck no está instalado: se omite el análisis estático."
+        for motor in podman docker; do
+            if command -v "${motor}" >/dev/null 2>&1 \
+               && "${motor}" image exists docker.io/koalaman/shellcheck:stable >/dev/null 2>&1; then
+                hay_shellcheck=2
+                log_info "Usando shellcheck en contenedor (${motor})."
+                break
+            fi
+        done
+    fi
+    if (( hay_shellcheck == 0 )); then
+        log_aviso "shellcheck no está disponible: se omite el análisis estático."
         log_aviso "Instálalo con 'sudo apt install shellcheck' (ver 'make herramientas')."
     fi
+
+    # Ejecuta shellcheck por el medio disponible.
+    correr_shellcheck() {
+        if (( hay_shellcheck == 1 )); then
+            shellcheck -x -S warning "$@"
+        else
+            "${motor}" run --rm -v "${NOMAD_RAIZ}:/mnt:z" -w /mnt \
+                docker.io/koalaman/shellcheck:stable -x -S warning "$@"
+        fi
+    }
 
     local script
     while read -r script; do
@@ -155,6 +178,16 @@ comprobar_scripts() {
         # Cabecera documental obligatoria
         grep -q 'Propósito' "${script}" || fallo "${script} no tiene cabecera con 'Propósito'"
 
+        # Análisis estático: se aplica también a las bibliotecas
+        if (( hay_shellcheck != 0 )); then
+            if correr_shellcheck "${script}" >/dev/null 2>&1; then
+                log_ok "shellcheck limpio: ${script}"
+            else
+                fallo "shellcheck reporta hallazgos en ${script}"
+                correr_shellcheck "${script}" || true
+            fi
+        fi
+
         # Bibliotecas: no necesitan set -euo pipefail ni ser ejecutables
         if [[ "${script}" == scripts/lib/* ]]; then
             continue
@@ -167,15 +200,6 @@ comprobar_scripts() {
 
         grep -q 'mostrar_ayuda' "${script}" \
             || fallo "${script} no define mostrar_ayuda() (--help es obligatorio)"
-
-        if (( hay_shellcheck == 1 )); then
-            if shellcheck -x -S warning "${script}" >/dev/null 2>&1; then
-                log_ok "shellcheck limpio: ${script}"
-            else
-                fallo "shellcheck reporta hallazgos en ${script}"
-                shellcheck -x -S warning "${script}" || true
-            fi
-        fi
     done < <(find scripts -name '*.sh' -type f | sort)
 }
 
@@ -221,19 +245,27 @@ comprobar_docs() {
     local definidas
     definidas="$(grep -oE '^[A-Z][A-Z0-9_]*=' config/servidor.env.example | tr -d '=' | sort -u)"
 
-    local usadas variable
-    usadas="$(grep -rhoE '\$\{[A-Z][A-Z0-9_]*\}' docs/ templates/ 2>/dev/null \
-              | sed -E 's/^\$\{//; s/\}$//' | sort -u || true)"
+    local archivo usadas locales variable
+    while read -r archivo; do
+        [[ -n "${archivo}" ]] || continue
 
-    for variable in ${usadas}; do
-        if grep -qx "${variable}" <<<"${definidas}"; then
-            continue
-        fi
-        if printf '%s\n' "${VARIABLES_PERMITIDAS[@]}" | grep -qx "${variable}"; then
-            continue
-        fi
-        fallo "la variable \${${variable}} se usa pero no está en config/servidor.env.example"
-    done
+        usadas="$(grep -ohE '\$\{[A-Z][A-Z0-9_]*\}' "${archivo}" 2>/dev/null \
+                  | sed -E 's/^\$\{//; s/\}$//' | sort -u || true)"
+
+        # Variables asignadas dentro del propio archivo (ejemplos de shell que
+        # definen su variable antes de usarla). No tienen que estar en la
+        # plantilla de configuración.
+        locales="$(grep -ohE '(^|[[:space:](])[A-Z][A-Z0-9_]*=' "${archivo}" 2>/dev/null \
+                   | tr -d ' (=' | sort -u || true)"
+
+        for variable in ${usadas}; do
+            grep -qx "${variable}" <<<"${definidas}" && continue
+            grep -qx "${variable}" <<<"${locales}" && continue
+            printf '%s\n' "${VARIABLES_PERMITIDAS[@]}" | grep -qx "${variable}" && continue
+            fallo "${archivo}: \${${variable}} no está en config/servidor.env.example ni se define en el propio archivo"
+        done
+    done < <(find docs templates -type f \( -name '*.md' -o -name '*.cfg' -o -name '*.yml' -o -name '*.conf' \) | sort)
+
     log_ok "variables usadas en docs/ y templates/ contrastadas con la plantilla"
 
     log_paso "Documentación: enlaces"

@@ -289,7 +289,19 @@ instalar_archivo() {
     marcar_cambio
 }
 
-# Instala una plantilla de templates/ sustituyendo las ${VARIABLES} del entorno.
+# Lista de variables sustituibles, en el formato que espera envsubst.
+# Se deriva de config/servidor.env.example para que envsubst NO toque otros
+# símbolos con '$' que aparecen legítimamente en las plantillas: las variables
+# propias de nftables ($lan_cidr), la sintaxis de partman ($primary{ }) o las
+# referencias de Traefik.
+formato_envsubst() {
+    grep -oE '^[A-Z][A-Z0-9_]*=' "${NOMAD_CONFIG_EJEMPLO}" \
+        | tr -d '=' \
+        | sed 's/^/${/; s/$/}/' \
+        | tr '\n' ' '
+}
+
+# Instala una plantilla de templates/ sustituyendo las ${VARIABLES} conocidas.
 #   instalar_plantilla etc/nftables.conf /etc/nftables.conf 640 root:root
 instalar_plantilla() {
     local origen="${NOMAD_TEMPLATES}/$1"
@@ -298,7 +310,8 @@ instalar_plantilla() {
     local propietario="${4:-root:root}"
 
     [[ -r "${origen}" ]] || die "No se encuentra la plantilla ${origen}"
-    envsubst < "${origen}" | instalar_archivo "${destino}" "${modo}" "${propietario}"
+    envsubst "$(formato_envsubst)" < "${origen}" \
+        | instalar_archivo "${destino}" "${modo}" "${propietario}"
 }
 
 # Instala paquetes APT solo si faltan.
