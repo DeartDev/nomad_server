@@ -1,0 +1,17 @@
+# ===========================================================================
+#  Repositorio de Docker CE — formato deb822
+#  Destino  : /etc/apt/sources.list.d/docker.sources
+#  Generado por scripts/09_docker.sh
+#  Capítulo : docs/09_docker.md § 3.1
+#
+#  Se usa el repositorio oficial de Docker y no el paquete 'docker.io' de
+#  Debian: este último se queda varias versiones atrás y no incluye el plugin
+#  'compose' v2.
+# ===========================================================================
+
+Types: deb
+URIs: https://download.docker.com/linux/debian
+Suites: ${DEBIAN_SUITE}
+Components: stable
+Architectures: amd64
+Signed-By: /etc/apt/keyrings/docker.asc

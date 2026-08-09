@@ -1,0 +1,17 @@
+# ===========================================================================
+#  Repositorio de Tailscale — formato deb822
+#  Destino  : /etc/apt/sources.list.d/tailscale.sources
+#  Generado por scripts/08_tailscale.sh
+#  Capítulo : docs/08_tailscale.md § 3.2
+#
+#  Equivale al archivo .list que publica Tailscale, escrito en el mismo
+#  formato que el resto de repositorios de este servidor (capítulo 04 § 3.1).
+#  'Signed-By' ata este repositorio a la clave de Tailscale: no puede firmar
+#  paquetes que suplanten a los de Debian.
+# ===========================================================================
+
+Types: deb
+URIs: https://pkgs.tailscale.com/stable/debian
+Suites: ${DEBIAN_SUITE}
+Components: main
+Signed-By: /usr/share/keyrings/tailscale-archive-keyring.gpg
