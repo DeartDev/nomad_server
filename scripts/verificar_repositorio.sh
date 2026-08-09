@@ -69,7 +69,14 @@ VARIABLES_PERMITIDAS=(
     BASH_SOURCE FUNCNAME PIPESTATUS RANDOM
     UUID DEVICE INTERFAZ ARCHIVO DISCO PROYECTO DOMINIO SUBDOMINIO
     VERSION ARCH CODENAME FECHA NOMBRE PUERTO IP RUTA
+    VARIABLE VARIABLES
 )
+
+# Imprime un archivo Markdown sin el contenido de los bloques de código, para
+# que los comentarios de shell (# …) no se confundan con títulos.
+sin_bloques_de_codigo() {
+    awk '/^```/ { dentro = !dentro; next } !dentro' "$1"
+}
 
 # ===========================================================================
 #  1. ESTRUCTURA
@@ -188,9 +195,12 @@ comprobar_docs() {
             continue
         fi
 
+        local cuerpo
+        cuerpo="$(sin_bloques_de_codigo "${doc}")"
+
         local faltantes=()
         for seccion in "${SECCIONES_OBLIGATORIAS[@]}"; do
-            grep -qE "^## [0-9]+\. ${seccion}" "${doc}" || faltantes+=("${seccion}")
+            grep -qE "^## [0-9]+\. ${seccion}" <<<"${cuerpo}" || faltantes+=("${seccion}")
         done
 
         if (( ${#faltantes[@]} == 0 )); then
@@ -199,9 +209,9 @@ comprobar_docs() {
             fallo "$(basename "${doc}") no tiene: ${faltantes[*]}"
         fi
 
-        # Un único título de nivel 1
+        # Un único título de nivel 1 (ignorando los bloques de código)
         local titulos
-        titulos="$(grep -c '^# ' "${doc}" || true)"
+        titulos="$(grep -c '^# ' <<<"${cuerpo}" || true)"
         [[ "${titulos}" == "1" ]] \
             || fallo "$(basename "${doc}") tiene ${titulos} títulos de nivel 1 (debe haber exactamente 1)"
     done
