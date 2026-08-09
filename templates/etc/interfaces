@@ -1,0 +1,26 @@
+# ===========================================================================
+#  nomad_server — configuración de red
+#  Destino  : /etc/network/interfaces
+#  Generado por scripts/06_firewall.sh
+#  Capítulo : docs/06_red_y_firewall.md
+#
+#  No lo edites aquí: edita config/servidor.env y vuelve a ejecutar el script.
+#
+#  NOTA: la directiva 'dns-nameservers' solo tiene efecto si está instalado
+#  'resolvconf', que una instalación mínima de Debian NO incluye. Por eso los
+#  servidores DNS se escriben directamente en /etc/resolv.conf.
+# ===========================================================================
+
+source /etc/network/interfaces.d/*
+
+auto lo
+iface lo inet loopback
+
+# Interfaz cableada con dirección fija.
+# 'auto' (y no 'allow-hotplug') hace que networking.service espere a que la
+# interfaz esté lista antes de dar el arranque por completado, lo que evita
+# que servicios como Docker arranquen sin red.
+auto ${LAN_INTERFAZ}
+iface ${LAN_INTERFAZ} inet static
+    address ${LAN_IP}/${LAN_PREFIJO}
+    gateway ${LAN_GATEWAY}

@@ -1,0 +1,29 @@
+# ===========================================================================
+#  nomad_server — configuración de fail2ban
+#  Destino  : /etc/fail2ban/jail.d/nomad.local
+#  Generado por scripts/05_ssh.sh
+#  Capítulo : docs/05_usuarios_y_acceso_ssh.md § 3.7
+# ===========================================================================
+
+[DEFAULT]
+# Nunca bloquear a los equipos de la red local ni a los de la tailnet:
+# bloquearte a ti mismo por teclear mal una contraseña sería un mal final.
+ignoreip = 127.0.0.1/8 ::1 ${LAN_CIDR} ${TS_CIDR}
+
+bantime  = 1h
+findtime = 10m
+maxretry = 5
+
+# Una instalación mínima de Debian 13 NO lleva rsyslog: /var/log/auth.log no
+# existe y los registros están solo en journald. Sin esta línea, fail2ban no
+# encuentra nada que leer y no bloquea a nadie, en silencio.
+backend = systemd
+
+# El cortafuegos de este servidor es nftables (capítulo 06). Sin esto se
+# usaría iptables, cuyas reglas no aparecerían al inspeccionar el cortafuegos.
+banaction = nftables-multiport
+banaction_allports = nftables-allports
+
+[sshd]
+enabled = true
+port    = ${SSH_PUERTO}

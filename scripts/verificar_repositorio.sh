@@ -292,11 +292,20 @@ comprobar_docs() {
 
     log_paso "Documentación: marcadores pendientes"
 
-    if grep -rnE '\b(TODO|TBD|PENDIENTE|FIXME|XXX)\b' docs/ README.md 2>/dev/null; then
-        fallo "hay marcadores pendientes en la documentación (arriba)"
-    else
-        log_ok "sin marcadores pendientes"
-    fi
+    # Se ignoran los bloques de código y el código en línea: ahí un "XXX MB" o
+    # un echo "REINICIO PENDIENTE" son contenido legítimo, no una tarea sin
+    # terminar.
+    local hay_marcadores=0
+    for doc in docs/*.md README.md checklists/*.md; do
+        [[ -e "${doc}" ]] || continue
+        if sin_bloques_de_codigo "${doc}" \
+             | sed 's/`[^`]*`//g' \
+             | grep -nE '\b(TODO|TBD|FIXME|XXX)\b|\bPENDIENTE:' ; then
+            fallo "${doc} contiene marcadores pendientes (arriba)"
+            hay_marcadores=1
+        fi
+    done
+    (( hay_marcadores == 0 )) && log_ok "sin marcadores pendientes"
 }
 
 # ===========================================================================

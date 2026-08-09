@@ -1,0 +1,21 @@
+# ===========================================================================
+#  Repositorios de Debian — formato deb822
+#  Generado por scripts/04_base.sh a partir de templates/etc/debian.sources
+#  Capítulo: docs/04_primer_arranque_y_base.md § 3.1
+#
+#  No lo edites aquí: edita config/servidor.env y vuelve a ejecutar el script.
+# ===========================================================================
+
+# Versión estable y correcciones que no son de seguridad.
+Types: deb
+URIs: https://${DEBIAN_MIRROR}/debian
+Suites: ${DEBIAN_SUITE} ${DEBIAN_SUITE}-updates
+Components: main non-free-firmware
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+# Parches de seguridad. Este bloque es el que no puede faltar.
+Types: deb
+URIs: https://security.debian.org/debian-security
+Suites: ${DEBIAN_SUITE}-security
+Components: main non-free-firmware
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
