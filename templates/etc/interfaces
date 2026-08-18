@@ -9,6 +9,22 @@
 #  NOTA: la directiva 'dns-nameservers' solo tiene efecto si está instalado
 #  'resolvconf', que una instalación mínima de Debian NO incluye. Por eso los
 #  servidores DNS se escriben directamente en /etc/resolv.conf.
+#
+#  CÓMO APLICARLA A MANO (equivalente a lo que hace el script)
+#
+#      cd ~/nomad_server
+#      source scripts/lib/entorno.sh
+#      nomad_diff etc/interfaces /etc/network/interfaces
+#      sudo cp -a /etc/network/interfaces \
+#          /etc/network/interfaces.bak-$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
+#      nomad_plantilla etc/interfaces \
+#          | sudo tee /etc/network/interfaces >/dev/null
+#      sudo chmod 644 /etc/network/interfaces
+#
+#  Y después, para que tenga efecto:
+#      sudo systemctl restart networking     # corta la sesión si cambia la IP
+#
+#  Detalle: templates/README.md y docs/98_variables_y_entorno.md § 4.3
 # ===========================================================================
 
 source /etc/network/interfaces.d/*

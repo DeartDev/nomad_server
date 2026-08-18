@@ -63,13 +63,20 @@ SECCIONES_OBLIGATORIAS=(
 )
 
 # Variables de entorno ajenas a config/servidor.env que pueden aparecer
-# legítimamente en los ejemplos de la documentación.
+# legítimamente en los ejemplos de la documentación: variables del sistema,
+# nombres genéricos que la propia documentación usa como marcador de posición
+# al explicar una regla (VAR, VALOR, LLAVES…), y variables temporales que los
+# capítulos declaran en el paso donde hacen falta.
 VARIABLES_PERMITIDAS=(
     HOME PATH USER SHELL EDITOR PWD UID EUID HOSTNAME TERM LANG PS1
     BASH_SOURCE FUNCNAME PIPESTATUS RANDOM
     UUID DEVICE INTERFAZ ARCHIVO DISCO PROYECTO DOMINIO SUBDOMINIO
     VERSION ARCH CODENAME FECHA NOMBRE PUERTO IP RUTA
-    VARIABLE VARIABLES
+    VARIABLE VARIABLES VAR VALOR LLAVES
+    # Variables que pertenecen a OTROS programas o a las propias plantillas, y
+    # que la documentación cita precisamente para explicar que NO se sustituyen
+    # (ver docs/98_variables_y_entorno.md § 4.4).
+    RESTIC_REPOSITORY VERSION_CODENAME POSTGRES_USER POSTGRES_DB
 )
 
 # Imprime un archivo Markdown sin el contenido de los bloques de código, para
@@ -213,8 +220,11 @@ comprobar_docs() {
     for doc in docs/[0-9]*.md; do
         [[ -e "${doc}" ]] || continue
 
-        # 99_glosario es un anexo, no un capítulo de procedimiento.
-        if [[ "$(basename "${doc}")" == 99_* ]]; then
+        # Los documentos 9x son anexos transversales (vías de montaje,
+        # variables y entorno, glosario), no capítulos de procedimiento: no
+        # tienen pasos que ejecutar ni nada que revertir, así que no se les
+        # exige la plantilla de 10 secciones.
+        if [[ "$(basename "${doc}")" == 9[0-9]_* ]]; then
             log_sinca "$(basename "${doc}") es un anexo: no se le exige la plantilla."
             continue
         fi

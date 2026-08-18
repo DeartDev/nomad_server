@@ -31,6 +31,26 @@ arrancar sola tras un corte de luz y no suspenderse nunca.
 **Este capítulo no instala nada** en el equipo. Es la última oportunidad de recuperar datos antes
 del formateo del capítulo 03.
 
+**Preparar la sesión.** Este capítulo es el único que se ejecuta **delante del equipo candidato**,
+normalmente desde un sistema *live*, y ahí no hay repositorio ni configuración. Los bloques de
+comandos van marcados como `# [equipo]` para distinguirlos.
+
+Si quieres usar el script del inventario, lleva el repositorio al sistema *live*:
+
+```bash
+# [equipo] — con red disponible
+sudo apt update && sudo apt install -y git      # en un live de Debian/Ubuntu
+git clone <url-del-repositorio> /tmp/nomad_server
+cd /tmp/nomad_server
+```
+
+Si el *live* no tiene red o el repositorio no está publicado, cópialo desde tu equipo a una segunda
+memoria USB y móntala. **No hace falta `config/servidor.env`**: el inventario no usa ninguna
+variable del despliegue, solo escribe un archivo con lo que encuentra.
+
+Los resultados de este capítulo —`DISCO_DESTINO` y `LAN_INTERFAZ`— se anotan al final, **en tu
+equipo**, dentro de `config/servidor.env`. El paso 9 da los comandos exactos.
+
 ---
 
 ## 3. Decisiones y por qué
@@ -110,15 +130,44 @@ apagado ordenado; queda fuera del alcance de este repositorio.
 
 ## 4. Variables usadas
 
+### 4.1 De `config/servidor.env` (solo para contrastar)
+
 | Variable | Uso en este capítulo |
 |---|---|
-| `LAN_CIDR`, `LAN_GATEWAY` | Se contrastan con lo que se observa en la red real |
-| `DISCO_DESTINO` | Se **determina** en este capítulo y se anota en `config/servidor.env` |
+| `LAN_CIDR` | Se contrasta con la red que se observa realmente en el equipo |
+| `LAN_GATEWAY` | Se contrasta con la puerta de enlace real |
 
-El resultado más importante del capítulo es rellenar `DISCO_DESTINO` con la ruta estable del disco
-donde se instalará Debian. Se usa la ruta por identificador de hardware
-(`/dev/disk/by-id/…`) y no `/dev/sda`, porque las letras cambian de orden entre arranques según qué
-disco responda antes.
+Ninguna hace falta cargada en la sesión: se comparan a ojo con lo que muestren los comandos.
+
+### 4.2 Variables que se DESCUBREN en este capítulo
+
+Este es el capítulo que más valores aporta al archivo de configuración. **Anótalos antes de apagar
+el equipo**: si no, hay que volver a arrancarlo con el *live* para averiguarlos.
+
+| Variable | Qué es | Cómo se obtiene | La necesita |
+|---|---|---|---|
+| `DISCO_DESTINO` | Ruta estable del disco donde se instalará Debian | Paso 2, con `ls -l /dev/disk/by-id/` | Capítulo [03](03_instalacion_debian.md) |
+| `LAN_INTERFAZ` | Nombre de la interfaz cableada | Paso 2, con `ip -br link` | Capítulo [06](06_red_y_firewall.md) |
+
+`DISCO_DESTINO` usa la ruta por identificador de hardware (`/dev/disk/by-id/ata-Marca_Modelo_Serie`)
+y no `/dev/sda`, porque las letras cambian de orden entre arranques según qué disco responda antes.
+Instalar en `/dev/sda` creyendo que es el SSD y que resulte ser el disco de datos es un error real y
+caro.
+
+`LAN_INTERFAZ` puede quedarse vacía: los scripts la detectan solas y el capítulo 06 la confirma. Se
+anota aquí porque ya la tienes delante.
+
+El paso 9 da los comandos exactos para escribir ambas.
+
+### 4.3 Variables temporales de esta sesión
+
+| Variable | Qué contiene | Se declara en |
+|---|---|---|
+| `DISCO` | Dispositivo que se está inspeccionando (`/dev/sda`) | Paso 3 |
+
+Solo vive en la terminal del sistema *live*. No confundirla con `DISCO_DESTINO`: `DISCO` es la ruta
+volátil (`/dev/sda`) que se usa para consultar SMART; `DISCO_DESTINO` es la ruta estable que se
+guarda.
 
 ---
 
@@ -197,11 +246,23 @@ lsusb
 
 ### Paso 3 — Salud de los discos
 
+Declara primero qué disco vas a inspeccionar. Es una variable **temporal de esta sesión** (§ 4.3):
+si cierras la terminal, hay que volver a declararla.
+
+```bash
+# [equipo]
+DISCO=/dev/sda                        # ← el tuyo, según la salida del paso 2
+echo "Inspeccionando: ${DISCO}"
+```
+
+Criterio de aceptación: imprime el dispositivo. Si sale vacío, los comandos siguientes fallarán con
+mensajes confusos sobre dispositivos inexistentes.
+
 ```bash
 # [equipo]
 sudo apt install -y smartmontools     # o: sudo dnf install smartmontools
-sudo smartctl -i /dev/sda             # sustituye por tu disco
-sudo smartctl -H /dev/sda
+sudo smartctl -i "${DISCO}"
+sudo smartctl -H "${DISCO}"
 ```
 
 Criterio de aceptación:
@@ -216,12 +277,12 @@ Los atributos concretos importan tanto como el veredicto global:
 
 ```bash
 # [equipo] — disco mecánico
-sudo smartctl -A /dev/sda | grep -E 'Reallocated_Sector|Current_Pending|Offline_Uncorrectable|Power_On_Hours'
+sudo smartctl -A "${DISCO}" | grep -E 'Reallocated_Sector|Current_Pending|Offline_Uncorrectable|Power_On_Hours'
 ```
 
 ```bash
 # [equipo] — SSD
-sudo smartctl -A /dev/sda | grep -E 'Wear_Leveling|Percent_Lifetime|Media_Wearout|Total_LBAs_Written|Power_On_Hours'
+sudo smartctl -A "${DISCO}" | grep -E 'Wear_Leveling|Percent_Lifetime|Media_Wearout|Total_LBAs_Written|Power_On_Hours'
 ```
 
 Cómo leerlo:
@@ -237,9 +298,9 @@ Lanza además una prueba corta:
 
 ```bash
 # [equipo]
-sudo smartctl -t short /dev/sda
+sudo smartctl -t short "${DISCO}"
 sleep 120
-sudo smartctl -l selftest /dev/sda
+sudo smartctl -l selftest "${DISCO}"
 ```
 
 Criterio de aceptación: `Completed without error`.
@@ -377,52 +438,140 @@ Con el equipo apagado y desenchufado:
 
 ### Paso 9 — Anota los resultados
 
-Actualiza `config/servidor.env` con lo aprendido:
+**Este es el paso que no se puede saltar.** Todo lo averiguado hasta aquí vive solo en la pantalla
+del sistema *live*, que va a desaparecer en cuanto apagues el equipo.
+
+Primero, en el propio equipo, imprime los dos valores en un formato que puedas copiar:
+
+```bash
+# [equipo]
+echo "DISCO_DESTINO=$(ls -l /dev/disk/by-id/ | grep -v part | grep -E 'ata-|nvme-|scsi-' | awk '{print "/dev/disk/by-id/" $9}' | head -5)"
+echo "LAN_INTERFAZ=$(ip -o -4 route show to default 2>/dev/null | awk '{print $5}')"
+```
+
+Salida de ejemplo:
+
+```
+DISCO_DESTINO=/dev/disk/by-id/ata-Samsung_SSD_870_EVO_500GB_S6PENL0T123456
+LAN_INTERFAZ=enp3s0
+```
+
+> Si aparecen varias rutas `by-id`, elige la del disco **donde vas a instalar**: la que lleva el
+> modelo y el número de serie que anotaste en el paso 2. Ignora las que contengan `-part`, que son
+> particiones, y las `wwn-…`, que son válidas pero menos legibles.
+
+Después, **en tu equipo**, escríbelos en la configuración:
+
+```bash
+# [cliente]
+cd ~/nomad_server
+./scripts/variables.sh --fijar DISCO_DESTINO=/dev/disk/by-id/ata-Samsung_SSD_870_EVO_500GB_S6PENL0T123456
+./scripts/variables.sh --fijar LAN_INTERFAZ=enp3s0
+```
+
+Comprueba que han quedado escritos:
+
+```bash
+# [cliente]
+./scripts/variables.sh --ver DISCO_DESTINO
+./scripts/variables.sh --ver LAN_INTERFAZ
+make faltan
+```
+
+Criterio de aceptación: los dos valores se imprimen, y `make faltan` ya no los menciona.
+
+Si prefieres editar el archivo a mano:
 
 ```bash
 # [cliente]
 $EDITOR config/servidor.env
+chmod 600 config/servidor.env
 ```
 
 - `DISCO_DESTINO` → la ruta `/dev/disk/by-id/…` del paso 2
 - `LAN_INTERFAZ` → el nombre de la interfaz cableada (o déjalo vacío para autodetección)
 
+Y guarda también el archivo del inventario en un sitio que no sea este equipo: contiene los números
+de serie y te hará falta el día que haya que pedir una garantía o comparar el desgaste de un disco.
+
 ---
 
 ## 6. Script asociado
 
-`scripts/02_inventario_equipo.sh` automatiza el paso 2 completo: recoge todo el inventario, la salud
-de los discos y las características de la red, y lo guarda en un archivo Markdown con fecha.
+### 6.1 Vía A — con el script
+
+`scripts/02_inventario_equipo.sh` automatiza los pasos 2 y 3 completos: recoge todo el inventario,
+la salud de los discos y las características de la red, y lo guarda en un archivo Markdown con
+fecha.
 
 ```bash
 # [equipo] — desde el sistema live o el sistema actual del equipo
-sudo ./scripts/02_inventario_equipo.sh
-sudo ./scripts/02_inventario_equipo.sh --salida /mnt/externo/inventario.md
+cd /tmp/nomad_server                            # o donde lo hayas copiado
 ./scripts/02_inventario_equipo.sh --help
+sudo ./scripts/02_inventario_equipo.sh --check  # lo muestra por pantalla, no escribe nada
+sudo ./scripts/02_inventario_equipo.sh
 ```
 
-En modo `--check` recoge exactamente la misma información pero la muestra por pantalla sin escribir
-ningún archivo.
+Conviene ejecutarlo con `sudo`: sin privilegios no se puede leer la información de DMI (fabricante,
+modelo, módulos de memoria) ni consultar SMART, y el inventario queda a medias sin decirlo
+claramente.
 
-Qué **no** hace el script, y hay que hacer a mano:
+Para dejar el archivo directamente en el disco externo, que es lo más práctico si el equipo se va a
+formatear:
 
-- La comprobación de memoria (paso 4): requiere arrancar fuera del sistema operativo.
-- El rescate de datos (paso 5): solo tú sabes qué merece la pena conservar.
-- La configuración de la UEFI (paso 7): no es accesible desde el sistema operativo.
+```bash
+# [equipo]
+sudo ./scripts/02_inventario_equipo.sh --salida /mnt/externo/inventario-servidor.md
+```
 
-El archivo generado va a `inventario/`, que está en `.gitignore` porque contiene números de serie
-del hardware.
+Por omisión va a `inventario/<hostname>-<fecha>.md`, dentro del repositorio. Ese directorio está en
+`.gitignore` porque el archivo contiene números de serie del hardware.
+
+**Este script no necesita `config/servidor.env`**: no usa ninguna variable del despliegue, solo
+recoge lo que encuentra. Es el único del repositorio del que se puede decir eso.
+
+### 6.2 Correspondencia entre el script y los pasos manuales
+
+| Paso de la sección 5 | ¿Lo hace el script? | Nota |
+|---|---|---|
+| 1 — arrancar con un *live* | No | Es una operación física |
+| 2 — inventario del hardware | **Sí**, completo | Incluye DMI, CPU, memoria, discos, red y PCI/USB |
+| 3 — salud de los discos | **Sí** | SMART de todos los discos detectados |
+| 4 — memoria (memtest86+) | No | Se ejecuta fuera del sistema operativo |
+| 5 — rescate de datos | No | Solo tú sabes qué conservar |
+| 6 — actualizar el firmware UEFI | No | Depende del fabricante |
+| 7 — configurar la UEFI | No | No es accesible desde el sistema operativo |
+| 8 — comprobación física | No | Hay que abrir la caja |
+| 9 — anotar los resultados | Parcial: los imprime; escribirlos es tuyo | Usa `scripts/variables.sh --fijar` |
+
+### 6.3 Si prefieres la vía manual
+
+Los pasos 2 y 3 de la sección 5 recogen la misma información, comando a comando. Merece la pena
+hacerlo así al menos una vez: son los comandos que usarás para diagnosticar el hardware dentro de
+tres años, cuando algo empiece a fallar.
+
+Lo que asumes al hacerlo a mano:
+
+- [ ] Guardar la salida de cada bloque en algún sitio, no solo mirarla.
+- [ ] Interpretar los atributos SMART según la tabla del paso 3.
+- [ ] Ejecutar el mismo bloque para **cada** disco del equipo, no solo el primero.
 
 ---
 
 ## 7. Validación
 
 ```bash
-# [equipo]
-sudo smartctl -H "${DISCO}" | grep -q 'PASSED' && echo "DISCO SANO"
+# [equipo] — repítelo para cada disco que vayas a usar
+for DISCO in $(lsblk -dno PATH,TYPE | awk '$2=="disk"{print $1}'); do
+    printf '%-12s ' "${DISCO}"
+    sudo smartctl -H "${DISCO}" 2>/dev/null | grep -q 'PASSED' \
+        && echo "DISCO SANO" || echo "REVISAR"
+done
 ```
 
-Criterio de aceptación: imprime `DISCO SANO` para cada disco que vayas a usar.
+Criterio de aceptación: `DISCO SANO` en todos los discos que vayas a usar. Un `REVISAR` puede
+significar que el disco falla o que no expone SMART (habitual en adaptadores USB); mira la salida
+completa de `sudo smartctl -a` antes de decidir.
 
 ```bash
 # [equipo] — la controladora debe estar en AHCI, no en RAID
@@ -492,6 +641,10 @@ firmware conocidos.
 | El disco tiene `Reallocated_Sector_Ct` > 0 | El disco está degradándose | No lo uses para el sistema. Si es el único que tienes, refuerza la política de respaldos del capítulo 14 | [Atributos SMART](https://www.smartmontools.org/wiki/FAQ) |
 | El equipo se apaga solo a los pocos minutos | Sobrecalentamiento por polvo o pasta térmica seca | Limpia, y si persiste sustituye la pasta térmica del procesador | — |
 | Monté la partición NTFS y está en solo lectura | Windows la dejó en modo hibernación / fast startup | Arranca Windows, apágalo con `shutdown /s /f /t 0`, y vuelve a montarla | [Debian Wiki — NTFS](https://wiki.debian.org/NTFS) |
+| `smartctl` falla diciendo que no encuentra el dispositivo | La variable `DISCO` está vacía: se perdió al cerrar la terminal del *live* | Vuelve a declararla (paso 3) | § 4.3 |
+| Apagué el equipo y no anoté el disco ni la interfaz | Se saltó el paso 9 | Hay que volver a arrancar con el *live*. Es exactamente lo que ese paso evita | § 5 paso 9 |
+| El instalador del capítulo 03 no reconoce `DISCO_DESTINO` | Se anotó una ruta `-part` (una partición) en lugar del disco | Vuelve a mirar `/dev/disk/by-id/` e ignora las entradas con `-part` | § 4.2 |
+| El script del inventario dice que faltan variables | Se está ejecutando una versión del repositorio que sí las exige | Este script no las necesita; comprueba que estás en `scripts/02_inventario_equipo.sh` | § 6.1 |
 
 ---
 
@@ -504,6 +657,7 @@ firmware conocidos.
 - [Debian Wiki — Secure Boot](https://wiki.debian.org/SecureBoot)
 - [Debian Wiki — Nombres predecibles de interfaces](https://wiki.debian.org/NetworkInterfaceNames)
 - [Guía de instalación de Debian 13 — Requisitos de hardware](https://www.debian.org/releases/trixie/amd64/ch02s05)
+- Anexo [98 — Variables, entorno y sesiones](98_variables_y_entorno.md) § 6, sobre cómo persistir lo descubierto
 
 ---
 

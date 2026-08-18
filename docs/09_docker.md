@@ -23,7 +23,29 @@ un contenedor de prueba funcionando.
 - Salida a internet (se descargan unos 400 MB).
 - Espacio en `/var`: las imágenes viven ahí. Comprueba con `df -h /var`.
 
-**Tiempo estimado:** 25 minutos.
+**Preparar la sesión.**
+
+```bash
+# [servidor]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+echo "proxy=${DOCKER_RED_PROXY}/${DOCKER_RED_PROXY_SUBRED} socket=${DOCKER_RED_SOCKET}/${DOCKER_RED_SOCKET_SUBRED} datos=${DATOS_RAIZ}"
+```
+
+Salida esperada, con los valores de ejemplo:
+
+```
+proxy=proxy/172.20.0.0/16 socket=socket/172.19.0.0/24 datos=/srv
+```
+
+> **Aviso propio de este capítulo:** el paso 5 te obliga a **cerrar la sesión y volver a entrar**
+> para que el grupo `docker` tenga efecto. Al volver, la terminal está en blanco: hay que repetir
+> `cd ~/nomad_server && source scripts/lib/entorno.sh` antes de seguir con el paso 6, que usa
+> `${DOCKER_RED_PROXY_SUBRED}`. Crear una red con una subred vacía falla con un mensaje confuso
+> sobre CIDR inválido, y crearla con el **nombre** vacío produce una red anónima que Traefik no
+> encontrará después.
+
+**Tiempo estimado:** 35 minutos.
 
 ---
 
@@ -168,18 +190,80 @@ automático del capítulo 07, respetando a la vez lo que hayas parado a propósi
 
 ## 4. Variables usadas
 
-| Variable | Uso |
-|---|---|
-| `DEBIAN_SUITE` | Suite del repositorio de Docker |
-| `ADMIN_USUARIO` | Usuario que se añade al grupo `docker` |
-| `DOCKER_RED_PROXY` | Nombre de la red compartida |
-| `DOCKER_RED_PROXY_SUBRED` | Subred de esa red |
-| `DOCKER_LOG_MAX_SIZE`, `DOCKER_LOG_MAX_FILE` | Rotación de registros |
-| `DATOS_RAIZ` | Directorio raíz de los proyectos |
+### 4.1 De `config/servidor.env`
+
+| Variable | Uso | Dónde |
+|---|---|---|
+| `DEBIAN_SUITE` | Suite del repositorio de Docker | Paso 2 |
+| `ADMIN_USUARIO` | Usuario que se añade al grupo `docker` y dueño de `${DATOS_RAIZ}` | Pasos 5 y 7 |
+| `DOCKER_RED_PROXY` | Nombre de la red compartida con Traefik y los proyectos | Paso 6 |
+| `DOCKER_RED_PROXY_SUBRED` | Subred de esa red | Paso 6 |
+| `DOCKER_RED_SOCKET` | Nombre de la red aislada del intermediario del socket | Paso 6 |
+| `DOCKER_RED_SOCKET_SUBRED` | Subred de esa red | Paso 6 |
+| `DOCKER_LOG_MAX_SIZE`, `DOCKER_LOG_MAX_FILE` | Rotación de registros en `daemon.json` | Paso 4 |
+| `DATOS_RAIZ` | Directorio raíz de los proyectos | Paso 7 |
+| `LAN_CIDR` | Se contrasta para que las subredes de Docker no solapen con la LAN | Paso 6 |
+
+Cargar y comprobar:
+
+```bash
+# [servidor]
+cd ~/nomad_server && source scripts/lib/entorno.sh
+echo "${DOCKER_RED_PROXY}=${DOCKER_RED_PROXY_SUBRED} ${DOCKER_RED_SOCKET}=${DOCKER_RED_SOCKET_SUBRED} datos=${DATOS_RAIZ} lan=${LAN_CIDR}"
+```
+
+> **Un comando de este capítulo es destructivo si una variable está vacía.**
+> `sudo chown ${ADMIN_USUARIO}:${ADMIN_USUARIO} ${DATOS_RAIZ}` con `DATOS_RAIZ` sin valor cambiaría
+> el propietario de **la raíz del sistema entero**. El paso 7 incluye una comprobación previa por
+> ese motivo.
+
+### 4.2 Variables temporales de esta sesión
+
+Ninguna. Todo está en `config/servidor.env`.
+
+### 4.3 Coherencia entre variables
+
+Antes del paso 6, comprueba que las subredes de Docker no solapan con tu red local. Si tu LAN fuera
+`172.20.x.x`, la red `proxy` la pisaría y el servidor perdería el acceso al router:
+
+```bash
+# [servidor]
+for red in "${DOCKER_RED_PROXY_SUBRED}" "${DOCKER_RED_SOCKET_SUBRED}"; do
+    printf '%-16s vs LAN %-16s ' "${red}" "${LAN_CIDR}"
+    if [ "${red%.*.*/*}" = "${LAN_CIDR%.*.*/*}" ]; then
+        echo "REVISAR: mismo prefijo de 16 bits"
+    else
+        echo "ok"
+    fi
+done
+```
+
+Criterio de aceptación: `ok` en las dos. Es una comprobación aproximada —compara los dos primeros
+octetos— pero cubre el caso real: una LAN doméstica en `192.168.x.x` o `10.0.x.x` frente a subredes
+de Docker en `172.x.x.x`. Si alguna sale `REVISAR`, cambia su valor en `config/servidor.env` (por
+ejemplo a `10.90.0.0/16`) antes de crear las redes:
+
+```bash
+# [servidor]
+./scripts/variables.sh --fijar DOCKER_RED_PROXY_SUBRED=10.90.0.0/16
+source scripts/lib/entorno.sh
+```
 
 ---
 
 ## 5. Procedimiento
+
+### Paso 0 — Prepara la sesión
+
+```bash
+# [servidor]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+echo "proxy=${DOCKER_RED_PROXY}/${DOCKER_RED_PROXY_SUBRED} socket=${DOCKER_RED_SOCKET}/${DOCKER_RED_SOCKET_SUBRED} datos=${DATOS_RAIZ} usuario=${ADMIN_USUARIO}"
+```
+
+Criterio de aceptación: los cinco valores aparecen. Recuerda que tendrás que repetir este paso tras
+el paso 5, que cierra la sesión.
 
 ### Paso 1 — Comprueba el espacio y el reenvío de paquetes
 
@@ -207,10 +291,7 @@ sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyring
 sudo chmod a+r /etc/apt/keyrings/docker.asc
 ```
 
-```bash
-# [servidor]
-sudo vim /etc/apt/sources.list.d/docker.sources
-```
+**Así queda el archivo del repositorio** (con los valores de ejemplo):
 
 ```
 Types: deb
@@ -219,6 +300,30 @@ Suites: trixie
 Components: stable
 Architectures: amd64
 Signed-By: /etc/apt/keyrings/docker.asc
+```
+
+**Y este es el comando que lo escribe con tu suite:**
+
+```bash
+# [servidor]
+nomad_plantilla etc/docker.sources | sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null
+grep '^Suites:' /etc/apt/sources.list.d/docker.sources
+```
+
+Criterio de aceptación: `Suites:` seguido de tu suite real, no vacío.
+
+O sin la plantilla:
+
+```bash
+# [servidor]
+sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/debian
+Suites: ${DEBIAN_SUITE}
+Components: stable
+Architectures: amd64
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
 ```
 
 ```bash
@@ -245,10 +350,7 @@ plugin v2, y no `docker-compose` (con guion), la herramienta antigua en Python.
 
 ### Paso 4 — Configura el demonio
 
-```bash
-# [servidor]
-sudo vim /etc/docker/daemon.json
-```
+**Así queda el archivo** (con los valores de ejemplo):
 
 ```json
 {
@@ -267,6 +369,26 @@ sudo vim /etc/docker/daemon.json
   }
 }
 ```
+
+**Y este es el comando que lo escribe con tus valores de rotación:**
+
+```bash
+# [servidor]
+sudo mkdir -p /etc/docker
+nomad_diff etc/docker-daemon.json /etc/docker/daemon.json
+nomad_plantilla etc/docker-daemon.json | sudo tee /etc/docker/daemon.json >/dev/null
+```
+
+Comprueba que es JSON válido **antes** de reiniciar Docker. Un `daemon.json` con un error de
+sintaxis impide que el demonio arranque, y el mensaje de error no siempre lo deja claro:
+
+```bash
+# [servidor]
+jq . /etc/docker/daemon.json >/dev/null && echo "JSON VALIDO"
+grep -c '\${' /etc/docker/daemon.json || echo "0 (sin variables sin sustituir)"
+```
+
+Criterio de aceptación: `JSON VALIDO` y ninguna variable sin sustituir.
 
 > **Lo que deliberadamente NO está aquí:** `"iptables": false`. Aparece en muchas guías de
 > endurecimiento y **rompe por completo la red de los contenedores**. Docker necesita gestionar sus
@@ -307,7 +429,19 @@ docker ps
 
 Criterio de aceptación: `docker ps` funciona **sin `sudo`**.
 
-Recuerda 3.6: esto equivale a tener root sin contraseña.
+**Y la sesión nueva no tiene el entorno cargado.** Antes de seguir con el paso 6:
+
+```bash
+# [servidor]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+echo "proxy=${DOCKER_RED_PROXY}/${DOCKER_RED_PROXY_SUBRED}"
+```
+
+Criterio de aceptación: imprime el nombre y la subred. Si imprime `proxy=/`, el paso 6 crearía una
+red sin nombre ni subred.
+
+Recuerda 3.6: pertenecer al grupo `docker` equivale a tener root sin contraseña.
 
 ### Paso 6 — Crea las redes compartidas
 
@@ -343,12 +477,26 @@ internet**: los contenedores conectados solo pueden hablar entre sí.
 
 ### Paso 7 — Prepara el directorio de proyectos
 
+**Comprobación previa obligatoria.** El `chown` de más abajo, con `DATOS_RAIZ` vacía, cambiaría el
+propietario de la raíz del sistema:
+
+```bash
+# [servidor]
+[ -n "${DATOS_RAIZ}" ] && [ "${DATOS_RAIZ}" != "/" ] && [ -n "${ADMIN_USUARIO}" ] \
+  && echo "SEGURO: ${DATOS_RAIZ} para ${ADMIN_USUARIO}" \
+  || echo "PARA: DATOS_RAIZ o ADMIN_USUARIO sin valor"
+```
+
+Criterio de aceptación: `SEGURO: /srv para deart` (con tus valores).
+
 ```bash
 # [servidor]
 sudo mkdir -p ${DATOS_RAIZ}
 sudo chown ${ADMIN_USUARIO}:${ADMIN_USUARIO} ${DATOS_RAIZ}
 ls -ld ${DATOS_RAIZ}
 ```
+
+Criterio de aceptación: el directorio existe y su propietario es tu usuario, no `root`.
 
 ### Paso 8 — Prueba de humo
 
@@ -387,6 +535,8 @@ mantiene.
 
 ## 6. Script asociado
 
+### 6.1 Vía A — con el script
+
 `scripts/09_docker.sh` automatiza los pasos 1 a 8.
 
 ```bash
@@ -396,6 +546,12 @@ cd ~/nomad_server
 sudo ./scripts/09_docker.sh --check
 sudo ./scripts/09_docker.sh
 ```
+
+| Opción | Para qué |
+|---|---|
+| `--sin-prueba` | Omite el paso 8 (prueba de humo con contenedores) |
+| `-n, --check` | Muestra las diferencias de `daemon.json` y del repositorio, y verifica las condiciones previas |
+| `-y, --si` | No pide confirmación |
 
 Comportamiento destacable:
 
@@ -407,6 +563,31 @@ Comportamiento destacable:
 
 En modo `--check` muestra las diferencias de `daemon.json` y del repositorio, y verifica las
 condiciones previas, sin instalar ni descargar nada.
+
+### 6.2 Correspondencia entre el script y los pasos manuales
+
+| Paso de la sección 5 | ¿Lo hace el script? | Nota |
+|---|---|---|
+| 0 — preparar la sesión | Sí | Carga la configuración por su cuenta |
+| 1 — espacio y `ip_forward` | Sí | **Aborta** si algún archivo pone `ip_forward` a 0 |
+| 2 — repositorio de Docker | Sí | Instala `templates/etc/docker.sources` |
+| 3 — instalar | Sí | |
+| 4 — `daemon.json` | Sí | Instala `templates/etc/docker-daemon.json` y avisa de `"iptables": false` |
+| 5 — grupo `docker` | Sí | **Cerrar sesión y volver a entrar es tuyo** |
+| 6 — crear las redes | Sí | Comprueba que las subredes no solapan con `${LAN_CIDR}` |
+| 7 — directorio de proyectos | Sí | |
+| 8 — prueba de humo | Sí | Se omite con `--sin-prueba` |
+| 9 — comprobar que no hay puertos publicados | Sí | Se repite en la sección 7 |
+
+### 6.3 Si prefieres la vía manual
+
+Lo que asumes:
+
+- [ ] Recargar el entorno tras el paso 5, que cierra la sesión.
+- [ ] Comprobar que `daemon.json` es JSON válido antes de reiniciar el demonio.
+- [ ] Comprobar que las subredes no solapan con tu LAN (§ 4.3).
+- [ ] Comprobar `${DATOS_RAIZ}` antes del `chown` del paso 7.
+- [ ] No añadir `"iptables": false` a `daemon.json`, por muy recomendado que aparezca en internet.
 
 ---
 
@@ -485,6 +666,24 @@ sudo nft list chain inet nomad_filter entrada | grep -c 'policy drop'
 
 Criterio de aceptación: `1`. Instalar Docker no debe haber alterado nuestra tabla.
 
+```bash
+# [servidor] — las redes se llaman como dice la configuración, no algo anónimo
+source scripts/lib/entorno.sh
+docker network inspect "${DOCKER_RED_PROXY}" --format '{{.Name}}' 2>/dev/null \
+  && docker network inspect "${DOCKER_RED_SOCKET}" --format '{{.Name}}' 2>/dev/null \
+  || echo "REVISAR: alguna red no existe con ese nombre"
+```
+
+Criterio de aceptación: imprime los dos nombres. Si falla, es probable que se crearan con el entorno
+sin cargar; bórralas con `docker network rm` y repite el paso 6.
+
+```bash
+# [servidor] — el directorio de proyectos pertenece al administrador
+stat -c '%n %U:%G %a' "${DATOS_RAIZ}"
+```
+
+Criterio de aceptación: propietario tu usuario, no `root`. Y comprueba que **no** es `/`.
+
 **Prueba de reinicio:** `sudo reboot`, y después comprobar que `docker ps` responde y que la red
 `${DOCKER_RED_PROXY}` sigue existiendo.
 
@@ -538,6 +737,12 @@ sudo apt update
 | Las reglas del cortafuegos desaparecen al recargar nftables | `/etc/nftables.conf` tiene `flush ruleset` | Elimínalo (capítulo 06 § 3.4) y `sudo systemctl restart docker` | Capítulo [06](06_red_y_firewall.md) |
 | `docker network create` falla con «Pool overlaps» | Ya existe una red con esa subred | `docker network ls` y elimina la que sobre, o cambia `DOCKER_RED_PROXY_SUBRED` | [Docker — Redes](https://docs.docker.com/engine/network/) |
 | Un contenedor no llega a otro por su nombre | No están en la misma red | Conecta ambos a `${DOCKER_RED_PROXY}` y comprueba con `docker network inspect` | [Docker — DNS interno](https://docs.docker.com/engine/network/#dns-services) |
+| Tras volver a entrar por el grupo `docker`, los comandos fallan con valores vacíos | La sesión nueva no tiene el entorno cargado | `cd ~/nomad_server && source scripts/lib/entorno.sh` | § 5 paso 5 |
+| `docker network create` falla con «invalid CIDR» | `${DOCKER_RED_PROXY_SUBRED}` está vacía | Carga el entorno y repite el paso 6 | § 5 paso 0 |
+| Existe una red de Docker con un nombre extraño y Traefik no la encuentra | Se creó con `${DOCKER_RED_PROXY}` vacío | `docker network ls`, elimínala y repite el paso 6 | § 4.1 |
+| Media raíz del sistema cambió de propietario | `chown` con `${DATOS_RAIZ}` vacía | Restaura desde el respaldo. La comprobación del paso 7 existe para esto | § 5 paso 7 |
+| Docker no arranca tras escribir `daemon.json` | Error de sintaxis JSON, o una variable sin sustituir | `jq . /etc/docker/daemon.json` y `journalctl -u docker -n 50` | § 5 paso 4 |
+| El servidor pierde el router al crear proyectos | La subred de Docker solapa con la LAN | Comprueba con la § 4.3 y cambia `DOCKER_RED_PROXY_SUBRED` | § 4.3 |
 
 ---
 
@@ -551,6 +756,8 @@ sudo apt update
 - [Docker Compose — Especificación](https://docs.docker.com/reference/compose-file/)
 - [Docker — Live restore](https://docs.docker.com/engine/daemon/live-restore/)
 - [Docker — Seguridad](https://docs.docker.com/engine/security/)
+- [templates/README.md](../templates/README.md) — `docker.sources` y `docker-daemon.json`
+- Anexo [98 — Variables, entorno y sesiones](98_variables_y_entorno.md) § 5.1, sobre qué se pierde al cerrar sesión
 
 ---
 

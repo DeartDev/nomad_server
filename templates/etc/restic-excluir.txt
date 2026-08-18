@@ -6,6 +6,22 @@
 #
 #  Todo lo que se pueda volver a generar con un comando NO se respalda:
 #  ocupa espacio, alarga el respaldo y no aporta nada que no se recupere solo.
+#
+#  CÓMO APLICARLA A MANO (equivalente a lo que hace el script)
+#
+#      cd ~/nomad_server
+#      source scripts/lib/entorno.sh
+#      nomad_diff etc/restic-excluir.txt /etc/nomad/restic-excluir.txt
+#      sudo cp -a /etc/nomad/restic-excluir.txt \
+#          /etc/nomad/restic-excluir.txt.bak-$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
+#      nomad_plantilla etc/restic-excluir.txt \
+#          | sudo tee /etc/nomad/restic-excluir.txt >/dev/null
+#      sudo chmod 644 /etc/nomad/restic-excluir.txt
+#
+#  Y después, para que tenga efecto:
+#      sudo mkdir -p /etc/nomad     # antes de instalarla
+#
+#  Detalle: templates/README.md y docs/98_variables_y_entorno.md § 4.3
 # ===========================================================================
 
 # --- Dependencias reinstalables --------------------------------------------

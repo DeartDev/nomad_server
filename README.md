@@ -29,10 +29,12 @@ esa opción, *cómo verificar* que funcionó y *qué hacer* cuando falla.
 |---|---|
 | **Reproducibilidad** | Cero valores inventados sobre la marcha: todo sale de `config/servidor.env`. Cada paso tiene comando exacto y salida esperada. |
 | **Consistencia** | Los 17 capítulos de procedimiento comparten la misma estructura de 10 secciones. Siempre sabes dónde mirar. |
+| **Dos vías, un resultado** | Cada capítulo se puede ejecutar con su script o a mano, comando a comando. Las dos rutas están escritas enteras y producen lo mismo. |
 | **Robustez** | Todo script es idempotente y admite `--check` para simular. Nada se sobrescribe sin copia de seguridad previa. |
 | **Seguridad** | Nada se expone a internet. SSH solo con llaves. Firewall con política de denegación por defecto. Ningún contenedor publica puertos al host. |
 | **Verificabilidad** | Cada capítulo termina con comandos de validación y un criterio de aceptación explícito. Un paso sin validación no está terminado. |
 | **Recuperabilidad** | Respaldos cifrados con prueba de restauración obligatoria y un capítulo dedicado a reconstruir todo desde cero. |
+| **Retomable** | El montaje son 9–12 horas repartidas. Está escrito para pararse, reiniciar el servidor y volver días después sin perder el hilo. |
 
 ---
 
@@ -83,6 +85,55 @@ internet no encuentra absolutamente nada.
 
 ---
 
+## Las dos vías
+
+El mismo servidor se puede construir de dos formas, y las dos están documentadas enteras:
+
+| | **Vía A — con los scripts** | **Vía B — a mano** |
+|---|---|---|
+| Cómo | Clonas el repositorio en el servidor y ejecutas `scripts/NN_*.sh` | Copias y pegas los comandos de cada capítulo |
+| Tiempo | 3–4 h | 9–12 h |
+| Qué aporta | Velocidad, idempotencia, validaciones y copias previas automáticas | Entender exactamente qué toca cada cosa |
+| Variables | Cada script lee `config/servidor.env` por su cuenta | **Hay que cargarlas en tu sesión** (ver abajo) |
+
+Lo habitual es **mezclarlas**: hacer a mano la primera vez los capítulos que más enseñan y usar los
+scripts para el resto. Como los scripts son idempotentes, también sirven de verificador: ejecutados
+después de un capítulo hecho a mano, informan con `[=]` de lo que ya estaba bien y corrigen lo que
+quedó a medias.
+
+La ruta completa de cada vía, con la secuencia exacta de comandos, está en
+[97 — Las dos vías de montaje](docs/97_vias_de_montaje.md).
+
+### Si trabajas a mano: carga el entorno en cada sesión
+
+La documentación escribe los valores como `${VARIABLE}` para que sirva con cualquier red y cualquier
+dominio. Esas variables viven en `config/servidor.env`, que **tu terminal no conoce**. Antes de
+pegar el primer comando de cualquier capítulo:
+
+```bash
+# [servidor]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+```
+
+Hay que repetirlo **en cada sesión nueva**: al reconectar por SSH, tras reiniciar el servidor, al
+abrir una segunda terminal o una ventana nueva de `tmux`. Las variables de entorno mueren con el
+shell que las creó, y este montaje está pensado para hacerse por tandas.
+
+Y cada vez que un capítulo te dé un valor nuevo —el UUID del túnel, el del disco de respaldo, la IP
+de Tailscale—, escríbelo en el momento:
+
+```bash
+# [servidor]
+./scripts/variables.sh --fijar CF_TUNEL_ID=8a1b2c3d-4e5f-6789-abcd-ef0123456789
+./scripts/variables.sh --faltan     # qué queda pendiente y de dónde sale
+```
+
+Todo esto, con sus trampas (`sudo` y el entorno, comillas en los heredocs, `envsubst`), está
+explicado en [98 — Variables, entorno y sesiones](docs/98_variables_y_entorno.md).
+
+---
+
 ## Índice de capítulos
 
 Los capítulos están numerados en su **orden de ejecución**. Cada uno declara de cuáles depende, así
@@ -129,11 +180,21 @@ que no los saltes: el 06 da por hecho lo que hizo el 05.
 | 14 | [Respaldos con restic](docs/14_respaldos_restic.md) | Copias cifradas automáticas y restauración probada |
 | 15 | [Mantenimiento](docs/15_mantenimiento_y_actualizaciones.md) | Una rutina para que el servidor no se pudra con el tiempo |
 | 16 | [Recuperación ante desastres](docs/16_recuperacion_ante_desastres.md) | Volver a estar en pie tras un fallo grave |
+
+### Anexos transversales
+
+No son capítulos de procedimiento: se consultan desde cualquier punto del montaje.
+
+| # | Anexo | Para qué |
+|---|---|---|
+| 97 | [Las dos vías de montaje](docs/97_vias_de_montaje.md) | La secuencia completa con scripts, la equivalencia manual, y qué no automatiza nada |
+| 98 | [Variables, entorno y sesiones](docs/98_variables_y_entorno.md) | De dónde sale cada `${VALOR}`, cómo cargarlo, y cómo parar y retomar el montaje |
 | 99 | [Glosario y referencias](docs/99_glosario_y_referencias.md) | Términos y documentación oficial |
 
 ### Listas de comprobación
 
 - [Antes de instalar](checklists/pre_instalacion.md) — imprímela y tenla al lado del equipo
+- [Empezar o retomar una sesión](checklists/reanudar_sesion.md) — los cinco minutos de cada tanda
 - [Después de instalar](checklists/post_instalacion.md) — validación de extremo a extremo
 - [Rutina de mantenimiento](checklists/mantenimiento.md) — semanal, mensual y trimestral
 
@@ -141,35 +202,65 @@ que no los saltes: el 06 da por hecho lo que hizo el 05.
 
 ## Cómo se usa este repositorio
 
+### 1. En tu equipo
+
 ```bash
-# 1. Clona el repositorio en TU EQUIPO (no en el servidor todavía)
+# Clona el repositorio
 git clone <url-del-repositorio> nomad_server
 cd nomad_server
 
-# 2. Crea tu configuración local a partir de la plantilla
+# Crea tu configuración local a partir de la plantilla
 make init
 $EDITOR config/servidor.env      # rellena hostname, red, dominio, usuario…
 
-# 3. Comprueba que el repositorio está sano
+# ¿Qué falta por rellenar y de dónde sale cada valor?
+make variables
+
+# Comprueba que el repositorio está sano
 make check
 
-# 4. Empieza a leer por el principio
+# Empieza a leer por el principio
 $PAGER docs/00_planificacion.md
 ```
 
-A partir del capítulo 04 el repositorio se clona **también en el servidor**, porque los scripts se
-ejecutan allí. El capítulo 04 explica cómo.
+### 2. En el servidor, a partir del capítulo 04
+
+Los scripts se ejecutan allí, así que el repositorio tiene que estar allí:
+
+```bash
+# [servidor]
+sudo apt update && sudo apt install -y git
+git clone <url-del-repositorio> ~/nomad_server
+cd ~/nomad_server
+```
+
+```bash
+# [cliente] — config/servidor.env nunca viaja por git
+scp config/servidor.env <usuario>@<ip-del-servidor>:~/nomad_server/config/
+```
+
+```bash
+# [servidor]
+chmod 600 ~/nomad_server/config/servidor.env
+./scripts/variables.sh --estado
+```
+
+Si el repositorio aún no está publicado, el capítulo [04](docs/04_primer_arranque_y_base.md) explica
+la alternativa con `rsync`.
 
 ### Anatomía de un capítulo
 
 Todos los capítulos tienen exactamente las mismas 10 secciones, en el mismo orden:
 
 1. **Objetivo** — qué queda funcionando al terminar
-2. **Requisitos previos** — de qué capítulos depende y qué necesitas a mano
+2. **Requisitos previos** — de qué capítulos depende, qué necesitas a mano y cómo preparar la sesión
 3. **Decisiones y por qué** — qué se descartó y por qué razón
-4. **Variables usadas** — qué campos de `config/servidor.env` intervienen
-5. **Procedimiento** — los pasos, con comandos exactos y salida esperada
-6. **Script asociado** — qué parte está automatizada y cómo invocarla
+4. **Variables usadas** — qué campos de `config/servidor.env` intervienen, cuáles se descubren aquí
+   y cuáles son temporales de la sesión
+5. **Procedimiento** — los pasos, con comandos exactos y salida esperada. Empieza siempre por un
+   **paso 0** que prepara la sesión
+6. **Script asociado** — la vía A: qué automatiza, qué no, y cómo se corresponde con los pasos
+   manuales
 7. **Validación** — cómo comprobar que quedó bien, con criterio de aceptación
 8. **Reversión** — cómo deshacerlo sin reinstalar
 9. **Errores frecuentes** — síntoma → causa → solución → documentación oficial
@@ -180,8 +271,12 @@ Todos los capítulos tienen exactamente las mismas 10 secciones, en el mismo ord
 - **Nada de valores fijos.** La documentación usa `${VARIABLES}` que se definen una sola vez en
   `config/servidor.env`. Si tu red es `10.0.0.0/24` en lugar de `192.168.1.0/24`, cambias una línea
   y toda la documentación sigue siendo correcta.
+- **Cada bloque dice dónde se ejecuta**: `# [cliente]` en tu equipo, `# [servidor]` por SSH,
+  `# [equipo]` delante de la máquina antes de instalar.
+- **Los archivos se muestran dos veces**: primero su contenido con valores de ejemplo, para poder
+  leerlo; después el comando que lo escribe con **tus** valores, para no teclearlo.
 - **Los scripts son idempotentes.** Ejecutarlos dos veces no rompe nada. Todos aceptan `--check`
-  para ver qué harían sin tocar el sistema, y `--help` para saber qué hacen.
+  para ver qué harían sin tocar el sistema, y `--help` para saber qué hacen y qué **no** hacen.
 - **Nada se sobrescribe a ciegas.** Cualquier archivo del sistema que se modifique se copia antes a
   `<archivo>.bak-<fecha>`.
 - **Los secretos nunca se versionan.** `config/servidor.env`, los `.env` de los proyectos y las
@@ -194,21 +289,24 @@ Todos los capítulos tienen exactamente las mismas 10 secciones, en el mismo ord
 ```
 nomad_server/
 ├── config/servidor.env.example   Todas las variables del despliegue, comentadas
-├── docs/                         Los 17 capítulos + el glosario
+├── docs/                         Los 17 capítulos + 3 anexos transversales
 ├── scripts/
-│   ├── lib/common.sh             Biblioteca compartida: registro, validaciones, idempotencia
+│   ├── lib/common.sh             Biblioteca de los scripts: registro, validaciones, idempotencia
+│   ├── lib/entorno.sh            Se importa con 'source' para trabajar a mano
 │   ├── 01…14_*.sh                Un script por capítulo, idempotente y con --check
+│   ├── variables.sh              Estado y edición de config/servidor.env
 │   ├── deploy.sh                 Despliegue de proyectos, con reversión automática
 │   ├── verificar_sistema.sh      Estado del servidor: lo que se ejecuta cada semana
 │   └── verificar_repositorio.sh  Lo que ejecuta 'make check'
 ├── templates/                    Configuración del sistema y ficheros compose parametrizados
+│   ├── README.md                 Inventario de plantillas y cómo aplicarlas a mano
 │   ├── etc/                      nftables, sshd, sysctl, journald, respaldo…
 │   ├── systemd/                  Unidades de servicio y temporizadores
 │   └── compose/                  Traefik, cloudflared, observabilidad, proyecto de ejemplo
 └── checklists/                   Listas de comprobación imprimibles
 ```
 
-### Los tres scripts que se usan a diario
+### Los scripts que se usan a diario
 
 Cuando el montaje termina, estos son los que quedan:
 
@@ -216,6 +314,13 @@ Cuando el montaje termina, estos son los que quedan:
 ./scripts/verificar_sistema.sh --rapido   # ¿está todo bien? (2 min, semanal)
 ./scripts/deploy.sh <proyecto>            # actualizar un proyecto
 sudo ./scripts/14_restic.sh --probar      # ¿sirven mis respaldos? (trimestral)
+```
+
+Y durante el montaje, estos dos:
+
+```bash
+source scripts/lib/entorno.sh             # al empezar cada sesión
+./scripts/variables.sh --faltan           # qué valores quedan pendientes
 ```
 
 ---

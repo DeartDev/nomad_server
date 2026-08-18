@@ -20,10 +20,40 @@ seguridad aplicadas a todo el tráfico público, y su panel accesible únicament
 **Necesitas a mano:**
 
 - `docker ps` funcionando sin `sudo`.
-- La IP de Tailscale del servidor, si quieres acceder al panel desde el móvil:
-  `tailscale ip -4`.
+- La IP de Tailscale del servidor ya persistida en `TS_IP` (capítulo [08](08_tailscale.md) paso 10),
+  si quieres acceder al panel desde el móvil.
 
-**Tiempo estimado:** 30 minutos.
+**Preparar la sesión.**
+
+```bash
+# [servidor]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+echo "datos=${DATOS_RAIZ} red=${DOCKER_RED_PROXY} socket=${DOCKER_RED_SOCKET}"
+echo "panel en ${TRAEFIK_BIND_INTERNA}:${TRAEFIK_PUERTO_INTERNA} · host ${TRAEFIK_DASHBOARD_HOST}"
+```
+
+Salida esperada, con los valores de ejemplo:
+
+```
+datos=/srv red=proxy socket=socket
+panel en 127.0.0.1:8080 · host traefik.nomad.lan
+```
+
+> **Comprobación que evita el fallo más frecuente de este capítulo.** Docker se niega a arrancar un
+> contenedor que intente atarse a una dirección que no existe en el sistema, con un mensaje
+> (`cannot assign requested address`) que no dice cuál es el problema. Compruébalo antes:
+>
+> ```bash
+> # [servidor]
+> ip -br addr | grep -q "${TRAEFIK_BIND_INTERNA}" && echo "DIRECCION VALIDA" \
+>   || echo "PARA: ${TRAEFIK_BIND_INTERNA} no existe en este servidor"
+> ```
+>
+> Criterio de aceptación: `DIRECCION VALIDA`. Si elegiste la IP de Tailscale y falla, la VPN no está
+> levantada o `TS_IP` cambió: revisa el capítulo [08](08_tailscale.md) paso 10.
+
+**Tiempo estimado:** 40 minutos.
 
 ---
 
@@ -174,34 +204,114 @@ Se descartan además casi todas las cabeceras, conservando `User-Agent`, `X-Forw
 
 ## 4. Variables usadas
 
-| Variable | Uso |
-|---|---|
-| `DATOS_RAIZ` | Directorio donde vive la configuración de Traefik |
-| `DOCKER_RED_PROXY` | Red por la que Traefik alcanza los contenedores |
-| `DOCKER_RED_PROXY_SUBRED` | IPs de confianza para las cabeceras reenviadas |
-| `TRAEFIK_BIND_INTERNA` | Dirección donde se publica el punto de entrada interno |
-| `TRAEFIK_PUERTO_INTERNA` | Puerto de ese punto de entrada en el host |
-| `TRAEFIK_DASHBOARD_HOST` | Nombre para llegar al panel |
-| `LAN_CIDR`, `TS_CIDR` | Redes permitidas en el middleware `solo-privada` |
+### 4.1 De `config/servidor.env`
+
+| Variable | Uso | Archivo donde acaba |
+|---|---|---|
+| `DATOS_RAIZ` | Directorio donde vive la configuración de Traefik | Rutas de todos los comandos |
+| `DOCKER_RED_PROXY` | Red por la que Traefik alcanza los contenedores | `traefik.yml`, `docker-compose.yml` |
+| `DOCKER_RED_SOCKET` | Red aislada del intermediario del socket | `docker-compose.yml` |
+| `DOCKER_RED_PROXY_SUBRED` | IPs de confianza para las cabeceras reenviadas | `traefik.yml`, `middlewares.yml` |
+| `TRAEFIK_BIND_INTERNA` | Dirección donde se publica el punto de entrada interno | `docker-compose.yml` |
+| `TRAEFIK_PUERTO_INTERNA` | Puerto de ese punto de entrada en el host | `docker-compose.yml` |
+| `TRAEFIK_DASHBOARD_HOST` | Nombre para llegar al panel | `docker-compose.yml` |
+| `LAN_CIDR`, `TS_CIDR` | Redes permitidas en el middleware `solo-privada` | `middlewares.yml` |
+
+Cargar y comprobar:
+
+```bash
+# [servidor]
+cd ~/nomad_server && source scripts/lib/entorno.sh
+echo "${TRAEFIK_BIND_INTERNA}:${TRAEFIK_PUERTO_INTERNA} → ${DOCKER_RED_PROXY} / ${DOCKER_RED_SOCKET}"
+```
+
+> **`TRAEFIK_BIND_INTERNA` nunca debe ser `0.0.0.0`.** Eso publicaría el panel de administración en
+> toda la red local. El script se niega a continuar si lo detecta; a mano, la comprobación es tuya:
+>
+> ```bash
+> # [servidor]
+> [ "${TRAEFIK_BIND_INTERNA}" = "0.0.0.0" ] \
+>   && echo "PARA: expondrías el panel a toda la LAN" || echo "ok"
+> ```
+
+### 4.2 Variables que puede que tengas que ACTUALIZAR aquí
+
+| Variable | Cuándo cambiarla | Cómo |
+|---|---|---|
+| `TRAEFIK_BIND_INTERNA` | Si empezaste con `127.0.0.1` y ahora quieres el panel accesible desde el móvil | `./scripts/variables.sh --fijar TRAEFIK_BIND_INTERNA="$(tailscale ip -4)"` |
+| `TRAEFIK_PUERTO_INTERNA` | Si usas la IP de Tailscale, puedes poner `80` y quitar el puerto de las direcciones | `./scripts/variables.sh --fijar TRAEFIK_PUERTO_INTERNA=80` |
+
+Tras cambiar cualquiera de las dos:
+
+```bash
+# [servidor]
+source scripts/lib/entorno.sh
+cd ${DATOS_RAIZ}/traefik && docker compose up -d --force-recreate traefik
+```
+
+El `--force-recreate` es necesario: Docker no recrea un contenedor solo porque cambie una variable
+que ya no está en su fichero compose renderizado.
+
+### 4.3 Variables temporales de esta sesión
+
+Ninguna, salvo el nombre del contenedor de prueba del paso 8, que va literal.
 
 ---
 
 ## 5. Procedimiento
+
+### Paso 0 — Prepara la sesión
+
+```bash
+# [servidor]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+```
+
+Cuatro comprobaciones previas, todas de un segundo, que cubren los cuatro motivos por los que este
+capítulo suele fallar:
+
+```bash
+# [servidor]
+echo "1. redes:"    ; docker network inspect "${DOCKER_RED_PROXY}" "${DOCKER_RED_SOCKET}" --format '   {{.Name}} (internal={{.Internal}})'
+echo "2. bind:"     ; ip -br addr | grep -q "${TRAEFIK_BIND_INTERNA}" && echo "   ${TRAEFIK_BIND_INTERNA} existe" || echo "   PARA: no existe"
+echo "3. no 0.0.0.0:"; [ "${TRAEFIK_BIND_INTERNA}" != "0.0.0.0" ] && echo "   ok" || echo "   PARA: expondría el panel a la LAN"
+echo "4. docker:"   ; docker ps >/dev/null 2>&1 && echo "   accesible sin sudo" || echo "   PARA: falta el grupo docker"
+```
+
+Criterio de aceptación: las cuatro líneas positivas. Este capítulo **no se ejecuta con `sudo`**: usa
+tu usuario, que pertenece al grupo `docker` y es el dueño de `${DATOS_RAIZ}`.
 
 ### Paso 1 — Prepara el directorio
 
 ```bash
 # [servidor]
 mkdir -p ${DATOS_RAIZ}/traefik/config/dinamica
-cd ${DATOS_RAIZ}/traefik
+ls -ld ${DATOS_RAIZ}/traefik
 ```
+
+Criterio de aceptación: el directorio existe bajo `${DATOS_RAIZ}` —no bajo `/`— y su propietario
+eres tú. Si `DATOS_RAIZ` estuviera vacía, esto habría creado `/traefik`: bórralo y carga el entorno.
 
 ### Paso 2 — Configuración estática
 
+Los tres archivos de configuración de Traefik salen de plantillas. Este es el comando que instala la
+primera:
+
 ```bash
 # [servidor]
-vim ${DATOS_RAIZ}/traefik/config/traefik.yml
+nomad_plantilla compose/traefik/traefik.yml > ${DATOS_RAIZ}/traefik/config/traefik.yml
 ```
+
+Y así se revisa antes de levantarlo:
+
+```bash
+# [servidor]
+grep -nE '\$\{|^\s*(address|endpoint|network):' ${DATOS_RAIZ}/traefik/config/traefik.yml
+```
+
+Criterio de aceptación: aparecen `:80`, `:8080`, `tcp://socket-proxy:2375` y el nombre real de tu
+red, **sin ningún `${…}` sin sustituir**.
 
 El contenido completo está en `templates/compose/traefik/traefik.yml`. Los puntos clave:
 
@@ -238,17 +348,42 @@ lleva `traefik.enable=true`.
 
 ```bash
 # [servidor]
-vim ${DATOS_RAIZ}/traefik/config/dinamica/middlewares.yml
+nomad_plantilla compose/traefik/dinamica/middlewares.yml \
+    > ${DATOS_RAIZ}/traefik/config/dinamica/middlewares.yml
 ```
 
 El contenido está en `templates/compose/traefik/dinamica/middlewares.yml`. Este archivo se recarga
 solo al guardarlo: no hace falta reiniciar Traefik.
 
+Comprueba que las redes privadas del middleware `solo-privada` han quedado con tus valores. Es la
+segunda barrera que protege el panel y las herramientas del capítulo 13:
+
+```bash
+# [servidor]
+grep -A6 'solo-privada:' ${DATOS_RAIZ}/traefik/config/dinamica/middlewares.yml
+```
+
+Salida esperada, con los valores de ejemplo:
+
+```
+    solo-privada:
+      ipAllowList:
+        sourceRange:
+          - "127.0.0.1/32"
+          - "192.168.1.0/24"
+          - "100.64.0.0/10"
+          - "172.20.0.0/16"
+```
+
+Criterio de aceptación: cuatro rangos con direcciones reales. **Una lista vacía o con `${LAN_CIDR}`
+literal haría que Traefik rechazara el archivo entero** —y con él todos los middlewares, incluidas
+las cabeceras de seguridad— sin más aviso que una línea en su registro.
+
 ### Paso 4 — Fichero compose
 
 ```bash
 # [servidor]
-vim ${DATOS_RAIZ}/traefik/docker-compose.yml
+nomad_plantilla compose/traefik/docker-compose.yml > ${DATOS_RAIZ}/traefik/docker-compose.yml
 ```
 
 El contenido está en `templates/compose/traefik/docker-compose.yml`. Fíjate en tres cosas:
@@ -256,6 +391,29 @@ El contenido está en `templates/compose/traefik/docker-compose.yml`. Fíjate en
 1. El servicio `traefik` **no publica el puerto 80**.
 2. El único `ports:` está atado a `${TRAEFIK_BIND_INTERNA}`.
 3. `socket-proxy` está en una red `internal: true`, sin salida a internet.
+
+Valida el fichero **antes** de levantarlo. `docker compose config` resuelve las variables, comprueba
+la sintaxis y muestra el resultado final:
+
+```bash
+# [servidor]
+cd ${DATOS_RAIZ}/traefik
+docker compose config | grep -E 'published|name:|external'
+```
+
+Salida esperada, con los valores de ejemplo:
+
+```
+        published: "8080"
+        host_ip: 127.0.0.1
+    name: proxy
+    external: true
+    name: socket
+    external: true
+```
+
+Criterio de aceptación: `host_ip` es tu dirección privada —**nunca `0.0.0.0`**— y las dos redes
+aparecen con su nombre real y como externas.
 
 ### Paso 5 — Levanta
 
@@ -302,11 +460,11 @@ Y en el navegador: <http://localhost:8080/dashboard/>
 
 ```bash
 # [servidor]
-tailscale ip -4
+echo "http://${TRAEFIK_BIND_INTERNA}:${TRAEFIK_PUERTO_INTERNA}/dashboard/"
 ```
 
-Y en el navegador, desde cualquier dispositivo de tu tailnet:
-`http://100.x.y.z:8080/dashboard/`
+Copia esa URL en el navegador de cualquier dispositivo de tu tailnet, incluido el móvil. Si el
+comando imprime `http://:8080/dashboard/`, el entorno no está cargado.
 
 > La barra final de `/dashboard/` **es obligatoria**. Sin ella Traefik devuelve un 404 y parece que
 > el panel no funciona. Es la confusión número uno con Traefik.
@@ -362,15 +520,27 @@ docker rm -f prueba-traefik
 
 ## 6. Script asociado
 
+### 6.1 Vía A — con el script
+
 `scripts/10_traefik.sh` automatiza los pasos 1 a 6 y ejecuta la prueba del paso 8.
 
 ```bash
-# [servidor]
+# [servidor] — SIN sudo
 cd ~/nomad_server
 ./scripts/10_traefik.sh --help
 ./scripts/10_traefik.sh --check
 ./scripts/10_traefik.sh
 ```
+
+> **Sin `sudo`.** Es la diferencia con los capítulos anteriores: este script opera con el grupo
+> `docker` y escribe en `${DATOS_RAIZ}`, que pertenece a tu usuario. Ejecutarlo con `sudo` crearía
+> los archivos como `root` y después no podrías editarlos.
+
+| Opción | Para qué |
+|---|---|
+| `--sin-prueba` | Omite la prueba de enrutado del paso 8 |
+| `-n, --check` | Muestra las diferencias y valida el compose, sin levantar nada |
+| `-y, --si` | No pide confirmación |
 
 Comportamiento destacable:
 
@@ -384,6 +554,40 @@ Comportamiento destacable:
 
 En modo `--check` muestra las diferencias de los tres archivos de configuración y valida el fichero
 compose con `docker compose config`, sin levantar nada.
+
+### 6.2 Correspondencia entre el script y los pasos manuales
+
+| Paso de la sección 5 | ¿Lo hace el script? | Nota |
+|---|---|---|
+| 0 — comprobaciones previas | Sí | Las cuatro: redes, dirección, `0.0.0.0` y grupo `docker` |
+| 1 — directorio | Sí | |
+| 2 — `traefik.yml` | Sí | Desde `templates/compose/traefik/traefik.yml` |
+| 3 — `middlewares.yml` | Sí | Desde `templates/compose/traefik/dinamica/middlewares.yml` |
+| 4 — `docker-compose.yml` | Sí | Y lo valida con `docker compose config` |
+| 5 — levantar | Sí | Espera a que los contenedores estén sanos |
+| 6 — comprobar que no se expone nada | Sí | Falla si algo quedó en `0.0.0.0` |
+| 7 — abrir el panel | **No** | Es una comprobación visual |
+| 8 — prueba de enrutado | Sí | Se omite con `--sin-prueba` |
+
+### 6.3 Si prefieres la vía manual
+
+Lo que asumes:
+
+- [ ] Renderizar las tres plantillas con `nomad_plantilla` (o sustituir a mano cada `${…}`).
+- [ ] Comprobar que ningún archivo ha quedado con variables sin sustituir, en especial
+      `middlewares.yml`: un YAML inválido hace que Traefik **ignore el archivo entero**, y con él
+      las cabeceras de seguridad, sin dar más señal que una línea en su registro.
+- [ ] `docker compose config` antes de `docker compose up -d`.
+- [ ] La comprobación de que nada quedó publicado en `0.0.0.0` (paso 6).
+
+Comprobación conjunta de lo anterior:
+
+```bash
+# [servidor]
+grep -rn '\${' ${DATOS_RAIZ}/traefik/ 2>/dev/null && echo "REVISAR" || echo "CORRECTO"
+```
+
+Criterio de aceptación: `CORRECTO`.
 
 ---
 
@@ -450,6 +654,21 @@ docker network inspect ${DOCKER_RED_SOCKET} --format '{{.Internal}}'
 
 Criterio de aceptación: `true`.
 
+```bash
+# [servidor] — ningún archivo de configuración quedó con variables sin sustituir
+grep -rn '\${' ${DATOS_RAIZ}/traefik/ 2>/dev/null && echo "REVISAR" || echo "CORRECTO"
+```
+
+Criterio de aceptación: `CORRECTO`.
+
+```bash
+# [servidor] — el middleware de red privada tiene rangos reales
+docker exec traefik wget -qO- http://localhost:8080/api/http/middlewares 2>/dev/null \
+    | grep -o '"sourceRange":\[[^]]*\]'
+```
+
+Criterio de aceptación: aparecen tus rangos (`192.168.…`, `100.64.…`), no una lista vacía.
+
 **Prueba de reinicio:** `sudo reboot` y comprobar que ambos contenedores vuelven solos y el panel
 responde.
 
@@ -500,6 +719,12 @@ docker compose restart traefik
 | `socket-proxy` responde 403 a todo | Falta `CONTAINERS: 1` entre sus variables de entorno | Revisa el fichero compose | [docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy) |
 | El panel es accesible desde toda la LAN | `TRAEFIK_BIND_INTERNA` está en `0.0.0.0` | Cámbialo a `127.0.0.1` o a la IP de Tailscale y recrea el contenedor | § 3.3 |
 | Dos routers con el mismo nombre | Dos proyectos usan la misma etiqueta `routers.<nombre>` | Usa nombres únicos por proyecto | [Traefik — Routers](https://doc.traefik.io/traefik/routing/routers/) |
+| Los middlewares no aparecen en el panel | `middlewares.yml` tiene YAML inválido, a menudo por una variable sin sustituir | `docker logs traefik \| grep -i error` y revisa el archivo | § 5 paso 3 |
+| Las cabeceras de seguridad no llegan a las respuestas | Lo mismo: Traefik ignoró el archivo de middlewares entero | Ídem | § 5 paso 3 |
+| Se creó un directorio `/traefik` en la raíz | `${DATOS_RAIZ}` estaba vacía al ejecutar el paso 1 | Bórralo, carga el entorno y repite | § 5 paso 1 |
+| Los archivos de `${DATOS_RAIZ}/traefik` pertenecen a root y no puedo editarlos | Se ejecutó el script con `sudo` | `sudo chown -R ${ADMIN_USUARIO}: ${DATOS_RAIZ}/traefik` | § 6.1 |
+| Cambié `TRAEFIK_BIND_INTERNA` y el panel sigue donde estaba | El contenedor no se recreó | `docker compose up -d --force-recreate traefik` | § 4.2 |
+| «cannot assign requested address» tras reiniciar | Traefik arrancó antes que Tailscale y la IP aún no existía | `docker compose up -d` de nuevo, o usa `127.0.0.1` | Capítulo [08](08_tailscale.md) |
 
 ---
 
@@ -513,6 +738,8 @@ docker compose restart traefik
 - [Tecnativa — docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy)
 - [Docker — Seguridad del socket](https://docs.docker.com/engine/security/#docker-daemon-attack-surface)
 - [MDN — Cabeceras de seguridad HTTP](https://developer.mozilla.org/docs/Web/HTTP/Headers)
+- [templates/README.md](../templates/README.md) — las tres plantillas de Traefik
+- Anexo [98 — Variables, entorno y sesiones](98_variables_y_entorno.md) § 4.3, sobre renderizar plantillas
 
 ---
 

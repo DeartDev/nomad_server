@@ -24,10 +24,23 @@ verificada.
 - Acceso por SSH con llave.
 - Que el capítulo 06 esté validado: las actualizaciones automáticas necesitan red estable.
 
-**Tiempo estimado:** 30 minutos, más 10 minutos de auditoría.
+**Preparar la sesión.**
+
+```bash
+# [servidor]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+```
+
+Este capítulo es el único que **no consume ninguna variable de `config/servidor.env`**: todos sus
+ajustes son independientes de tu red y de tu dominio. Aun así conviene cargar el entorno, por dos
+motivos: los ayudantes `nomad_plantilla` y `nomad_diff` sí hacen falta para aplicar las plantillas,
+y el resumen que imprime confirma que estás en el servidor correcto.
 
 > Este capítulo se hace **antes** de instalar Docker a propósito: así el sistema base queda cerrado
 > antes de añadir un servicio que se comunica con internet y ejecuta código de terceros.
+
+**Tiempo estimado:** 40 minutos, más 10 de auditoría.
 
 ---
 
@@ -148,12 +161,70 @@ Igual de importante que lo que se activa:
 
 ## 4. Variables usadas
 
-Este capítulo no consume variables de `config/servidor.env`: todos sus ajustes son independientes
-del entorno concreto. El script sí carga la configuración para las comprobaciones previas comunes.
+### 4.1 De `config/servidor.env`
+
+**Ninguna.** Es el único capítulo del que se puede decir eso: los límites del registro, los
+parámetros del kernel y la política de actualizaciones son idénticos en cualquier servidor. El
+script sí carga la configuración, pero solo para las comprobaciones previas comunes a todos
+(`requerir_root`, `requerir_debian`).
+
+Se referencia `${SSH_PUERTO}` en el paso 6 al revisar qué está escuchando; para que ese comando
+funcione al pegarlo, carga el entorno como indica la sección 2.
+
+### 4.2 Variables que NO son tuyas y no hay que sustituir
+
+Este capítulo contiene el ejemplo más claro de todo el repositorio de un `${…}` que **pertenece a
+otro programa**:
+
+```
+Unattended-Upgrade::Origins-Pattern {
+    "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+};
+```
+
+`${distro_codename}` es una variable **de APT**, no del shell ni de este repositorio. APT la
+sustituye por `trixie` al leer el archivo, y por `forky` cuando subas de versión mayor. Si la
+expandes tú al escribir el archivo, la configuración quedará atada a `trixie` para siempre y dejará
+de aplicar parches el día que actualices.
+
+Cómo se garantiza que no se expanda:
+
+| Vía | Mecanismo |
+|---|---|
+| Con la plantilla (`nomad_plantilla`) | `envsubst` recibe solo la lista de variables en MAYÚSCULAS; `distro_codename` va en minúscula y no se toca |
+| A mano con heredoc | Se usa `<<'EOF'` **con comillas**, que impide toda expansión |
+| Con un editor | No expande nada; se escribe literalmente |
+
+Es el caso inverso al de los capítulos 04 a 06, donde el heredoc iba sin comillas precisamente para
+que sí se expandiera. La regla general está en el anexo
+[98 § 4.1 y § 4.4](98_variables_y_entorno.md).
+
+### 4.3 Variables temporales de esta sesión
+
+Ninguna.
 
 ---
 
 ## 5. Procedimiento
+
+### Paso 0 — Prepara la sesión
+
+```bash
+# [servidor]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+```
+
+Comprobación de que el capítulo anterior sigue en pie, porque las actualizaciones automáticas
+necesitan red y el resto del capítulo da por hecho el cortafuegos:
+
+```bash
+# [servidor]
+getent hosts deb.debian.org >/dev/null && echo "DNS OK"
+sudo nft list chain inet nomad_filter entrada | grep -c 'policy drop'
+```
+
+Criterio de aceptación: `DNS OK` y `1`.
 
 ### Paso 1 — Actualizaciones automáticas
 
@@ -162,10 +233,7 @@ del entorno concreto. El script sí carga la configuración para las comprobacio
 sudo apt install -y unattended-upgrades apt-listchanges
 ```
 
-```bash
-# [servidor]
-sudo vim /etc/apt/apt.conf.d/52-nomad-unattended
-```
+**Así queda el archivo:**
 
 ```
 Unattended-Upgrade::Origins-Pattern {
@@ -185,22 +253,66 @@ Unattended-Upgrade::MinimalSteps "true";
 Unattended-Upgrade::SyslogEnable "true";
 ```
 
-`${distro_codename}` es una variable **de APT**, no del entorno: déjala tal cual. APT la sustituye
-por `trixie` automáticamente, de modo que la configuración sigue siendo válida tras actualizar a la
-siguiente versión de Debian.
+> **`${distro_codename}` NO es una variable de este repositorio: es de APT.** Déjala literal. APT la
+> sustituye por `trixie` al leer el archivo, y por `forky` el día que subas de versión mayor, de
+> modo que la configuración sigue siendo correcta sin tocarla. Si la expandieras tú, la política de
+> actualizaciones quedaría atada a `trixie` para siempre y **dejaría de aplicar parches tras la
+> subida de versión**, en silencio.
+
+**Y este es el comando que lo escribe.** Fíjate en que el heredoc va **con comillas** (`<<'EOF'`),
+justo al revés que en los capítulos 04 a 06: aquí no queremos que el shell expanda nada.
+
+```bash
+# [servidor]
+sudo tee /etc/apt/apt.conf.d/52-nomad-unattended >/dev/null <<'EOF'
+Unattended-Upgrade::Origins-Pattern {
+    "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+    "origin=Debian,codename=${distro_codename}-updates";
+};
+
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+Unattended-Upgrade::Remove-New-Unused-Dependencies "true";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-Time "04:00";
+Unattended-Upgrade::Automatic-Reboot-WithUsers "false";
+
+Unattended-Upgrade::MinimalSteps "true";
+Unattended-Upgrade::SyslogEnable "true";
+EOF
+```
+
+O con la plantilla del repositorio, que además lleva los comentarios explicativos y el bloque de
+correo comentado:
+
+```bash
+# [servidor]
+nomad_plantilla etc/unattended-upgrades.conf \
+    | sudo tee /etc/apt/apt.conf.d/52-nomad-unattended >/dev/null
+```
+
+**Comprueba que `${distro_codename}` sigue ahí, literal:**
+
+```bash
+# [servidor]
+grep -c 'distro_codename' /etc/apt/apt.conf.d/52-nomad-unattended
+```
+
+Criterio de aceptación: `2`. Si devuelve `0`, la variable se expandió a nada y el patrón de orígenes
+no coincidirá con ningún repositorio: el servidor dejaría de parchearse. Reescribe el archivo con
+`<<'EOF'`.
 
 Y activa las tareas periódicas:
 
 ```bash
 # [servidor]
-sudo vim /etc/apt/apt.conf.d/20auto-upgrades
-```
-
-```
+sudo tee /etc/apt/apt.conf.d/20auto-upgrades >/dev/null <<'EOF'
 APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Download-Upgradeable-Packages "1";
 APT::Periodic::Unattended-Upgrade "1";
 APT::Periodic::AutocleanInterval "7";
+EOF
 ```
 
 ### Paso 2 — Prueba las actualizaciones en seco
@@ -222,11 +334,7 @@ Criterio de aceptación: los dos temporizadores aparecen con próxima ejecución
 
 ### Paso 3 — Límites del registro
 
-```bash
-# [servidor]
-sudo mkdir -p /etc/systemd/journald.conf.d
-sudo vim /etc/systemd/journald.conf.d/50-nomad.conf
-```
+**Así queda el archivo:**
 
 ```
 [Journal]
@@ -239,6 +347,35 @@ MaxFileSec=1week
 RateLimitIntervalSec=30s
 RateLimitBurst=10000
 ForwardToSyslog=no
+```
+
+**Y este es el comando que lo escribe.** No lleva ninguna variable, así que el heredoc va con
+comillas:
+
+```bash
+# [servidor]
+sudo mkdir -p /etc/systemd/journald.conf.d
+sudo tee /etc/systemd/journald.conf.d/50-nomad.conf >/dev/null <<'EOF'
+[Journal]
+Storage=persistent
+SystemMaxUse=500M
+SystemKeepFree=1G
+SystemMaxFileSize=50M
+MaxRetentionSec=1month
+MaxFileSec=1week
+RateLimitIntervalSec=30s
+RateLimitBurst=10000
+ForwardToSyslog=no
+EOF
+```
+
+O con la plantilla:
+
+```bash
+# [servidor]
+nomad_diff etc/journald-nomad.conf /etc/systemd/journald.conf.d/50-nomad.conf
+nomad_plantilla etc/journald-nomad.conf \
+    | sudo tee /etc/systemd/journald.conf.d/50-nomad.conf >/dev/null
 ```
 
 ```bash
@@ -259,13 +396,25 @@ sudo journalctl --vacuum-size=500M
 
 ### Paso 4 — Parámetros del kernel
 
+El contenido completo está en `templates/etc/sysctl-nomad.conf`, con un comentario por parámetro
+explicando qué consigue. Instálalo así:
+
 ```bash
 # [servidor]
-sudo vim /etc/sysctl.d/60-nomad-endurecimiento.conf
+nomad_diff etc/sysctl-nomad.conf /etc/sysctl.d/60-nomad-endurecimiento.conf
+nomad_plantilla etc/sysctl-nomad.conf \
+    | sudo tee /etc/sysctl.d/60-nomad-endurecimiento.conf >/dev/null
 ```
 
-El contenido completo está en `templates/etc/sysctl-nomad.conf`. Repasa la sección 3.3 antes de
-añadir nada por tu cuenta: **no pongas `net.ipv4.ip_forward = 0`**.
+Repasa la sección 3.3 antes de añadir nada por tu cuenta: **no pongas
+`net.ipv4.ip_forward = 0`**. Si prefieres editarlo con un editor, la plantilla es exactamente el
+contenido que hay que copiar:
+
+```bash
+# [servidor]
+nomad_plantilla etc/sysctl-nomad.conf | less
+sudo ${EDITOR:-vim} /etc/sysctl.d/60-nomad-endurecimiento.conf
+```
 
 ```bash
 # [servidor]
@@ -329,6 +478,17 @@ sudo ss -tulpn | grep LISTEN
 
 Criterio de aceptación: **solo `sshd` en el puerto `${SSH_PUERTO}`**. Cualquier otra cosa merece una
 explicación.
+
+Comprobación automática, que es la que usa el script:
+
+```bash
+# [servidor]
+sudo ss -tulpn | grep LISTEN | grep -vc ":${SSH_PUERTO}\b"
+```
+
+Criterio de aceptación: `0`. Si el entorno no estuviera cargado, `${SSH_PUERTO}` se expandiría a
+nada y el `grep -v ":"` descartaría casi todo, dando un `0` falso. Comprueba antes con
+`echo "${SSH_PUERTO}"`.
 
 Lo que puede aparecer legítimamente:
 
@@ -394,6 +554,8 @@ Espera un minuto y valida con la sección 7.
 
 ## 6. Script asociado
 
+### 6.1 Vía A — con el script
+
 `scripts/07_hardening.sh` automatiza los pasos 1 a 7.
 
 ```bash
@@ -404,6 +566,12 @@ sudo ./scripts/07_hardening.sh --check
 sudo ./scripts/07_hardening.sh
 ```
 
+| Opción | Para qué |
+|---|---|
+| `--sin-auditoria` | Omite el paso 7 (Lynis), que es el que más tarda |
+| `-n, --check` | Muestra las diferencias de los cuatro archivos y ejecuta las comprobaciones de solo lectura |
+| `-y, --si` | No pide confirmación |
+
 Comportamiento destacable:
 
 - **Nunca fija `net.ipv4.ip_forward`**, y avisa si encuentra otro archivo en `/etc/sysctl.d/` que lo
@@ -413,13 +581,34 @@ Comportamiento destacable:
 - Genera la auditoría de Lynis en `inventario/lynis-<fecha>.dat` y muestra el índice.
 - Enumera lo que está escuchando en red y avisa de cualquier cosa que no sea SSH.
 
-```bash
-# [servidor] — omitir la auditoría, que es lo que más tarda
-sudo ./scripts/07_hardening.sh --sin-auditoria
-```
-
 En modo `--check` muestra las diferencias de los cuatro archivos de configuración y ejecuta las
 comprobaciones de solo lectura (AppArmor, puertos en escucha), sin aplicar nada.
+
+### 6.2 Correspondencia entre el script y los pasos manuales
+
+| Paso de la sección 5 | ¿Lo hace el script? | Nota |
+|---|---|---|
+| 0 — preparar la sesión | Sí | Comprueba red y cortafuegos antes de nada |
+| 1 — actualizaciones automáticas | Sí | Instala `templates/etc/unattended-upgrades.conf` y `apt-periodic.conf` |
+| 2 — prueba en seco | Sí | `unattended-upgrade --dry-run`, y avisa si no lista orígenes |
+| 3 — límites del registro | Sí | |
+| 4 — parámetros del kernel | Sí | Y **aborta si otro archivo pone `ip_forward` a 0** |
+| 5 — comprobar AppArmor | Sí | Lo instala si faltara |
+| 6 — revisar qué escucha | Sí | Avisa de cualquier cosa que no sea SSH |
+| 7 — auditoría de Lynis | Sí | Se omite con `--sin-auditoria` |
+| 8 — reinicio | **No** | Avisa si hace falta |
+
+### 6.3 Si prefieres la vía manual
+
+Lo que asumes:
+
+- [ ] Usar `<<'EOF'` **con comillas** en el archivo de `unattended-upgrades`, para no expandir
+      `${distro_codename}` (§ 4.2). Es el único error de este capítulo que no da ningún síntoma
+      hasta la siguiente subida de versión de Debian.
+- [ ] Comprobar con `grep -c distro_codename` que sigue literal.
+- [ ] Ejecutar `sudo unattended-upgrade --dry-run` y leer que aparecen los orígenes.
+- [ ] No añadir `net.ipv4.ip_forward = 0` a la configuración del kernel (§ 3.3).
+- [ ] Guardar el informe de Lynis con fecha, que es lo que da valor al paso 7.
 
 ---
 
@@ -480,6 +669,14 @@ ls ~/nomad_server/inventario/lynis-*.dat
 ```
 
 Criterio de aceptación: existe al menos un informe con fecha.
+
+```bash
+# [servidor] — la variable de APT sigue literal, no expandida
+grep -c 'distro_codename' /etc/apt/apt.conf.d/52-nomad-unattended
+```
+
+Criterio de aceptación: `2`. **Si es `0`, el servidor dejará de parchearse tras la siguiente subida
+de versión de Debian** y nada lo avisará (§ 4.2).
 
 ```bash
 # [servidor] — tras el reinicio, todo sigue en su sitio
@@ -543,6 +740,10 @@ dentro de un año.
 | Lynis sugiere decenas de cosas | Es normal: asume un servidor con servicios en el host | Revísalas una a una. No apliques nada que no entiendas | [Lynis — Controles](https://cisofy.com/lynis/controls/) |
 | El sistema no arranca tras un cambio de `sysctl` | Un parámetro incompatible con el hardware | Arranca en modo rescate y elimina `/etc/sysctl.d/60-nomad-endurecimiento.conf` | § 8 |
 | `apt` avisa de paquetes retenidos tras la actualización automática | `unattended-upgrades` no instala cambios que requieran eliminar paquetes | Revísalo a mano con `sudo apt full-upgrade` en la rutina del capítulo 15 | Capítulo [15](15_mantenimiento_y_actualizaciones.md) |
+| `Origins-Pattern` contiene `codename=-security`, sin nombre | Se escribió el archivo con `<<EOF` sin comillas y el shell expandió `${distro_codename}` a nada | Reescríbelo con `<<'EOF'` o con `nomad_plantilla` | § 4.2 |
+| Tras subir de versión mayor, dejaron de llegar parches | Alguien sustituyó `${distro_codename}` por `trixie` literal | Vuelve a poner la variable de APT | § 4.2 |
+| `ss -tulpn \| grep -v` da 0 pero sí hay puertos abiertos | `${SSH_PUERTO}` estaba vacío y el filtro descartó todo | `echo "${SSH_PUERTO}"` y carga el entorno | § 5 paso 6 |
+| `nomad_plantilla` dice que no encuentra la plantilla | El entorno no está cargado, o el nombre está mal | `source scripts/lib/entorno.sh`; sin argumentos lista las disponibles | Anexo [98](98_variables_y_entorno.md) § 4.3 |
 
 ---
 
@@ -556,6 +757,8 @@ dentro de un año.
 - [Documentación del kernel — Parámetros de red IP](https://docs.kernel.org/networking/ip-sysctl.html)
 - [Lynis — Documentación](https://cisofy.com/lynis/)
 - [Docker — Seguridad y AppArmor](https://docs.docker.com/engine/security/apparmor/)
+- [templates/README.md](../templates/README.md) — las cuatro plantillas de este capítulo
+- Anexo [98 — Variables, entorno y sesiones](98_variables_y_entorno.md) § 4.1 y § 4.4
 
 ---
 

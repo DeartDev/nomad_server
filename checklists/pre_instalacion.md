@@ -11,8 +11,14 @@
 ## Planificación (capítulo 00)
 
 - [ ] He leído entera la sección 3 del capítulo 00 y entiendo por qué el servidor no expone puertos
+- [ ] He decidido con qué vía voy a trabajar: con los scripts, a mano, o mezclando
+      ([97](../docs/97_vias_de_montaje.md))
 - [ ] `config/servidor.env` creado con `make init` y con permisos `600`
 - [ ] Todas las variables `[OBLIGATORIA]` tienen valor
+- [ ] `make variables` no muestra ninguna fila como `FALTA`
+- [ ] Entiendo que las filas `pendiente` son valores que se descubrirán durante el montaje, y sé
+      que hay que escribirlos con `./scripts/variables.sh --fijar` en cuanto aparezcan
+      ([98 § 2.2](../docs/98_variables_y_entorno.md))
 - [ ] `make check` termina sin errores
 - [ ] `${LAN_IP}` está reservada en el router para la MAC del servidor, o está fuera del rango DHCP
 - [ ] Cuenta de Tailscale creada, con verificación en dos pasos activada
@@ -40,8 +46,10 @@
 - [ ] Arquitectura `x86_64`, 2 núcleos o más
 - [ ] 4 GB de RAM como mínimo (8 GB recomendados)
 - [ ] Disco SSD identificado (`ROTA=0`)
-- [ ] `DISCO_DESTINO` anotado usando la ruta `/dev/disk/by-id/…`
-- [ ] Interfaz de red cableada identificada y anotada
+- [ ] `DISCO_DESTINO` **escrito en `config/servidor.env`** con la ruta `/dev/disk/by-id/…`
+      (`./scripts/variables.sh --fijar DISCO_DESTINO=…`)
+- [ ] `LAN_INTERFAZ` escrita igual, o dejada vacía a propósito para autodetección
+- [ ] `./scripts/variables.sh --ver DISCO_DESTINO` devuelve el valor correcto
 
 ### Salud
 
@@ -90,9 +98,28 @@
 
 ## Antes de pulsar «Instalar»
 
-- [ ] Tengo `config/servidor.env` abierto en **otro** dispositivo (el instalador no puede leerlo)
+- [ ] He generado la **chuleta de valores** del capítulo [03](../docs/03_instalacion_debian.md)
+      paso 0 y la tengo en otro dispositivo (el instalador no puede leer `config/servidor.env`)
+- [ ] Ningún campo de la chuleta sale vacío ni con `CAMBIAME`
 - [ ] Sé qué disco es el destino y puedo distinguirlo por tamaño y modelo
+- [ ] Tengo la contraseña del usuario administrador generada y en el gestor de contraseñas
 - [ ] Acepto que a partir de aquí el contenido del disco se pierde
+
+---
+
+## Después de instalar, lo primero
+
+No es parte de esta lista, pero conviene tenerlo presente: el capítulo
+[04](../docs/04_primer_arranque_y_base.md) paso 2 lleva el repositorio al servidor y establece el
+ritual que se repetirá en cada sesión a partir de entonces:
+
+```bash
+# [servidor]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+```
+
+La lista de ese ritual está en [reanudar_sesion.md](reanudar_sesion.md).
 
 ---
 

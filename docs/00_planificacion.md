@@ -29,6 +29,13 @@ capítulo 01 solo quede ejecutar, sin tener que detenerse a improvisar ninguna d
 **Lo que aún NO necesitas:** el dominio de internet. La infraestructura se monta completa con un
 dominio de ejemplo y solo hay que cambiar una variable cuando lo adquieras (capítulo 11).
 
+**Herramientas en tu equipo:** `git`, `make` y un cliente SSH. `shellcheck` y `lychee` son
+opcionales y solo los usa `make check`; `make herramientas` explica cómo instalarlos.
+
+**Preparar la sesión:** este capítulo se trabaja **en tu equipo**, no en el servidor, y no necesita
+cargar ningún entorno: todo lo que hace es rellenar `config/servidor.env`. A partir del capítulo 04
+sí habrá que hacerlo, y el propio capítulo lo recuerda al principio de su procedimiento.
+
 ---
 
 ## 3. Decisiones y por qué
@@ -279,19 +286,68 @@ Todas las decisiones anteriores se concretan en valores dentro de `config/servid
 `${VARIABLE}`.
 
 ```bash
+# [cliente]
 make init                    # copia la plantilla y le pone permisos 600
 $EDITOR config/servidor.env
 ```
+
+### 4.1 Tres clases de valor, y por qué importa distinguirlas
+
+No todas las variables se comportan igual. Confundirlas es la causa más frecuente de que el montaje
+se atasque al retomarlo días después.
+
+| Clase | Dónde vive | Cuándo se conoce | Sobrevive a un reinicio |
+|---|---|---|---|
+| **Decidida** | `config/servidor.env` | Aquí, en el capítulo 00 | Sí: está en un archivo |
+| **Descubierta** | `config/servidor.env`, **si la escribes** | A mitad del montaje | Solo si la escribes |
+| **Temporal de sesión** | Solo en tu terminal | En el paso donde se usa | **Nunca** |
+
+En este capítulo rellenas las **decididas**. Las **descubiertas** no se pueden saber todavía porque
+las genera el propio montaje o dependen del hardware real; cada capítulo indica cuándo aparecen y
+con qué comando persistirlas:
+
+| Variable | Se descubre en | Comando que la averigua |
+|---|---|---|
+| `DISCO_DESTINO` | Capítulo [02](02_validacion_equipo.md) | `ls -l /dev/disk/by-id/ \| grep -v part` |
+| `LAN_INTERFAZ` | Capítulo [06](06_red_y_firewall.md) | `ip -br link` |
+| `TS_IP` | Capítulo [08](08_tailscale.md) | `tailscale ip -4` |
+| `CF_TUNEL_ID` | Capítulo [11](11_cloudflared_y_dominio.md) | Lo imprime `cloudflared tunnel create` |
+| `RESTIC_USB_UUID` | Capítulo [14](14_respaldos_restic.md) | `sudo blkid /dev/sdX1` |
+| `RESTIC_PUSH_URL` | Capítulo [14](14_respaldos_restic.md) | La da Uptime Kuma al crear el monitor |
+
+Déjalas vacías por ahora. En cualquier momento puedes preguntar qué falta:
+
+```bash
+# [cliente]
+make faltan
+```
+
+Y cuando descubras un valor, escribirlo sin abrir el editor:
+
+```bash
+# [servidor]
+./scripts/variables.sh --fijar CF_TUNEL_ID=8a1b2c3d-4e5f-6789-abcd-ef0123456789
+```
+
+Las **temporales de sesión** (`ISO`, `USB`, `DISCO`, `PROYECTO`) no van en este archivo: la
+documentación las declara explícitamente en el paso donde hacen falta, con una línea de asignación
+visible, y hay que volver a declararlas si te desconectas.
+
+> El anexo [98 — Variables, entorno y sesiones](98_variables_y_entorno.md) desarrolla esto entero,
+> incluidas las trampas de `sudo`, de las comillas y de `envsubst`. Es la lectura complementaria de
+> este capítulo si vas a trabajar a mano.
+
+### 4.2 Inventario por grupos
 
 | Grupo | Variables | Cuándo se usan |
 |---|---|---|
 | Identidad | `SERVIDOR_HOSTNAME`, `SERVIDOR_DOMINIO_LOCAL`, `SERVIDOR_ZONA_HORARIA`, `SERVIDOR_LOCALE` | Capítulos 03, 04 |
 | Usuario | `ADMIN_USUARIO`, `ADMIN_SSH_CLAVE_PUBLICA` | Capítulos 03, 05 |
 | Red | `LAN_CIDR`, `LAN_IP`, `LAN_PREFIJO`, `LAN_GATEWAY`, `LAN_DNS`, `LAN_INTERFAZ`, `SSH_PUERTO` | Capítulos 05, 06 |
-| Tailscale | `TS_HOSTNAME`, `TS_CIDR`, `TS_INTERFAZ` | Capítulos 06, 08 |
-| Docker | `DOCKER_RED_PROXY`, `DOCKER_RED_PROXY_SUBRED`, `DATOS_RAIZ`, `DOCKER_LOG_MAX_SIZE`, `DOCKER_LOG_MAX_FILE` | Capítulos 09, 12 |
-| Publicación | `DOMINIO_PUBLICO`, `TRAEFIK_DASHBOARD_HOST`, `CF_TUNEL_NOMBRE`, `CF_CONFIG_DIR` | Capítulos 10, 11, 12 |
-| Respaldos | `RESTIC_USB_UUID`, `RESTIC_USB_MOUNT`, `RESTIC_REPO_LOCAL`, `RESTIC_REPO_REMOTO`, `RESTIC_PASSWORD_FILE`, `RESTIC_RETENCION_*`, `RESTIC_HORA` | Capítulo 14 |
+| Tailscale | `TS_HOSTNAME`, `TS_CIDR`, `TS_INTERFAZ`, `TS_IP` | Capítulos 06, 08, 10, 13 |
+| Docker | `DOCKER_RED_PROXY`, `DOCKER_RED_PROXY_SUBRED`, `DOCKER_RED_SOCKET`, `DOCKER_RED_SOCKET_SUBRED`, `DATOS_RAIZ`, `DOCKER_LOG_MAX_SIZE`, `DOCKER_LOG_MAX_FILE` | Capítulos 09, 10, 12, 13 |
+| Publicación | `DOMINIO_PUBLICO`, `TRAEFIK_DASHBOARD_HOST`, `TRAEFIK_BIND_INTERNA`, `TRAEFIK_PUERTO_INTERNA`, `CF_TUNEL_NOMBRE`, `CF_TUNEL_ID`, `CF_CONFIG_DIR` | Capítulos 10, 11, 12 |
+| Respaldos | `RESTIC_USB_UUID`, `RESTIC_USB_MOUNT`, `RESTIC_REPO_LOCAL`, `RESTIC_REPO_REMOTO`, `RESTIC_PASSWORD_FILE`, `RESTIC_RETENCION_*`, `RESTIC_HORA`, `RESTIC_PUSH_URL` | Capítulos 14, 16 |
 | Observabilidad | `DOZZLE_HOST`, `UPTIME_KUMA_HOST` | Capítulo 13 |
 | Instalación | `DISCO_DESTINO`, `DEBIAN_MIRROR`, `DEBIAN_SUITE` | Capítulos 01, 03 |
 
@@ -411,8 +467,37 @@ capítulo 14 y **no existe forma de recuperar los respaldos sin ella**.
 **Paso 8 — Valida el repositorio.**
 
 ```bash
+# [cliente]
 make check
 ```
+
+Criterio de aceptación: termina con `[OK] Todas las comprobaciones han pasado.`
+
+**Paso 9 — Comprueba qué variables quedan pendientes.**
+
+```bash
+# [cliente]
+make variables
+```
+
+Salida de ejemplo (recortada):
+
+```
+  VARIABLE                       VALOR ACTUAL                 ESTADO
+  ------------------------------ ---------------------------- ------
+  SERVIDOR_HOSTNAME              nomad                        ok
+  LAN_CIDR                       192.168.1.0/24               ok
+  LAN_INTERFAZ                   (sin valor)                  pendiente
+  CF_TUNEL_ID                    (sin valor)                  pendiente
+  DISCO_DESTINO                  /dev/disk/by-id/CAMBIAME     SIN CAMBIAR
+```
+
+Criterio de aceptación: nada aparece como `FALTA`. Los `pendiente` son normales: son los valores
+que se descubren durante el montaje (§ 4.1). `SIN CAMBIAR` en `DISCO_DESTINO` también es normal
+hasta terminar el capítulo [02](02_validacion_equipo.md).
+
+**Paso 10 — Decide con qué vía vas a trabajar** (§ 5.5) y **cuándo vas a parar** (§ 5.6).
+
 
 ### 5.4 Convenciones del repositorio
 
@@ -453,19 +538,125 @@ del sistema hacen una copia en `<archivo>.bak-<fecha>`.
 | `[AVISO]` | Algo merece tu atención, pero no detiene la ejecución |
 | `[ERROR]` | Falló; el script se detiene |
 
+### 5.5 Las dos vías: con scripts o a mano
+
+Cada capítulo de procedimiento se puede ejecutar de dos formas. Conviene elegir ahora, aunque se
+pueda cambiar de idea en cualquier momento.
+
+| | **Vía A — con los scripts** | **Vía B — a mano** |
+|---|---|---|
+| Cómo | Clonas el repositorio en el servidor y ejecutas `scripts/NN_*.sh` | Copias y pegas los comandos de la sección 5 de cada capítulo |
+| Tiempo total | 3–4 h | 9–12 h |
+| Qué aporta | Idempotencia, validación previa, copias de seguridad automáticas | Entender exactamente qué toca cada cosa |
+| Riesgo de saltarse un paso | Bajo | Alto: por eso existen las listas de `checklists/` |
+| ¿Hay que cargar variables? | **No**: cada script lee `config/servidor.env` | **Sí**, en cada sesión nueva |
+
+**La recomendación de este repositorio**: la primera vez, hacer a mano los capítulos que más
+enseñan —[05](05_usuarios_y_acceso_ssh.md), [06](06_red_y_firewall.md), [09](09_docker.md) y
+[10](10_traefik.md)— y usar los scripts para el resto. Como los scripts son idempotentes, se pueden
+ejecutar **después** de haber hecho los pasos a mano: informarán con `[=]` de todo lo que ya estaba
+bien y corregirán lo que quedara a medias. Ese uso, el script como verificador, es probablemente la
+mejor forma de aprovecharlos.
+
+El anexo [97 — Las dos vías de montaje](97_vias_de_montaje.md) contiene la secuencia completa de
+comandos de la vía A y la equivalencia manual de cada operación.
+
+> **Si eliges la vía B, hay un paso previo que no se puede saltar.** Tu terminal no conoce
+> `config/servidor.env`, así que al principio de cada sesión hay que cargarlo:
+>
+> ```bash
+> # [servidor]
+> cd ~/nomad_server
+> source scripts/lib/entorno.sh
+> ```
+>
+> Sin eso, un comando como `sudo hostnamectl set-hostname ${SERVIDOR_HOSTNAME}` se expande a nada.
+> El anexo [98](98_variables_y_entorno.md) lo explica en detalle, incluidas las trampas de `sudo` y
+> de las comillas.
+
+### 5.6 Trabajar por tandas
+
+El montaje son entre 9 y 12 horas, con varios reinicios de por medio. **No lo hagas de una
+sentada**: la fatiga causa más errores que la complejidad, y los capítulos 05 y 06 son
+precisamente los que peor perdonan un descuido.
+
+Lo que hay que saber para poder parar y volver:
+
+| Sobrevive a un reinicio | No sobrevive |
+|---|---|
+| Todo lo escrito en `/etc`, `/srv`, `/usr/local/bin` | Las variables cargadas en tu terminal |
+| `config/servidor.env` | Las variables temporales (`ISO`, `USB`, `DISCO`, `PROYECTO`) |
+| Servicios habilitados con `systemctl enable` | Las sesiones de `tmux` |
+| Contenedores con `restart: unless-stopped` | Los trabajos en segundo plano (`&`) |
+| Reglas de nftables cargadas por su servicio | La red de seguridad del capítulo 06 |
+
+**Buenos puntos para parar**, porque dejan el sistema coherente y verificado: al terminar los
+capítulos [03](03_instalacion_debian.md), [05](05_usuarios_y_acceso_ssh.md),
+[07](07_endurecimiento_del_sistema.md), [09](09_docker.md), [11](11_cloudflared_y_dominio.md) y
+[14](14_respaldos_restic.md).
+
+**Malos puntos**: a mitad del capítulo 05 con la contraseña ya desactivada pero sin haber probado la
+llave desde otra terminal; y a mitad del capítulo 06 con el cortafuegos aplicado pero la IP sin
+cambiar.
+
+Antes de parar, tres cosas:
+
+```bash
+# [servidor] — 1. persistir lo descubierto en esta tanda
+./scripts/variables.sh --faltan
+```
+
+```bash
+# [servidor] — 2. anotar dónde te quedaste
+mkdir -p ~/nomad_server/inventario
+printf '%s  capítulo %s — %s\n' "$(date +%F\ %H:%M)" "07" "hecho hasta el paso 5" \
+    >> ~/nomad_server/inventario/progreso.txt
+```
+
+```bash
+# [cliente] — 3. copiar el archivo de configuración fuera del servidor
+scp ${ADMIN_USUARIO}@${LAN_IP}:~/nomad_server/config/servidor.env ./config/servidor.env
+```
+
+Ese tercer paso importa más de lo que parece: **hasta terminar el capítulo 14 no hay respaldos
+automáticos**, así que esa copia es la única red de seguridad de todo lo que llevas configurado.
+
+La lista imprimible del ritual de empezar y terminar cada tanda está en
+[checklists/reanudar_sesion.md](../checklists/reanudar_sesion.md), y el detalle completo en el
+anexo [98](98_variables_y_entorno.md) § 5.
+
 ---
 
 ## 6. Script asociado
 
-Este capítulo no configura el servidor, así que solo intervienen los objetivos del `Makefile`:
+Este capítulo no configura el servidor, así que solo intervienen los objetivos del `Makefile` y el
+inspector de variables:
 
 | Comando | Qué hace |
 |---|---|
 | `make ayuda` | Lista los objetivos disponibles |
 | `make init` | Crea `config/servidor.env` desde la plantilla, con permisos 600 |
 | `make check` | Valida todo el repositorio: scripts, documentación, variables y secretos |
+| `make variables` | Tabla completa: qué variables están rellenas y cuáles no |
+| `make faltan` | Solo lo pendiente, con el capítulo y el comando que lo averigua |
+| `make entorno` | Recuerda cómo cargar las variables en una sesión interactiva |
 | `make indice` | Lista los capítulos en su orden de ejecución |
 | `make herramientas` | Explica cómo instalar las herramientas de validación opcionales |
+
+Y el script que se usará en todos los capítulos siguientes para persistir lo que se vaya
+descubriendo:
+
+```bash
+# [cliente o servidor]
+./scripts/variables.sh --help
+./scripts/variables.sh --estado                  # tabla completa
+./scripts/variables.sh --faltan                  # solo lo pendiente
+./scripts/variables.sh --fijar LAN_IP=10.0.0.50  # escribir un valor
+./scripts/variables.sh --ver DATOS_RAIZ          # consultar un valor
+```
+
+`--fijar` conserva el orden y los comentarios del archivo, deja una copia previa en
+`config/servidor.env.bak-<fecha>` y vuelve a poner los permisos en `600`.
 
 `make check` ejecuta `scripts/verificar_repositorio.sh`, que comprueba la sintaxis de los scripts,
 que todos los capítulos tengan las 10 secciones obligatorias, que ninguna `${VARIABLE}` usada en la
@@ -502,6 +693,16 @@ grep -B1 'OBLIGATORIA' config/servidor.env.example \
 ```
 
 Criterio de aceptación: no imprime nada.
+
+Lo mismo, con el inspector del repositorio y una salida más legible:
+
+```bash
+# [cliente]
+make variables
+```
+
+Criterio de aceptación: ninguna fila con estado `FALTA`. Las de estado `pendiente` corresponden a
+valores que se descubren más adelante (§ 4.1) y son correctas en este punto.
 
 Además, comprobación manual:
 
@@ -550,7 +751,12 @@ capítulo indica qué hay que deshacer a mano, si algo.
 
 | Síntoma | Causa probable | Solución | Documentación |
 |---|---|---|---|
-| Los scripts fallan con «Variables sin definir» | `config/servidor.env` no existe o quedaron variables vacías | `make init` y rellena las marcadas como `[OBLIGATORIA]` | Sección 4 de este capítulo |
+| Los scripts fallan con «Variables sin definir» | `config/servidor.env` no existe o quedaron variables vacías | `make init`, y después `make faltan` para ver qué queda | Sección 4 de este capítulo |
+| Los comandos que copio de la documentación fallan con argumentos vacíos | Estás en la vía B y no has cargado el entorno en esta terminal | `source scripts/lib/entorno.sh` y repite el comando | Anexo [98](98_variables_y_entorno.md) § 3 |
+| Se ha creado un directorio raro en la raíz del sistema | Una variable vacía dentro de una ruta: `${DATOS_RAIZ}/x` se convirtió en `/x` | Bórralo, carga el entorno y repite el paso | Anexo [98](98_variables_y_entorno.md) § 8 |
+| Cambié un valor en `config/servidor.env` y no se aplica | La terminal conserva el valor que cargó antes del cambio | Vuelve a hacer `source scripts/lib/entorno.sh` | Anexo [98](98_variables_y_entorno.md) § 6 |
+| Volví al día siguiente y no sé por dónde iba | No se anotó al parar | `tail inventario/progreso.txt`, `make faltan` y `./scripts/verificar_sistema.sh` | § 5.6 |
+| Un valor que descubrí ayer ha desaparecido | Se quedó solo en la memoria de aquella terminal | Vuelve a averiguarlo y persístelo con `--fijar` | § 4.1 |
 | El servidor cambia de IP a los pocos días | La IP elegida está dentro del rango DHCP y el router se la ha dado a otro equipo | Reserva la IP por MAC en el router, o elige una fuera del rango DHCP | Paso 4 |
 | `make check` avisa de que falta `shellcheck` | Es una dependencia opcional | `sudo apt install shellcheck`, o ignóralo: es un aviso, no un fallo | `make herramientas` |
 | No sé qué poner en `LAN_INTERFAZ` | Debian usa nombres predecibles (`enp3s0`, `eno1`), no `eth0`, y solo se ven desde el propio servidor | Déjala vacía: los scripts la detectan automáticamente. Se confirma en el capítulo 06 | [Predictable Network Interface Names](https://wiki.debian.org/NetworkInterfaceNames) |
@@ -591,6 +797,12 @@ capítulo indica qué hay que deshacer a mano, si algo.
 **restic**
 
 - [restic — Documentación](https://restic.readthedocs.io/)
+
+**Anexos de este repositorio**
+
+- [97 — Las dos vías de montaje](97_vias_de_montaje.md) — la secuencia completa con scripts y su equivalencia manual
+- [98 — Variables, entorno y sesiones](98_variables_y_entorno.md) — de dónde sale cada valor y cómo parar y retomar
+- [99 — Glosario y referencias](99_glosario_y_referencias.md) — términos que aparecen en los capítulos
 
 ---
 

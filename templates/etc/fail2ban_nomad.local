@@ -3,6 +3,22 @@
 #  Destino  : /etc/fail2ban/jail.d/nomad.local
 #  Generado por scripts/05_ssh.sh
 #  Capítulo : docs/05_usuarios_y_acceso_ssh.md § 3.7
+#
+#  CÓMO APLICARLA A MANO (equivalente a lo que hace el script)
+#
+#      cd ~/nomad_server
+#      source scripts/lib/entorno.sh
+#      nomad_diff etc/fail2ban_nomad.local /etc/fail2ban/jail.d/nomad.local
+#      sudo cp -a /etc/fail2ban/jail.d/nomad.local \
+#          /etc/fail2ban/jail.d/nomad.local.bak-$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
+#      nomad_plantilla etc/fail2ban_nomad.local \
+#          | sudo tee /etc/fail2ban/jail.d/nomad.local >/dev/null
+#      sudo chmod 644 /etc/fail2ban/jail.d/nomad.local
+#
+#  Y después, para que tenga efecto:
+#      sudo systemctl restart fail2ban
+#
+#  Detalle: templates/README.md y docs/98_variables_y_entorno.md § 4.3
 # ===========================================================================
 
 [DEFAULT]

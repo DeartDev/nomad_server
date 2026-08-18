@@ -7,6 +7,26 @@
 #  Este contenedor es el ÚNICO que recibe tráfico de internet, y lo recibe por
 #  una conexión que él mismo inicia hacia fuera. No publica ningún puerto: un
 #  escaneo a tu IP doméstica no encuentra absolutamente nada.
+#
+#  CÓMO APLICARLA A MANO (equivalente a lo que hace el script)
+#
+#      cd ~/nomad_server
+#      source scripts/lib/entorno.sh
+#      nomad_plantilla compose/cloudflared/docker-compose.yml \
+#          > ${CF_CONFIG_DIR}/docker-compose.yml
+#
+#  A diferencia de las plantillas de /etc, estos archivos pertenecen a tu
+#  usuario: NO se instalan con sudo. Si los escribes como root, después no
+#  podrás editarlos ni levantar el proyecto sin sudo.
+#
+#  Y después, para que tenga efecto:
+#      cd ${CF_CONFIG_DIR} && docker compose config && docker compose up -d
+#
+#  Comprueba antes de levantar nada que no ha quedado ninguna variable sin
+#  sustituir:
+#      grep -n '\${' ${CF_CONFIG_DIR}/docker-compose.yml && echo REVISAR || echo CORRECTO
+#
+#  Detalle: templates/README.md y docs/98_variables_y_entorno.md § 4.3
 # ===========================================================================
 
 services:

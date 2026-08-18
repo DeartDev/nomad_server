@@ -4,6 +4,22 @@
 #  Capítulo: docs/04_primer_arranque_y_base.md § 3.1
 #
 #  No lo edites aquí: edita config/servidor.env y vuelve a ejecutar el script.
+#
+#  CÓMO APLICARLA A MANO (equivalente a lo que hace el script)
+#
+#      cd ~/nomad_server
+#      source scripts/lib/entorno.sh
+#      nomad_diff etc/debian.sources /etc/apt/sources.list.d/debian.sources
+#      sudo cp -a /etc/apt/sources.list.d/debian.sources \
+#          /etc/apt/sources.list.d/debian.sources.bak-$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
+#      nomad_plantilla etc/debian.sources \
+#          | sudo tee /etc/apt/sources.list.d/debian.sources >/dev/null
+#      sudo chmod 644 /etc/apt/sources.list.d/debian.sources
+#
+#  Y después, para que tenga efecto:
+#      sudo apt update
+#
+#  Detalle: templates/README.md y docs/98_variables_y_entorno.md § 4.3
 # ===========================================================================
 
 # Versión estable y correcciones que no son de seguridad.

@@ -24,6 +24,22 @@ verificar los respaldos, así que tienen que existir.
 - Un recordatorio en el calendario. Es la parte que más se incumple, y el único requisito que no
   depende del servidor.
 
+**Preparar la sesión.** Igual que en todos los capítulos anteriores, y **también para las rutinas**:
+los comandos de mantenimiento usan `${DATOS_RAIZ}`, `${CF_CONFIG_DIR}`, `${RESTIC_USB_MOUNT}` y
+`${DOMINIO_PUBLICO}`.
+
+```bash
+# [servidor]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+```
+
+> **Meses después, este es el paso que se olvida.** Cuando vuelves al servidor tras semanas sin
+> tocarlo, lo natural es pegar directamente el comando de la rutina; y `df -h ${RESTIC_USB_MOUNT}`
+> con la variable vacía informa del disco raíz en lugar del de respaldo, sin dar ningún error.
+> Ponlo en el calendario junto con el recordatorio: *«entrar, `source scripts/lib/entorno.sh`,
+> rutina»*.
+
 **Tiempo estimado:** 15 minutos al mes en régimen normal.
 
 ---
@@ -110,12 +126,67 @@ mejor crecer que tener que encoger.
 
 ## 4. Variables usadas
 
-Este capítulo no consume variables nuevas. Los comandos usan las ya definidas: `${DATOS_RAIZ}`,
-`${RESTIC_REPO_LOCAL}`, `${DOMINIO_PUBLICO}`.
+### 4.1 De `config/servidor.env`
+
+Este capítulo no introduce ninguna variable nueva, pero sus rutinas usan varias de las existentes.
+Conviene tenerlo presente porque son comandos que se ejecutan meses después, en sesiones nuevas:
+
+| Variable | Dónde aparece en la rutina |
+|---|---|
+| `DATOS_RAIZ` | Actualizar Traefik, la observabilidad y los proyectos |
+| `CF_CONFIG_DIR` | Actualizar `cloudflared` |
+| `RESTIC_USB_MOUNT` | Comprobar el espacio del disco de respaldo (semanal) |
+| `RESTIC_REPO_LOCAL` | Verificar el repositorio (mensual y trimestral) |
+| `DOMINIO_PUBLICO` | Comprobar que un subdominio responde tras actualizar |
+| `DEBIAN_SUITE` | Subir de versión mayor (§ 5.4) |
+
+```bash
+# [servidor] — antes de cualquier rutina
+cd ~/nomad_server && source scripts/lib/entorno.sh
+```
+
+### 4.2 La única variable que este capítulo CAMBIA
+
+| Variable | Cuándo | Cómo |
+|---|---|---|
+| `DEBIAN_SUITE` | Al subir de versión mayor de Debian (cada 2–3 años) | `./scripts/variables.sh --fijar DEBIAN_SUITE=forky` |
+
+Cambiarla en `config/servidor.env` **no basta**: la suite aparece también en los tres archivos
+`.sources` del sistema (Debian, Docker y Tailscale), que hay que actualizar a la vez. El § 5.4 lo
+detalla.
+
+### 4.3 Variables temporales de las rutinas
+
+| Variable | Qué contiene | Dónde |
+|---|---|---|
+| `PROYECTO` | Proyecto que estás actualizando | § 5.2 paso 4 |
+| `DISCO` | Disco cuya salud estás comprobando | § 5.3 paso 3 |
+
+Las dos se declaran en el momento y desaparecen al cerrar la sesión, igual que en los capítulos
+[12](12_despliegue_de_proyectos.md) y [14](14_respaldos_restic.md).
 
 ---
 
 ## 5. Procedimiento
+
+### 5.0 El arranque de toda rutina
+
+Los tres bloques que siguen empiezan igual. Vale la pena memorizarlo o dejarlo en el recordatorio
+del calendario:
+
+```bash
+# [cliente]
+ssh nomad
+```
+
+```bash
+# [servidor]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+```
+
+El script `verificar_sistema.sh` **no lo necesita** —carga la configuración por su cuenta— pero los
+comandos manuales de las rutinas sí.
 
 ### 5.1 Rutina semanal — 2 minutos
 
@@ -290,11 +361,18 @@ Lee y descifra una muestra real: es lo único que detecta un disco degradándose
 **Paso 3 — Salud del hardware.**
 
 ```bash
-# [servidor]
-sudo smartctl -H /dev/sda
-sudo smartctl -A /dev/sda | grep -E 'Reallocated|Pending|Wear|Percent'
+# [servidor] — todos los discos, no solo el primero
+for DISCO in $(lsblk -dno PATH,TYPE | awk '$2=="disk"{print $1}'); do
+    echo "=== ${DISCO}"
+    sudo smartctl -H "${DISCO}" | grep -E 'result|SMART'
+    sudo smartctl -A "${DISCO}" | grep -E 'Reallocated|Pending|Wear|Percent|Power_On_Hours'
+done
 sensors 2>/dev/null || echo "(ejecuta sensors-detect si quieres temperaturas)"
 ```
+
+Criterio: `PASSED` en todos, y ningún sector reasignado **nuevo** respecto al trimestre anterior.
+Anota los valores: un `Reallocated_Sector_Ct` que sube de 0 a 4 no rompe nada hoy, pero es el aviso
+que da un disco antes de morirse.
 
 **Paso 4 — Comparar la auditoría de seguridad.**
 
@@ -412,8 +490,33 @@ sudo apt autoremove --purge
 ./scripts/verificar_sistema.sh
 ```
 
-Y actualiza `DEBIAN_SUITE` en `config/servidor.env`, además de los repositorios de Docker y
-Tailscale, que también llevan el nombre de la suite:
+```bash
+# [servidor] — 6. actualizar la suite en la configuración del repositorio
+cd ~/nomad_server
+./scripts/variables.sh --fijar DEBIAN_SUITE=forky
+source scripts/lib/entorno.sh
+echo "DEBIAN_SUITE=${DEBIAN_SUITE}"
+```
+
+Y con la variable ya cambiada, **vuelve a instalar los tres archivos de repositorio desde sus
+plantillas**, que es lo que garantiza que los tres queden coherentes:
+
+```bash
+# [servidor]
+nomad_diff etc/debian.sources    /etc/apt/sources.list.d/debian.sources
+nomad_diff etc/docker.sources    /etc/apt/sources.list.d/docker.sources
+nomad_diff etc/tailscale.sources /etc/apt/sources.list.d/tailscale.sources
+```
+
+```bash
+# [servidor]
+nomad_plantilla etc/debian.sources    | sudo tee /etc/apt/sources.list.d/debian.sources    >/dev/null
+nomad_plantilla etc/docker.sources    | sudo tee /etc/apt/sources.list.d/docker.sources    >/dev/null
+nomad_plantilla etc/tailscale.sources | sudo tee /etc/apt/sources.list.d/tailscale.sources >/dev/null
+sudo apt update
+```
+
+Alternativa rápida, si prefieres no tocar las plantillas:
 
 ```bash
 # [servidor]
@@ -422,9 +525,27 @@ sudo sed -i 's/trixie/forky/' /etc/apt/sources.list.d/tailscale.sources
 sudo apt update
 ```
 
+**Comprobación final de coherencia.** Es lo que evita el fallo silencioso de quedarse con un
+repositorio apuntando a la versión antigua:
+
+```bash
+# [servidor]
+grep -H '^Suites:' /etc/apt/sources.list.d/*.sources
+echo "esperado: ${DEBIAN_SUITE}"
+```
+
+Criterio de aceptación: los tres archivos mencionan la suite nueva. Un repositorio que se quede en
+`trixie` deja de recibir paquetes y `apt` lo dirá con un aviso fácil de pasar por alto.
+
+Recuerda también que `${distro_codename}` de `unattended-upgrades` **no hay que tocarla**: APT la
+resuelve sola a la suite nueva. Es justo el motivo por el que se dejó como variable (capítulo
+[07 § 4.2](07_endurecimiento_del_sistema.md)).
+
 ---
 
 ## 6. Script asociado
+
+### 6.1 Vía A — con los scripts
 
 `scripts/verificar_sistema.sh` recorre todas las comprobaciones de los capítulos 04 a 14 y da un
 veredicto único.
@@ -433,8 +554,20 @@ veredicto único.
 # [servidor]
 ./scripts/verificar_sistema.sh --help
 ./scripts/verificar_sistema.sh --rapido       # rutina semanal, 2 minutos
-./scripts/verificar_sistema.sh                # completo, para la rutina mensual
+sudo ./scripts/verificar_sistema.sh           # completo, para la rutina mensual
 ./scripts/verificar_sistema.sh --seccion red  # solo un bloque
+```
+
+Algunas comprobaciones necesitan privilegios (nftables, fail2ban, restic): para el informe completo,
+ejecútalo con `sudo`.
+
+Los otros dos scripts del día a día:
+
+```bash
+# [servidor]
+./scripts/deploy.sh --listar                  # estado de todos los proyectos
+sudo ./scripts/14_restic.sh --estado          # estado de los respaldos
+./scripts/variables.sh --estado               # ¿sigue la configuración como la dejaste?
 ```
 
 Comprueba, por bloques:
@@ -449,6 +582,28 @@ Comprueba, por bloques:
 | `respaldos` | Disco montado, temporizador, antigüedad de la última copia |
 
 No modifica nada: solo lee.
+
+### 6.2 Correspondencia entre el script y las rutinas manuales
+
+| Bloque de la rutina | ¿Lo cubre `verificar_sistema.sh`? | Lo que sigue siendo tuyo |
+|---|---|---|
+| Semanal, entera | **Sí**, con `--rapido` | Leer el resultado |
+| Mensual: comprobar el estado | Sí | — |
+| Mensual: **aplicar** actualizaciones | No | `apt full-upgrade`, `docker compose pull`, `deploy.sh` |
+| Mensual: limpiar Docker | No | `docker system prune -f` |
+| Mensual: verificar respaldos | Sí, lo comprueba; `14_restic.sh --verificar` lo ejecuta | — |
+| Trimestral: prueba de restauración | No | `sudo ./scripts/14_restic.sh --probar` |
+| Trimestral: hardware, Lynis, credenciales | Parcial | Comparar con el trimestre anterior |
+
+### 6.3 Si prefieres la vía manual
+
+Las rutinas de la sección 5 son la vía manual completa. Lo que asumes:
+
+- [ ] Cargar el entorno antes de empezar (§ 5.0), o los comandos con `${…}` no harán lo que dicen.
+- [ ] Respaldar **antes** de cualquier actualización que toque datos (§ 3.4).
+- [ ] Actualizar de una en una y comprobar entre medias (§ 3.3).
+- [ ] Revisar los volúmenes huérfanos antes de borrarlos (§ 3.5).
+- [ ] Anotar los valores de Lynis y de SMART para poder compararlos el trimestre siguiente.
 
 ---
 
@@ -488,6 +643,23 @@ grep '^hardening_index' ~/nomad_server/inventario/lynis-*.dat | tail -3
 ```
 
 Criterio de aceptación: la tendencia es estable o al alza.
+
+```bash
+# [servidor] — la configuración del repositorio sigue coincidiendo con la realidad
+cd ~/nomad_server && source scripts/lib/entorno.sh
+./scripts/variables.sh --estado | grep -E 'FALTA|SIN CAMBIAR' || echo "CORRECTO"
+```
+
+Criterio de aceptación: `CORRECTO`. Si algo aparece como pendiente meses después del montaje,
+significa que se cambió algo en el servidor sin reflejarlo en `config/servidor.env`, y la
+reconstrucción del capítulo [16](16_recuperacion_ante_desastres.md) fallaría por ahí.
+
+```bash
+# [servidor] — las tres suites coinciden
+grep -h '^Suites:' /etc/apt/sources.list.d/*.sources | sort -u
+```
+
+Criterio de aceptación: todas mencionan `${DEBIAN_SUITE}`.
 
 **Comprobaciones de calendario, que son las que fallan:**
 
@@ -553,6 +725,10 @@ respaldar **y probar la restauración**.
 | Tras subir de versión mayor, Docker o Tailscale no actualizan | Sus repositorios siguen apuntando a la suite antigua | Cambia la suite en sus `.sources` | § 5.4 |
 | El índice de Lynis ha bajado varios puntos | Algo se desactivó por el camino | `sudo lynis show suggestions` y compara con el informe anterior | Capítulo [07](07_endurecimiento_del_sistema.md) |
 | Llevo meses sin hacer la rutina | Sin recordatorio en el calendario | Ponlo ahora. Es el único requisito que no depende del servidor | § 7 |
+| `df -h ${RESTIC_USB_MOUNT}` informa del disco raíz | El entorno no estaba cargado y la variable se expandió a nada | `source scripts/lib/entorno.sh` antes de la rutina | § 5.0 |
+| Tras subir de versión, Docker o Tailscale no reciben paquetes | Sus `.sources` siguen con la suite antigua | Reinstala las tres plantillas con la nueva `DEBIAN_SUITE` | § 5.4 |
+| `config/servidor.env` ya no coincide con el servidor | Se hicieron cambios sin reflejarlos | `./scripts/variables.sh --estado` y corrige. La reconstrucción depende de ello | § 7 |
+| `cd ${DATOS_RAIZ}/traefik` no encuentra el directorio | Ídem: variable vacía | Ídem | § 5.0 |
 
 ---
 
@@ -565,6 +741,8 @@ respaldar **y probar la restauración**.
 - [Docker — Limpieza de recursos](https://docs.docker.com/engine/manage-resources/pruning/)
 - [restic — Trabajar con repositorios](https://restic.readthedocs.io/en/stable/045_working_with_repos.html)
 - [Traefik — Notas de publicación](https://github.com/traefik/traefik/releases)
+- [checklists/mantenimiento.md](../checklists/mantenimiento.md) — la versión imprimible de estas rutinas
+- Anexo [98 — Variables, entorno y sesiones](98_variables_y_entorno.md) § 5.3, el ritual al volver
 
 ---
 

@@ -7,11 +7,32 @@
 
 ---
 
+## Antes de empezar
+
+```bash
+# [servidor]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+```
+
+- [ ] El entorno está cargado en esta terminal (los comandos de abajo usan `${VARIABLES}`)
+
+```bash
+# [servidor]
+./scripts/variables.sh --faltan
+```
+
+- [ ] No falta ninguna variable. En particular, están escritas las seis que se descubren durante el
+      montaje: `DISCO_DESTINO`, `LAN_INTERFAZ`, `TS_IP`, `CF_TUNEL_ID`, `RESTIC_USB_UUID` y
+      `RESTIC_PUSH_URL`
+
+---
+
 ## Verificación automática
 
 ```bash
 # [servidor]
-./scripts/verificar_sistema.sh
+sudo ./scripts/verificar_sistema.sh
 ```
 
 - [ ] Termina sin fallos
@@ -70,6 +91,7 @@ saber **qué** se está comprobando y por qué.
 ## Tailscale (capítulo 08)
 
 - [ ] `tailscale status` → conectado
+- [ ] `./scripts/variables.sh --ver TS_IP` coincide con `tailscale ip -4`
 - [ ] `tailscale netcheck` → `UDP: true`
 - [ ] **La caducidad de clave está desactivada** en la consola de administración
 - [ ] MagicDNS activado
@@ -103,7 +125,8 @@ saber **qué** se está comprobando y por qué.
 - [ ] Un subdominio de prueba responde `HTTP/2 200` desde internet
 - [ ] Las cabeceras incluyen `server: cloudflare` y `x-frame-options: DENY`
 - [ ] El modo SSL/TLS de Cloudflare es **Full**
-- [ ] `ls -l ${CF_CONFIG_DIR}/*.json` → permisos `600`
+- [ ] `ls -l ${CF_CONFIG_DIR}/*.json` → permisos `600`, y el nombre lleva el UUID
+- [ ] `grep -c "${CF_TUNEL_ID}" ${CF_CONFIG_DIR}/config.yml` → `2`
 - [ ] Desde fuera: `nmap -Pn -p 80,443,22 <ip-publica>` → nada abierto
 - [ ] Las credenciales del túnel están copiadas en el gestor de contraseñas
 
@@ -137,6 +160,8 @@ saber **qué** se está comprobando y por qué.
 - [ ] `sudo systemctl start nomad-respaldo.service` → `success`
 - [ ] `restic check` → sin errores
 - [ ] El manifiesto del sistema está dentro del respaldo
+- [ ] `grep "${RESTIC_USB_UUID}" /etc/fstab | grep -c nofail` → `1`
+- [ ] `curl -fsS "${RESTIC_PUSH_URL}?status=up&msg=prueba"` entrega el aviso
 - [ ] **`sudo ./scripts/14_restic.sh --probar` → PRUEBA SUPERADA**
 - [ ] La contraseña del repositorio está en el gestor de contraseñas, **fuera del servidor**
 - [ ] Monitor de respaldo en Uptime Kuma en verde
@@ -158,12 +183,41 @@ terminado:
 
 ---
 
+## Coherencia de la configuración
+
+Lo que hace que la reconstrucción del capítulo [16](../docs/16_recuperacion_ante_desastres.md) sea
+posible es que `config/servidor.env` describa de verdad lo que hay montado:
+
+```bash
+# [servidor]
+./scripts/variables.sh --estado
+```
+
+- [ ] Ninguna fila como `FALTA` ni `SIN CAMBIAR`
+- [ ] Ningún archivo instalado ha quedado con variables sin sustituir:
+
+```bash
+# [servidor]
+sudo grep -rln '\${' /etc/nftables.conf /etc/ssh/sshd_config.d/ /etc/fail2ban/jail.d/ \
+    /etc/apt/sources.list.d/ ${DATOS_RAIZ}/traefik ${CF_CONFIG_DIR} 2>/dev/null \
+    && echo "REVISAR" || echo "CORRECTO"
+```
+
+- [ ] Devuelve `CORRECTO`
+
+---
+
 ## Preparación ante desastres
 
 Del capítulo [16](../docs/16_recuperacion_ante_desastres.md) § 2. Comprobar **ahora**, no cuando
 haga falta:
 
 - [ ] Contraseña del repositorio restic en el gestor de contraseñas, fuera del servidor
+- [ ] **Copia de `config/servidor.env` en tu equipo**, fuera del servidor
+      (`scp ${ADMIN_USUARIO}@${LAN_IP}:~/nomad_server/config/servidor.env ./config/`)
+- [ ] Los datos de rescate del capítulo [16 § 4.2](../docs/16_recuperacion_ante_desastres.md)
+      guardados en el gestor de contraseñas: UUID del disco, punto de montaje, ruta del repositorio
+      y nombre del servidor
 - [ ] Repositorio `nomad_server` en un remoto o en otro equipo
 - [ ] Llave privada SSH respaldada en otro sitio
 - [ ] Acceso a Cloudflare y a Tailscale desde otro dispositivo, con 2FA recuperable
@@ -172,4 +226,4 @@ haga falta:
 
 ---
 
-**Siguiente:** [Rutina de mantenimiento](mantenimiento.md)
+**Anterior:** [Empezar o retomar una sesión](reanudar_sesion.md) · **Siguiente:** [Rutina de mantenimiento](mantenimiento.md)

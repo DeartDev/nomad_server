@@ -31,7 +31,37 @@ bloqueará a quien insista.
 > la sesión abierta es lo que te permite deshacerlo. Esta regla se repite en cada paso porque es
 > el error que más veces obliga a bajar físicamente al servidor.
 
-**Tiempo estimado:** 30 minutos.
+**Preparar la sesión.** Este capítulo trabaja en **dos sitios a la vez**, y conviene tener claro
+cuál es cuál antes de empezar:
+
+| Dónde | Qué se hace allí | ¿Hay que cargar el entorno? |
+|---|---|---|
+| `# [cliente]` — tu equipo | Generar la llave, copiarla, configurar `~/.ssh/config`, y todas las comprobaciones de acceso | Sí, si quieres que los ejemplos con `${VARIABLE}` funcionen |
+| `# [servidor]` — sesión SSH abierta | Configurar `sshd` y `fail2ban` | Sí |
+| `# [servidor]` — **segunda** sesión SSH | Solo comprobar que se puede entrar | No hace falta |
+
+En el servidor:
+
+```bash
+# [servidor]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+```
+
+Y en tu equipo, desde la copia local del repositorio:
+
+```bash
+# [cliente]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+```
+
+> Cargarlo también en el cliente es lo que hace que comandos como
+> `ssh-copy-id -i ${ADMIN_SSH_CLAVE_PUBLICA} ${ADMIN_USUARIO}@${LAN_IP}` funcionen al pegarlos. Si
+> prefieres no hacerlo, sustituye los valores al escribir: el capítulo indica en cada caso cuáles
+> son.
+
+**Tiempo estimado:** 40 minutos.
 
 ---
 
@@ -144,17 +174,94 @@ mal la contraseña de `sudo` tres veces sería un final absurdo para este capít
 
 ## 4. Variables usadas
 
-| Variable | Uso |
-|---|---|
-| `ADMIN_USUARIO` | Único usuario autorizado en `AllowUsers` |
-| `ADMIN_SSH_CLAVE_PUBLICA` | Ruta a la llave pública en el equipo cliente |
-| `SSH_PUERTO` | Puerto de escucha |
-| `LAN_CIDR` | Red excluida de los bloqueos de fail2ban |
-| `TS_CIDR` | Rango de Tailscale, también excluido |
+### 4.1 De `config/servidor.env`
+
+| Variable | Uso | Dónde se usa |
+|---|---|---|
+| `ADMIN_USUARIO` | Único usuario autorizado en `AllowUsers` | Cliente y servidor |
+| `ADMIN_SSH_CLAVE_PUBLICA` | Ruta a la llave **pública** en el equipo cliente | Solo cliente |
+| `SSH_PUERTO` | Puerto de escucha de `sshd` y puerto vigilado por fail2ban | Servidor |
+| `LAN_CIDR` | Red excluida de los bloqueos de fail2ban | Servidor |
+| `TS_CIDR` | Rango de Tailscale, también excluido | Servidor |
+| `LAN_IP` | Dirección a la que conectarte, si el capítulo 06 ya está hecho | Cliente |
+
+Cargar el entorno, en las dos máquinas:
+
+```bash
+# [cliente] y [servidor]
+cd ~/nomad_server && source scripts/lib/entorno.sh
+```
+
+Comprobación:
+
+```bash
+# [servidor]
+echo "usuario=${ADMIN_USUARIO} puerto=${SSH_PUERTO} lan=${LAN_CIDR} ts=${TS_CIDR}"
+```
+
+Salida esperada, con los valores de ejemplo:
+
+```
+usuario=deart puerto=22 lan=192.168.1.0/24 ts=100.64.0.0/10
+```
+
+> **Si alguno sale vacío, para aquí.** Este capítulo escribe la configuración que decide quién puede
+> entrar al servidor: un `AllowUsers` vacío o un `ignoreip` incompleto te dejan fuera. Es el
+> capítulo donde una variable sin cargar tiene el peor desenlace posible.
+
+### 4.2 Variables temporales de esta sesión
+
+| Variable | Qué contiene | Se usa en |
+|---|---|---|
+| `<ip-del-servidor>` | La IP actual del servidor | Pasos 2 y 3, hasta que exista `~/.ssh/config` |
+
+A partir del paso 4 el servidor se llamará simplemente `nomad` gracias a `~/.ssh/config`, y a partir
+del capítulo [06](06_red_y_firewall.md) su dirección será `${LAN_IP}`, fija.
+
+### 4.3 Lo que NO va en `config/servidor.env`
+
+- **La llave privada** (`~/.ssh/id_ed25519_nomad`). Nunca sale de tu equipo y nunca se referencia
+  desde la configuración: solo se declara su ruta en `~/.ssh/config`.
+- **La frase de paso de la llave.** Va en tu gestor de contraseñas y en ningún otro sitio.
+- **La contraseña del usuario.** Ídem.
 
 ---
 
 ## 5. Procedimiento
+
+### Paso 0 — Prepara las dos sesiones
+
+**Terminal 1 — tu equipo.** Aquí se genera la llave y se hacen todas las comprobaciones de acceso:
+
+```bash
+# [cliente]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+echo "usuario=${ADMIN_USUARIO} clave=${ADMIN_SSH_CLAVE_PUBLICA} puerto=${SSH_PUERTO}"
+```
+
+**Terminal 2 — sesión SSH abierta al servidor.** Es la que aplica los cambios, y **no se cierra
+hasta el final**:
+
+```bash
+# [cliente]
+ssh <usuario>@<ip-del-servidor>
+```
+
+```bash
+# [servidor]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+echo "usuario=${ADMIN_USUARIO} puerto=${SSH_PUERTO} lan=${LAN_CIDR}"
+```
+
+**Terminal 3 — libre.** No abras nada todavía: es la que usarás en los pasos 3 y 8 para comprobar
+que el acceso nuevo funciona **antes** de cerrar la terminal 2. Si solo tienes una ventana, abre
+otra pestaña ahora; improvisarla a mitad del paso 8 es cómo se acaba bajando al servidor.
+
+> **Comprobación previa que evita el peor resultado de este capítulo.** El paso 5 desactiva el
+> acceso por contraseña. Si en ese momento `${ADMIN_USUARIO}` estuviera vacío, `AllowUsers` quedaría
+> sin usuario y **nadie** podría entrar. Los dos `echo` de arriba están precisamente para eso.
 
 ### Paso 1 — Genera la llave en tu equipo
 
@@ -162,7 +269,15 @@ mal la contraseña de `sudo` tres veces sería un final absurdo para este capít
 
 ```bash
 # [cliente]
-ssh-keygen -t ed25519 -C "${ADMIN_USUARIO}@nomad" -f ~/.ssh/id_ed25519_nomad
+ssh-keygen -t ed25519 -C "${ADMIN_USUARIO}@${SERVIDOR_HOSTNAME}" -f ~/.ssh/id_ed25519_nomad
+```
+
+La ruta `~/.ssh/id_ed25519_nomad` debe coincidir con lo que tengas en `ADMIN_SSH_CLAVE_PUBLICA`
+(quitándole el `.pub`). Si elegiste otro nombre, ajústalo aquí y en `config/servidor.env`:
+
+```bash
+# [cliente]
+./scripts/variables.sh --ver ADMIN_SSH_CLAVE_PUBLICA
 ```
 
 Cuando pida la frase de paso, escribe una larga y guárdala en tu gestor de contraseñas.
@@ -189,7 +304,7 @@ que está instalada es la tuya.
 
 ```bash
 # [cliente]
-ssh-copy-id -i ~/.ssh/id_ed25519_nomad.pub ${ADMIN_USUARIO}@<ip-del-servidor>
+ssh-copy-id -i ${ADMIN_SSH_CLAVE_PUBLICA} ${ADMIN_USUARIO}@<ip-del-servidor>
 ```
 
 Pedirá la contraseña del usuario: es la última vez que la usas para entrar.
@@ -198,16 +313,32 @@ Si `ssh-copy-id` no está disponible (macOS antiguo, Windows), hazlo a mano:
 
 ```bash
 # [cliente]
-cat ~/.ssh/id_ed25519_nomad.pub | ssh ${ADMIN_USUARIO}@<ip-del-servidor> \
+cat ${ADMIN_SSH_CLAVE_PUBLICA} | ssh ${ADMIN_USUARIO}@<ip-del-servidor> \
   "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
 ```
+
+> Fíjate en que las comillas del segundo comando son **dobles**: `${ADMIN_USUARIO}` lo expande tu
+> shell local antes de conectarse, y lo que viaja al servidor es el comando ya resuelto. Con comillas
+> simples no funcionaría, porque el shell del servidor no conoce esa variable
+> (anexo [98 § 4.1](98_variables_y_entorno.md)).
+
+Comprueba en el servidor que la llave ha llegado:
+
+```bash
+# [servidor] — terminal 2
+wc -l ~/.ssh/authorized_keys
+ssh-keygen -lf ~/.ssh/authorized_keys
+```
+
+Criterio de aceptación: hay al menos una línea y la huella coincide con la que anotaste en el
+paso 1.
 
 ### Paso 3 — Comprueba que la llave funciona ANTES de tocar nada
 
 Este paso es el que evita el desastre. **No sigas si falla.**
 
 ```bash
-# [cliente] — en una terminal NUEVA
+# [cliente] — terminal 3, la que dejaste libre en el paso 0
 ssh -i ~/.ssh/id_ed25519_nomad ${ADMIN_USUARIO}@<ip-del-servidor>
 ```
 
@@ -224,10 +355,7 @@ ssh -vv -i ~/.ssh/id_ed25519_nomad ${ADMIN_USUARIO}@<ip-del-servidor> 2>&1 | gre
 
 ### Paso 4 — Configura el cliente para no repetir la ruta
 
-```bash
-# [cliente]
-vim ~/.ssh/config
-```
+**Así queda el bloque** (con los valores de ejemplo):
 
 ```
 Host nomad
@@ -240,13 +368,41 @@ Host nomad
     ServerAliveCountMax 3
 ```
 
+**Y este es el comando que lo añade con tus valores**, sin borrar lo que ya tuvieras en el archivo:
+
 ```bash
 # [cliente]
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+cat >> ~/.ssh/config <<EOF
+
+Host ${SERVIDOR_HOSTNAME}
+    HostName ${LAN_IP}
+    User ${ADMIN_USUARIO}
+    Port ${SSH_PUERTO}
+    IdentityFile ${ADMIN_SSH_CLAVE_PUBLICA%.pub}
+    IdentitiesOnly yes
+    ServerAliveInterval 60
+    ServerAliveCountMax 3
+EOF
 chmod 600 ~/.ssh/config
-ssh nomad
 ```
 
-Sustituye los valores por los tuyos (`${LAN_IP}`, `${ADMIN_USUARIO}`, `${SSH_PUERTO}`).
+`${ADMIN_SSH_CLAVE_PUBLICA%.pub}` le quita el sufijo `.pub` a la ruta de la llave pública, que es
+justo la ruta de la privada. Es una expansión de bash, no una variable distinta.
+
+> **Ojo con la dirección.** Si todavía no has hecho el capítulo [06](06_red_y_firewall.md), el
+> servidor puede no estar aún en `${LAN_IP}`: usa la IP actual y corrígela después. El paso 8 del
+> capítulo 06 recuerda actualizar este archivo.
+
+Comprueba el resultado:
+
+```bash
+# [cliente]
+ssh -G ${SERVIDOR_HOSTNAME} | grep -E '^(hostname|user|port|identityfile)'
+ssh ${SERVIDOR_HOSTNAME}
+```
+
+Criterio de aceptación: `ssh -G` muestra tus valores reales y la conexión entra con la llave.
 
 Qué aporta cada opción:
 
@@ -258,23 +414,32 @@ Qué aporta cada opción:
 
 ### Paso 5 — Endurece el servidor
 
-**Deja abierta la sesión actual.** Todo lo que sigue se hace desde ella.
+**Deja abierta la sesión actual (terminal 2).** Todo lo que sigue se hace desde ella.
+
+Antes de escribir nada, una comprobación que puede ahorrarte un viaje al servidor:
 
 ```bash
-# [servidor]
-sudo vim /etc/ssh/sshd_config.d/50-nomad.conf
+# [servidor] — terminal 2
+[ -s ~/.ssh/authorized_keys ] && [ -n "${ADMIN_USUARIO}" ] \
+  && echo "SEGURO PARA CONTINUAR" \
+  || echo "PARA: falta la llave instalada o la variable ADMIN_USUARIO"
 ```
+
+Criterio de aceptación: `SEGURO PARA CONTINUAR`. Es la misma salvaguarda que hace el script antes de
+tocar nada.
+
+**Así queda el archivo** (con los valores de ejemplo):
 
 ```
 # Autenticación: solo llaves
 PubkeyAuthentication yes
 PasswordAuthentication no
 KbdInteractiveAuthentication no
-ChallengeResponseAuthentication no
 PermitEmptyPasswords no
 UsePAM yes
 
 # Acceso
+Port 22
 PermitRootLogin no
 AllowUsers deart
 MaxAuthTries 3
@@ -295,7 +460,60 @@ ClientAliveCountMax 2
 LogLevel VERBOSE
 ```
 
-Sustituye `deart` por `${ADMIN_USUARIO}`.
+**Y este es el comando que lo escribe con tus valores:**
+
+```bash
+# [servidor]
+sudo tee /etc/ssh/sshd_config.d/50-nomad.conf >/dev/null <<EOF
+# Autenticación: solo llaves
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+UsePAM yes
+
+# Acceso
+Port ${SSH_PUERTO}
+PermitRootLogin no
+AllowUsers ${ADMIN_USUARIO}
+MaxAuthTries 3
+MaxSessions 5
+LoginGraceTime 30
+
+# Funciones que no se usan
+X11Forwarding no
+AllowAgentForwarding no
+PermitTunnel no
+PrintMotd no
+
+# Sesiones colgadas
+ClientAliveInterval 300
+ClientAliveCountMax 2
+
+# Registro suficiente para que fail2ban vea los intentos
+LogLevel VERBOSE
+EOF
+```
+
+O, con la plantilla del repositorio, que lleva además los comentarios que explican cada bloque:
+
+```bash
+# [servidor]
+nomad_plantilla etc/sshd_50-nomad.conf | sudo tee /etc/ssh/sshd_config.d/50-nomad.conf >/dev/null
+```
+
+**Comprueba de inmediato que no ha quedado ninguna variable sin sustituir.** Es la comprobación más
+importante del capítulo:
+
+```bash
+# [servidor]
+grep -nE '\$\{|AllowUsers *$' /etc/ssh/sshd_config.d/50-nomad.conf \
+  && echo "PARA: hay variables sin sustituir o AllowUsers vacío" \
+  || echo "CORRECTO"
+```
+
+Criterio de aceptación: `CORRECTO`. Si sale el aviso, **no reinicies `sshd`**: corrige el archivo
+primero. Un `AllowUsers` sin usuario rechaza a todo el mundo.
 
 Sobre dos opciones que conviene entender antes de copiarlas:
 
@@ -380,8 +598,9 @@ se aplicó: repite el paso 7.
 ```bash
 # [servidor]
 sudo apt install -y fail2ban
-sudo vim /etc/fail2ban/jail.d/nomad.local
 ```
+
+**Así queda el archivo** (con los valores de ejemplo):
 
 ```
 [DEFAULT]
@@ -404,7 +623,50 @@ enabled = true
 port    = 22
 ```
 
-Sustituye la red por `${LAN_CIDR}` y el puerto por `${SSH_PUERTO}`.
+**Y este es el comando que lo escribe con tus valores:**
+
+```bash
+# [servidor]
+sudo mkdir -p /etc/fail2ban/jail.d
+sudo tee /etc/fail2ban/jail.d/nomad.local >/dev/null <<EOF
+[DEFAULT]
+# Nunca bloquear a los equipos de la red local ni a los de la tailnet
+ignoreip = 127.0.0.1/8 ::1 ${LAN_CIDR} ${TS_CIDR}
+
+bantime  = 1h
+findtime = 10m
+maxretry = 5
+
+# Debian 13 mínimo no instala rsyslog: los registros están solo en journald
+backend = systemd
+
+# El cortafuegos de este servidor es nftables (capítulo 06)
+banaction = nftables-multiport
+banaction_allports = nftables-allports
+
+[sshd]
+enabled = true
+port    = ${SSH_PUERTO}
+EOF
+```
+
+O con la plantilla:
+
+```bash
+# [servidor]
+nomad_plantilla etc/fail2ban_nomad.local | sudo tee /etc/fail2ban/jail.d/nomad.local >/dev/null
+```
+
+**Comprueba que `ignoreip` incluye tu red antes de arrancar el servicio.** Si quedara vacío,
+fail2ban podría bloquearte por teclear mal una contraseña:
+
+```bash
+# [servidor]
+grep '^ignoreip' /etc/fail2ban/jail.d/nomad.local
+```
+
+Criterio de aceptación: la línea incluye tu rango real (`192.168.1.0/24` o el que sea), no
+`${LAN_CIDR}` literal ni un hueco.
 
 ```bash
 # [servidor]
@@ -449,15 +711,27 @@ Si entras, el servidor es autónomo.
 
 ## 6. Script asociado
 
+### 6.1 Vía A — con el script
+
 `scripts/05_ssh.sh` automatiza los pasos 5 a 9.
 
 ```bash
-# [servidor]
+# [servidor] — terminal 2, la que NO se cierra
 cd ~/nomad_server
 ./scripts/05_ssh.sh --help
 sudo ./scripts/05_ssh.sh --check
 sudo ./scripts/05_ssh.sh
 ```
+
+No hace falta cargar el entorno: el script lee `config/servidor.env` por su cuenta. Sí hacen falta,
+en cambio, los pasos 1 a 3 hechos a mano desde tu equipo: sin una llave instalada el script se
+niega a continuar.
+
+| Opción | Para qué |
+|---|---|
+| `--sin-fail2ban` | Omite el paso 9 |
+| `-n, --check` | Muestra el contenido exacto que escribiría y las diferencias |
+| `-y, --si` | No pide confirmación |
 
 El script incorpora las salvaguardas del capítulo:
 
@@ -472,8 +746,34 @@ En modo `--check` muestra el contenido exacto que escribiría en
 `/etc/ssh/sshd_config.d/50-nomad.conf` y en la configuración de fail2ban, y las diferencias respecto
 a lo que hay.
 
-Lo que **no** hace: generar la llave ni copiarla (pasos 1 y 2). Eso ocurre en tu equipo, no en el
-servidor.
+### 6.2 Correspondencia entre el script y los pasos manuales
+
+| Paso de la sección 5 | ¿Lo hace el script? | Nota |
+|---|---|---|
+| 0 — preparar las tres terminales | No | Es tuyo, y es lo que evita quedarte fuera |
+| 1 — generar la llave | **No** | Ocurre en tu equipo, no en el servidor |
+| 2 — copiar la llave | **No** | Ídem. El script comprueba que ya está |
+| 3 — probar la llave antes de endurecer | **No** | Requiere una segunda terminal que el script no controla |
+| 4 — `~/.ssh/config` del cliente | **No** | Es tu equipo |
+| 5 — `sshd_config.d/50-nomad.conf` | Sí | Instala `templates/etc/sshd_50-nomad.conf` |
+| 6 — `ssh.service` en lugar de `ssh.socket` | Sí | |
+| 7 — validar con `sshd -t` | Sí | Y restaura la copia previa si falla |
+| 8 — aplicar y comprobar desde otra terminal | Parcial: aplica; **comprobar es tuyo** | Usa `restart`, que no corta las sesiones abiertas |
+| 9 — fail2ban | Sí | Se omite con `--sin-fail2ban` |
+| 10 — reinicio y retirada del monitor | **No** | |
+
+### 6.3 Si prefieres la vía manual
+
+Los pasos 5 a 9 producen lo mismo. Lo que asumes:
+
+- [ ] Comprobar que hay una llave en `~/.ssh/authorized_keys` **antes** de desactivar la contraseña.
+- [ ] Comprobar que el archivo escrito no tiene `${…}` sin sustituir ni `AllowUsers` vacío.
+- [ ] Ejecutar `sudo sshd -t` **antes** de reiniciar el servicio.
+- [ ] Usar `restart` y no `stop`+`start`, para no cortar tu propia sesión.
+- [ ] Comprobar el acceso desde la terminal 3 antes de cerrar la terminal 2.
+
+**Lo que ningún camino hace por ti**: los pasos 1 a 4 y el 10. La llave se genera en tu equipo, y la
+comprobación desde una segunda terminal es una decisión humana.
 
 ---
 
@@ -544,6 +844,22 @@ ssh-keygen -lf ~/.ssh/authorized_keys
 
 Criterio de aceptación: coincide con la huella anotada en el paso 1.
 
+```bash
+# [servidor] — ninguna variable ha quedado sin sustituir en la configuración escrita
+sudo grep -rn '\${' /etc/ssh/sshd_config.d/ /etc/fail2ban/jail.d/ 2>/dev/null \
+    && echo "REVISAR" || echo "CORRECTO"
+```
+
+Criterio de aceptación: `CORRECTO`.
+
+```bash
+# [servidor] — el usuario autorizado es el correcto, no una cadena vacía
+sudo sshd -T | grep '^allowusers'
+```
+
+Criterio de aceptación: aparece tu usuario. Si la línea no aparece o sale vacía, **corrígelo antes
+de cerrar la sesión abierta**.
+
 **Prueba final:** reinicia el servidor y comprueba que puedes entrar con la llave sin intervención
 manual.
 
@@ -606,6 +922,11 @@ sudo systemctl enable --now ssh.socket
 | `WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED` | Se reinstaló el servidor y cambiaron sus claves de host | Si el cambio es esperado: `ssh-keygen -R <ip>`. **Si no lo esperabas, investígalo** | [OpenSSH — known_hosts](https://man.openbsd.org/ssh#SSH_KNOWN_HOSTS_FILE_FORMAT) |
 | Al reiniciar, `ssh` no arranca | `ListenAddress` apunta a una interfaz que aún no existe | No uses `ListenAddress`: el control de acceso lo hace el cortafuegos (§ 3.4) | Capítulo [06](06_red_y_firewall.md) |
 | Olvidé la frase de paso de la llave | No hay forma de recuperarla | Genera una llave nueva y vuelve a los pasos 1–3 desde una sesión abierta | — |
+| Nadie puede entrar tras aplicar el paso 5 | `AllowUsers` quedó vacío porque el entorno no estaba cargado | Consola física: `sudo mv /etc/ssh/sshd_config.d/50-nomad.conf /root/` y `sudo systemctl restart ssh` | § 5 paso 5 |
+| El archivo de `sshd_config.d` contiene `${ADMIN_USUARIO}` literal | Se usó `<<'EOF'` con comillas | Reescríbelo con `<<EOF` sin comillas, o con `nomad_plantilla` | Anexo [98](98_variables_y_entorno.md) § 4.1 |
+| fail2ban me bloqueó pese al `ignoreip` | La línea quedó con `${LAN_CIDR}` literal o vacía | `sudo fail2ban-client set sshd unbanip <ip>` y corrige el archivo | § 5 paso 9 |
+| `ssh-copy-id` copia la llave a un usuario equivocado | `${ADMIN_USUARIO}` vacío en el cliente | Carga el entorno también en tu equipo (§ 4.1) | Anexo [98](98_variables_y_entorno.md) |
+| Tras reiniciar el servidor, `ssh nomad` va a la IP antigua | `~/.ssh/config` se escribió antes del capítulo 06 | Actualiza `HostName` con `${LAN_IP}` | Capítulo [06](06_red_y_firewall.md) § 5 paso 8 |
 
 ---
 
@@ -618,6 +939,7 @@ sudo systemctl enable --now ssh.socket
 - [fail2ban — Wiki](https://github.com/fail2ban/fail2ban/wiki)
 - [Debian — Notas de publicación de Trixie](https://www.debian.org/releases/trixie/releasenotes)
 - [Mozilla — Guía de configuración de OpenSSH](https://infosec.mozilla.org/guidelines/openssh)
+- Anexo [98 — Variables, entorno y sesiones](98_variables_y_entorno.md) § 4.1, sobre las comillas de los heredocs
 
 ---
 

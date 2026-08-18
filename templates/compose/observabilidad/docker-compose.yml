@@ -8,6 +8,26 @@
 #  Traefik, que está atado a una dirección privada. No existe ningún registro
 #  DNS público que lleve hasta aquí, y el middleware 'interno@file' añade una
 #  segunda barrera por dirección de origen.
+#
+#  CÓMO APLICARLA A MANO (equivalente a lo que hace el script)
+#
+#      cd ~/nomad_server
+#      source scripts/lib/entorno.sh
+#      nomad_plantilla compose/observabilidad/docker-compose.yml \
+#          > ${DATOS_RAIZ}/observabilidad/docker-compose.yml
+#
+#  A diferencia de las plantillas de /etc, estos archivos pertenecen a tu
+#  usuario: NO se instalan con sudo. Si los escribes como root, después no
+#  podrás editarlos ni levantar el proyecto sin sudo.
+#
+#  Y después, para que tenga efecto:
+#      cd ${DATOS_RAIZ}/observabilidad && docker compose config && docker compose up -d
+#
+#  Comprueba antes de levantar nada que no ha quedado ninguna variable sin
+#  sustituir:
+#      grep -n '\${' ${DATOS_RAIZ}/observabilidad/docker-compose.yml && echo REVISAR || echo CORRECTO
+#
+#  Detalle: templates/README.md y docs/98_variables_y_entorno.md § 4.3
 # ===========================================================================
 
 services:

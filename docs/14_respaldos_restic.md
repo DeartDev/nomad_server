@@ -30,7 +30,32 @@ al menos un proyecto desplegado para que haya algo real que respaldar.
 > Sin ella, el repositorio es matemáticamente irrecuperable. No hay recuperación de contraseña, no
 > hay puerta trasera, no hay soporte al que llamar.
 
-**Tiempo estimado:** 1 hora, incluida la prueba de restauración.
+**Preparar la sesión.**
+
+```bash
+# [servidor]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+echo "montaje=${RESTIC_USB_MOUNT} repo=${RESTIC_REPO_LOCAL} clave=${RESTIC_PASSWORD_FILE}"
+echo "uuid=${RESTIC_USB_UUID:-(pendiente, paso 1)} hora=${RESTIC_HORA}"
+```
+
+Salida esperada al empezar, con los valores de ejemplo:
+
+```
+montaje=/mnt/respaldo repo=/mnt/respaldo/restic/nomad clave=/root/.restic-password
+uuid=(pendiente, paso 1) hora=03:30
+```
+
+Fíjate en que `RESTIC_REPO_LOCAL` se compone a partir de `RESTIC_USB_MOUNT` y
+`SERVIDOR_HOSTNAME`: si alguna de las dos estuviera vacía, la ruta del repositorio saldría
+malformada y `restic init` crearía el repositorio en un sitio equivocado.
+
+**Este capítulo produce dos valores que hay que persistir**: `RESTIC_USB_UUID` (paso 1) y
+`RESTIC_PUSH_URL` (paso 8). Sin el primero, el disco no se monta al arrancar y el respaldo nocturno
+falla en silencio; sin el segundo, nadie te avisa de que ha fallado.
+
+**Tiempo estimado:** 1 hora y media, incluida la prueba de restauración.
 
 ---
 
@@ -162,21 +187,75 @@ fuerte.
 
 ## 4. Variables usadas
 
-| Variable | Uso |
-|---|---|
-| `RESTIC_USB_UUID` | UUID del sistema de archivos del disco de respaldo |
-| `RESTIC_USB_MOUNT` | Punto de montaje |
-| `RESTIC_REPO_LOCAL` | Ruta del repositorio en el disco |
-| `RESTIC_REPO_REMOTO` | Repositorio remoto opcional |
-| `RESTIC_PASSWORD_FILE` | Archivo con la contraseña, en el servidor |
-| `RESTIC_RETENCION_DIARIOS`, `_SEMANALES`, `_MENSUALES` | Política de retención |
-| `RESTIC_HORA` | Hora del respaldo diario |
-| `RESTIC_PUSH_URL` | Aviso a Uptime Kuma |
-| `DATOS_RAIZ`, `ADMIN_USUARIO`, `SERVIDOR_HOSTNAME` | Qué y desde dónde se respalda |
+### 4.1 De `config/servidor.env`
+
+| Variable | Uso | Dónde acaba |
+|---|---|---|
+| `RESTIC_USB_MOUNT` | Punto de montaje del disco | `/etc/fstab`, el script y la unidad de systemd |
+| `RESTIC_REPO_LOCAL` | Ruta del repositorio dentro del disco | El script de respaldo |
+| `RESTIC_REPO_REMOTO` | Repositorio remoto opcional | El script de respaldo |
+| `RESTIC_PASSWORD_FILE` | Archivo con la contraseña, en el servidor | El script de respaldo |
+| `RESTIC_RETENCION_DIARIOS`, `_SEMANALES`, `_MENSUALES` | Política de retención | El script de respaldo |
+| `RESTIC_HORA` | Hora del respaldo diario | `nomad-respaldo.timer` |
+| `DATOS_RAIZ`, `ADMIN_USUARIO`, `SERVIDOR_HOSTNAME` | Qué se respalda y con qué etiqueta | El script de respaldo |
+
+### 4.2 Variables que se DESCUBREN en este capítulo
+
+| Variable | Qué es | Cómo se obtiene | Sin ella |
+|---|---|---|---|
+| `RESTIC_USB_UUID` | UUID del sistema de archivos del disco de respaldo | `sudo blkid /dev/sdX1`, paso 1 | El disco no se monta al arrancar y el respaldo falla cada noche |
+| `RESTIC_PUSH_URL` | URL del monitor *Push* de Uptime Kuma | Al crear el monitor, paso 8 | Un respaldo que falle no avisa a nadie |
+
+Los comandos exactos para persistirlas están en sus pasos. Comprobación en cualquier momento:
+
+```bash
+# [servidor]
+./scripts/variables.sh --faltan
+```
+
+> **Es el UUID de la partición, no el del disco.** `blkid /dev/sdb` (el disco) y
+> `blkid /dev/sdb1` (la partición formateada) devuelven UUID distintos, y `/etc/fstab` necesita el
+> segundo. Poner el del disco produce un sistema que no arranca del todo si falta `nofail`, y un
+> respaldo que nunca encuentra su destino si lo lleva.
+
+### 4.3 Variables temporales de esta sesión
+
+| Variable | Qué contiene | Se declara en | Riesgo |
+|---|---|---|---|
+| `DISCO` | Dispositivo del disco USB de respaldo (`/dev/sdb`) | Paso 1 | **Máximo**: el paso 1 lo formatea |
+
+`DISCO` es, junto con `USB` del capítulo [01](01_unidad_usb_booteable.md), la variable más peligrosa
+del repositorio. El paso 1 incluye una comprobación previa obligatoria.
+
+### 4.4 Secretos que NO van en `config/servidor.env`
+
+| Secreto | Dónde vive | Copia obligatoria |
+|---|---|---|
+| La contraseña del repositorio restic | `${RESTIC_PASSWORD_FILE}`, permisos 600 | **En tu gestor de contraseñas, fuera del servidor** |
+| Credenciales del repositorio remoto | `/etc/nomad/restic-remoto.env`, permisos 600 | En tu gestor de contraseñas |
+
+`config/servidor.env` guarda la **ruta** del archivo de contraseña, nunca la contraseña. Guardar la
+única copia en el propio servidor sería dejar la llave dentro de la caja fuerte: el escenario para
+el que existen los respaldos es precisamente que ese servidor ya no esté.
 
 ---
 
 ## 5. Procedimiento
+
+### Paso 0 — Prepara la sesión
+
+```bash
+# [servidor]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+echo "montaje=${RESTIC_USB_MOUNT} repo=${RESTIC_REPO_LOCAL} clave=${RESTIC_PASSWORD_FILE}"
+```
+
+Criterio de aceptación: las tres rutas están completas. Una `RESTIC_REPO_LOCAL` del tipo
+`/restic/` significa que `RESTIC_USB_MOUNT` o `SERVIDOR_HOSTNAME` están vacías.
+
+Y ten la contraseña del repositorio delante, en tu gestor de contraseñas. La necesitas en el paso 3
+y sin ella no tiene sentido empezar.
 
 ### Paso 1 — Prepara el disco USB
 
@@ -187,12 +266,30 @@ Conecta el disco e identifícalo:
 lsblk -o NAME,SIZE,MODEL,SERIAL,TRAN,FSTYPE,MOUNTPOINTS
 ```
 
-Localiza el disco USB por tamaño y modelo. **Comprueba tres veces que es el correcto**: el paso
-siguiente lo borra.
+Localiza el disco USB por tamaño, modelo y `TRAN=usb`. **Comprueba tres veces que es el correcto**:
+el paso siguiente lo borra sin preguntar y sin posibilidad de deshacer.
 
 ```bash
 # [servidor]
 DISCO=/dev/sdb        # ← el tuyo
+```
+
+**Comprobación obligatoria antes de formatear.** Es el mismo tipo de comprobación del capítulo
+[01](01_unidad_usb_booteable.md) paso 10, y por el mismo motivo:
+
+```bash
+# [servidor]
+[ -n "${DISCO}" ] && [ -b "${DISCO}" ] \
+  && lsblk -o NAME,SIZE,MODEL,TRAN,MOUNTPOINTS "${DISCO}" \
+  || echo "PARA: la variable DISCO está vacía o no es un dispositivo de bloques"
+```
+
+Criterio de aceptación: muestra **tu disco USB**, con `TRAN` igual a `usb`, el tamaño esperado, y
+**ningún punto de montaje del sistema** (`/`, `/var`, `/srv`, `/boot`). Si aparece alguno de esos,
+has elegido el disco equivocado.
+
+```bash
+# [servidor] — a partir de aquí el contenido del disco se pierde
 sudo wipefs -a ${DISCO}
 sudo parted ${DISCO} --script mklabel gpt
 sudo parted ${DISCO} --script mkpart primary ext4 1MiB 100%
@@ -213,22 +310,56 @@ Salida de ejemplo:
 /dev/sdb1: LABEL="RESPALDO" UUID="a1b2c3d4-e5f6-7890-abcd-ef1234567890" TYPE="ext4"
 ```
 
-Anota el UUID en `RESTIC_USB_UUID`, dentro de `config/servidor.env`.
+**Persiste el UUID ahora**, sin copiarlo a mano —es largo y un carácter mal copiado produce un
+sistema que no monta el disco y un respaldo que falla cada noche—:
+
+```bash
+# [servidor]
+./scripts/variables.sh --fijar RESTIC_USB_UUID="$(sudo blkid -s UUID -o value ${DISCO}1)"
+source scripts/lib/entorno.sh
+echo "RESTIC_USB_UUID=${RESTIC_USB_UUID}"
+```
+
+Criterio de aceptación: imprime un UUID de cinco grupos separados por guiones. Si sale vacío, es que
+`${DISCO}1` no existe: comprueba con `lsblk` cómo se llama la partición (en discos NVMe sería
+`${DISCO}p1`).
 
 ### Paso 2 — Monta el disco de forma permanente
 
 ```bash
 # [servidor]
 sudo mkdir -p ${RESTIC_USB_MOUNT}
-sudo cp /etc/fstab /etc/fstab.bak-$(date +%F)
-sudo vim /etc/fstab
+sudo cp -a /etc/fstab /etc/fstab.bak-$(date +%Y%m%d-%H%M%S)
 ```
 
-Añade al final:
+**Así queda la línea** (con el UUID de ejemplo):
 
 ```
 UUID=a1b2c3d4-e5f6-7890-abcd-ef1234567890  /mnt/respaldo  ext4  defaults,nofail,noatime,x-systemd.device-timeout=10  0  2
 ```
+
+**Y este es el comando que la añade con tus valores**, solo si no estaba ya (para poder repetirlo
+sin duplicar la entrada):
+
+```bash
+# [servidor]
+grep -q "${RESTIC_USB_UUID}" /etc/fstab || printf '%s\n' \
+  "UUID=${RESTIC_USB_UUID}  ${RESTIC_USB_MOUNT}  ext4  defaults,nofail,noatime,x-systemd.device-timeout=10  0  2" \
+  | sudo tee -a /etc/fstab >/dev/null
+tail -2 /etc/fstab
+```
+
+**Comprobación crítica antes de reiniciar nunca más este servidor:**
+
+```bash
+# [servidor]
+grep "${RESTIC_USB_UUID}" /etc/fstab | grep -c nofail
+```
+
+Criterio de aceptación: `1`. **Sin `nofail`, el día que el disco USB no esté conectado el servidor
+no terminará de arrancar** y se quedará en una consola de emergencia a la que no puedes llegar por
+SSH. Es el error más caro de este capítulo, porque obliga a bajar físicamente al equipo con un
+teclado.
 
 Qué hace cada opción:
 
@@ -300,10 +431,12 @@ irrecoverably lost.
 ```bash
 # [servidor]
 sudo mkdir -p /etc/nomad
-sudo vim /etc/nomad/restic-excluir.txt
+nomad_plantilla etc/restic-excluir.txt | sudo tee /etc/nomad/restic-excluir.txt >/dev/null
+wc -l /etc/nomad/restic-excluir.txt
 ```
 
-El contenido está en `templates/etc/restic-excluir.txt`.
+El contenido está en `templates/etc/restic-excluir.txt`, con un comentario por bloque explicando qué
+se descarta y por qué.
 
 > Revisa la sección de artefactos de construcción antes de darla por buena: si algún proyecto
 > **sirve** su directorio `dist/` sin reconstruirlo al desplegar, excluirlo dejaría el sitio vacío
@@ -313,11 +446,44 @@ El contenido está en `templates/etc/restic-excluir.txt`.
 
 ```bash
 # [servidor]
-sudo vim /usr/local/bin/nomad-respaldo.sh
+nomad_plantilla etc/nomad-respaldo.sh | sudo tee /usr/local/bin/nomad-respaldo.sh >/dev/null
 sudo chmod 700 /usr/local/bin/nomad-respaldo.sh
 ```
 
-El contenido está en `templates/etc/nomad-respaldo.sh`, con las variables ya sustituidas.
+El contenido está en `templates/etc/nomad-respaldo.sh`. **Es la plantilla más delicada del
+repositorio**, porque es un script que primero se sustituye con `envsubst` y después se ejecuta:
+
+| En la plantilla | Qué le pasa al instalar | Ejemplo |
+|---|---|---|
+| Está en `config/servidor.env.example` | **Se sustituye** por tu valor | `${RESTIC_REPO_LOCAL}`, `${DATOS_RAIZ}` |
+| Variable interna en minúscula | Llega intacta; la resuelve bash al ejecutarse | `${punto_montaje}`, `${rutas[@]}` |
+| Variable en mayúscula que no está en la configuración | Llega intacta también | `${RESTIC_REPOSITORY}`, `${VERSION_CODENAME}` |
+
+Lo que decide qué se sustituye no es el nombre, sino **estar en la lista** que se le pasa a
+`envsubst`. La convención de minúsculas existe para que esa frontera se vea de un vistazo (anexo
+[98 § 4.4](98_variables_y_entorno.md)).
+
+**Comprueba las tres cosas antes de ejecutarlo:**
+
+```bash
+# [servidor]
+sudo bash -n /usr/local/bin/nomad-respaldo.sh && echo "1. SINTAXIS CORRECTA"
+sudo grep -E '^RESTIC_REPOSITORY=|^punto_montaje=|^datos_raiz=' /usr/local/bin/nomad-respaldo.sh
+```
+
+Salida esperada, con los valores de ejemplo:
+
+```
+1. SINTAXIS CORRECTA
+RESTIC_REPOSITORY="/mnt/respaldo/restic/nomad"
+punto_montaje="/mnt/respaldo"
+datos_raiz="/srv"
+```
+
+Criterio de aceptación: sintaxis correcta y las asignaciones con **tus rutas reales** entre
+comillas, no con `${…}` ni con cadenas vacías. Que más abajo el script siga usando
+`${RESTIC_REPOSITORY}` y `${punto_montaje}` es correcto: son sus propias variables, ya asignadas
+aquí arriba.
 
 ### Paso 7 — Primer respaldo, a mano
 
@@ -350,7 +516,39 @@ En Uptime Kuma, **Añadir nuevo monitor**:
 | Intervalo | `90000` segundos (25 horas) |
 | Reintentos | 0 |
 
-Copia la URL de push que te da y ponla en `RESTIC_PUSH_URL`, dentro de `config/servidor.env`.
+Uptime Kuma muestra entonces una **Push URL** con este aspecto:
+
+```
+http://estado.nomad.lan:8080/api/push/f7G8h9J0k1
+```
+
+**Persístela ahora**, con la dirección que el **host** pueda alcanzar (no el nombre interno del
+contenedor, porque el script de respaldo corre fuera de Docker):
+
+```bash
+# [servidor]
+PUSH_ID=f7G8h9J0k1        # ← el identificador que te ha dado Uptime Kuma
+./scripts/variables.sh --fijar \
+    RESTIC_PUSH_URL="http://${TRAEFIK_BIND_INTERNA}:${TRAEFIK_PUERTO_INTERNA}/api/push/${PUSH_ID}"
+source scripts/lib/entorno.sh
+echo "${RESTIC_PUSH_URL}"
+```
+
+Y **pruébala antes de darla por buena**. El monitor debe pasar a verde en segundos:
+
+```bash
+# [servidor]
+curl -fsS "${RESTIC_PUSH_URL}?status=up&msg=prueba" && echo "  ← aviso entregado"
+```
+
+Criterio de aceptación: `curl` devuelve una respuesta correcta y el monitor se pone en verde. Si
+falla, prueba con otra dirección (`127.0.0.1`, la IP de Tailscale) hasta dar con la que responde
+desde el host, y vuelve a fijar la variable.
+
+> **Vuelve a instalar el script después de fijar esta variable**, porque el valor se sustituye al
+> generarlo: `nomad_plantilla etc/nomad-respaldo.sh | sudo tee /usr/local/bin/nomad-respaldo.sh`.
+> Si no, el respaldo funcionará pero no avisará a nadie, que es justo el fallo que este monitor
+> existe para detectar.
 
 El intervalo de 25 horas da margen: el respaldo es diario y `RandomizedDelaySec` puede retrasarlo
 unos minutos. Si pasan 25 horas sin aviso, algo va mal (§ 3.6).
@@ -359,11 +557,31 @@ unos minutos. Si pasan 25 horas sin aviso, algo va mal (§ 3.6).
 
 ```bash
 # [servidor]
-sudo vim /etc/systemd/system/nomad-respaldo.service
-sudo vim /etc/systemd/system/nomad-respaldo.timer
+nomad_plantilla systemd/nomad-respaldo.service \
+    | sudo tee /etc/systemd/system/nomad-respaldo.service >/dev/null
+nomad_plantilla systemd/nomad-respaldo.timer \
+    | sudo tee /etc/systemd/system/nomad-respaldo.timer >/dev/null
 ```
 
-El contenido está en `templates/systemd/`.
+El contenido está en `templates/systemd/`. Comprueba que las rutas y la hora han quedado escritas:
+
+```bash
+# [servidor]
+grep -E 'RequiresMountsFor|ReadWritePaths' /etc/systemd/system/nomad-respaldo.service
+grep 'OnCalendar' /etc/systemd/system/nomad-respaldo.timer
+```
+
+Salida esperada, con los valores de ejemplo:
+
+```
+RequiresMountsFor=/mnt/respaldo
+ReadWritePaths=/mnt/respaldo /var/backups/nomad /var/cache/restic
+OnCalendar=*-*-* 03:30:00
+```
+
+Criterio de aceptación: rutas reales y una hora válida. Un `OnCalendar=*-*-* :00` con la hora vacía
+hace que systemd rechace la unidad, lo cual al menos es ruidoso; un `ReadWritePaths` vacío hace que
+el respaldo falle **solo desde systemd** y funcione a mano, que es mucho más confuso.
 
 ```bash
 # [servidor]
@@ -498,14 +716,21 @@ lugar de respaldar dos veces evita leer y cifrar todo otra vez.
 
 ## 6. Script asociado
 
+### 6.1 Vía A — con el script
+
 `scripts/14_restic.sh` automatiza los pasos 2 a 9 y proporciona las operaciones del día a día.
 
 ```bash
-# [servidor]
+# [servidor] — CON sudo: toca /etc/fstab, /root y unidades de systemd
+cd ~/nomad_server
 sudo ./scripts/14_restic.sh --help
 sudo ./scripts/14_restic.sh --check
 sudo ./scripts/14_restic.sh --instalar
 ```
+
+**Antes de ejecutarlo** hay que haber hecho a mano el paso 1 (formatear el disco) y haber
+persistido `RESTIC_USB_UUID`. El script comprueba que ese UUID corresponde a un dispositivo
+presente y aborta si no.
 
 Operaciones habituales:
 
@@ -529,6 +754,57 @@ Comportamiento destacable:
 
 En modo `--check` muestra las diferencias de `fstab`, del script y de las unidades de systemd, y
 comprueba el estado del disco, sin escribir nada.
+
+### 6.2 Correspondencia entre el script y los pasos manuales
+
+| Paso de la sección 5 | ¿Lo hace el script? | Nota |
+|---|---|---|
+| 0 — preparar la sesión | Sí | Carga la configuración por su cuenta |
+| 1 — formatear el disco | **No, a propósito** | Es destructivo. También es tuyo persistir el UUID |
+| 2 — montaje permanente por UUID | Sí | Con `nofail`, siempre |
+| 3 — instalar restic y la contraseña | Parcial | Instala el paquete; **la contraseña la escribes tú** |
+| 4 — inicializar el repositorio | Sí | Solo si no existe ya |
+| 5 — exclusiones | Sí | Desde `templates/etc/restic-excluir.txt` |
+| 6 — script de respaldo | Sí | Desde `templates/etc/nomad-respaldo.sh`, con las variables sustituidas |
+| 7 — primer respaldo | Sí, con `--ahora` | |
+| 8 — monitor de Uptime Kuma | **No** | Interfaz web; y persistir `RESTIC_PUSH_URL` es tuyo |
+| 9 — servicio y temporizador | Sí | Desde `templates/systemd/` |
+| 10 — **prueba de restauración** | Sí, con `--probar` | **Interpretar el resultado es tuyo** |
+| 11 — verificación de integridad | Sí, con `--verificar` y `--verificar-datos` | |
+| 12 — repositorio remoto | Parcial | El script lo usa si está configurado; inicializarlo es tuyo |
+
+### 6.3 Lo que ninguna vía hace por ti
+
+- [ ] **Formatear el disco** (paso 1). Destructivo por definición.
+- [ ] **Escribir la contraseña del repositorio** y, sobre todo, **guardarla fuera del servidor**.
+- [ ] **Crear el monitor** de Uptime Kuma y persistir `RESTIC_PUSH_URL`.
+- [ ] **Leer el resultado de la prueba de restauración.** El script dice si los archivos coinciden;
+      que eso signifique que tu servidor es recuperable es un juicio tuyo.
+
+### 6.4 Orden recomendado, mezclando las dos vías
+
+Es el capítulo donde más sentido tiene combinarlas:
+
+```bash
+# [servidor] — 1. a mano, porque es destructivo
+DISCO=/dev/sdb
+# … pasos 1 de la sección 5 …
+./scripts/variables.sh --fijar RESTIC_USB_UUID="$(sudo blkid -s UUID -o value ${DISCO}1)"
+```
+
+```bash
+# [servidor] — 2. a mano, porque es un secreto
+sudo touch /root/.restic-password && sudo chmod 600 /root/.restic-password
+sudo ${EDITOR:-vim} /root/.restic-password
+```
+
+```bash
+# [servidor] — 3. el resto, con el script
+sudo ./scripts/14_restic.sh --check
+sudo ./scripts/14_restic.sh --instalar
+sudo ./scripts/14_restic.sh --ahora
+sudo ./scripts/14_restic.sh --probar
+```
 
 ---
 
@@ -593,6 +869,30 @@ sudo restic ls latest --repo ${RESTIC_REPO_LOCAL} --password-file ${RESTIC_PASSW
 ```
 
 Criterio de aceptación: aparecen ambos.
+
+```bash
+# [servidor] — el script instalado no tiene variables sin sustituir
+sudo grep -n '\${[A-Z]' /usr/local/bin/nomad-respaldo.sh && echo "REVISAR" || echo "CORRECTO"
+```
+
+Criterio de aceptación: `CORRECTO`. Las variables en minúscula (`${punto_montaje}`, `${rutas[@]}`)
+**sí deben estar**: son del propio script.
+
+```bash
+# [servidor] — el aviso al monitor está configurado y funciona
+source ~/nomad_server/scripts/lib/entorno.sh
+[ -n "${RESTIC_PUSH_URL}" ] && curl -fsS "${RESTIC_PUSH_URL}?status=up&msg=validacion" \
+  && echo "  ← aviso entregado" || echo "REVISAR: RESTIC_PUSH_URL vacía o inalcanzable"
+```
+
+Criterio de aceptación: el aviso se entrega y el monitor de Uptime Kuma se pone en verde.
+
+```bash
+# [servidor] — la entrada de fstab lleva nofail
+grep "${RESTIC_USB_UUID}" /etc/fstab | grep -c nofail
+```
+
+Criterio de aceptación: `1`.
 
 **Comprobaciones que no son comandos, y son las que importan:**
 
@@ -664,6 +964,13 @@ sudo systemctl daemon-reload
 | `restic check` da errores de integridad | El disco USB se está degradando | Sustituye el disco. Comprueba su salud con `sudo smartctl -H` | Capítulo [02](02_validacion_equipo.md) |
 | El monitor de Uptime Kuma está rojo sin motivo aparente | El respaldo no se ejecutó: servidor apagado, disco desconectado o fallo | Eso es exactamente lo que debe detectar. Mira `journalctl -u nomad-respaldo` | § 3.6 |
 | La copia remota falla y la local no | Credenciales del remoto mal, o sin red | `set -a; . /etc/nomad/restic-remoto.env; set +a` y prueba `restic -r <remoto> snapshots` | [restic — B2](https://restic.readthedocs.io/en/stable/030_preparing_a_new_repo.html#backblaze-b2) |
+| El servidor se queda en consola de emergencia al arrancar | Falta `nofail` en la línea de `/etc/fstab` | Consola física: edita `/etc/fstab` y añádelo. Es el error más caro del capítulo | § 5 paso 2 |
+| El respaldo falla cada noche con «no está montado» | `RESTIC_USB_UUID` mal copiado o del disco en vez de la partición | `sudo blkid ${DISCO}1` y vuelve a fijarlo con `--fijar` | § 4.2 |
+| El repositorio se creó en `/restic/` o en una ruta rara | `RESTIC_USB_MOUNT` o `SERVIDOR_HOSTNAME` vacías al ejecutar `restic init` | Borra esa ruta, carga el entorno y repite el paso 4 | § 5 paso 0 |
+| El script de respaldo falla con rutas vacías | Se instaló sin el entorno cargado | `nomad_plantilla etc/nomad-respaldo.sh \| sudo tee …` y comprueba | § 5 paso 6 |
+| El respaldo funciona pero el monitor sigue rojo | `RESTIC_PUSH_URL` se fijó **después** de instalar el script | Vuelve a instalar el script tras fijar la variable | § 5 paso 8 |
+| `curl` a la URL de push no responde desde el servidor | La URL usa un nombre de contenedor que el host no resuelve | Usa `${TRAEFIK_BIND_INTERNA}:${TRAEFIK_PUERTO_INTERNA}` | § 5 paso 8 |
+| Formateé el disco equivocado | La variable `DISCO` apuntaba a otro dispositivo | No hay recuperación por software. La comprobación del paso 1 existe para esto | § 4.3 |
 
 ---
 
@@ -677,6 +984,8 @@ sudo systemctl daemon-reload
 - [restic — Comprobar la integridad](https://restic.readthedocs.io/en/stable/045_working_with_repos.html)
 - [systemd — Temporizadores](https://www.freedesktop.org/software/systemd/man/systemd.timer.html)
 - [`fstab(5)`](https://manpages.debian.org/trixie/mount/fstab.5.en.html)
+- [templates/README.md](../templates/README.md) — el script de respaldo y las unidades de systemd
+- Anexo [98 — Variables, entorno y sesiones](98_variables_y_entorno.md) § 4.4, sobre mayúsculas y minúsculas en la plantilla
 
 ---
 

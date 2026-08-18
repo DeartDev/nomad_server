@@ -7,6 +7,26 @@
 #  «Dinámica» significa que Traefik recarga este archivo al guardarlo, sin
 #  reiniciar. Se referencian desde las etiquetas de los proyectos con el
 #  sufijo @file, por ejemplo:  middlewares=seguridad@file,compresion@file
+#
+#  CÓMO APLICARLA A MANO (equivalente a lo que hace el script)
+#
+#      cd ~/nomad_server
+#      source scripts/lib/entorno.sh
+#      nomad_plantilla compose/traefik/dinamica/middlewares.yml \
+#          > ${DATOS_RAIZ}/traefik/config/dinamica/middlewares.yml
+#
+#  A diferencia de las plantillas de /etc, estos archivos pertenecen a tu
+#  usuario: NO se instalan con sudo. Si los escribes como root, después no
+#  podrás editarlos ni levantar el proyecto sin sudo.
+#
+#  Y después, para que tenga efecto:
+#      nada: Traefik recarga este archivo solo al guardarlo
+#
+#  Comprueba antes de levantar nada que no ha quedado ninguna variable sin
+#  sustituir:
+#      grep -n '\${' ${DATOS_RAIZ}/traefik/config/dinamica/middlewares.yml && echo REVISAR || echo CORRECTO
+#
+#  Detalle: templates/README.md y docs/98_variables_y_entorno.md § 4.3
 # ===========================================================================
 
 http:

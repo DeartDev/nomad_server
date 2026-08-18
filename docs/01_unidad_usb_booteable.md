@@ -28,6 +28,21 @@ has confirmado byte a byte.
 
 **Se puede hacer en paralelo con:** [02 — Validación del equipo](02_validacion_equipo.md).
 
+**Preparar la sesión.** Todo este capítulo se ejecuta **en tu equipo**, desde la raíz del
+repositorio clonado. No hace falta cargar `config/servidor.env` —los comandos de aquí no usan
+ninguna variable del despliegue— pero sí conviene trabajar siempre desde el mismo directorio:
+
+```bash
+# [cliente]
+cd ~/nomad_server        # o donde hayas clonado el repositorio
+```
+
+Lo que sí usa este capítulo son **cuatro variables temporales de sesión** (`ISO`, `BASE`, `USB` y
+`BYTES`). Viven solo en la terminal donde las declares y desaparecen al cerrarla. Si te desconectas
+a mitad, hay que volver a declararlas: el paso 0 explica cómo.
+
+**Tiempo estimado:** 30 minutos, de los cuales unos 10 son de descarga.
+
 ---
 
 ## 3. Decisiones y por qué
@@ -94,18 +109,71 @@ tuviera firmware, la instalación se detendría.
 
 ## 4. Variables usadas
 
-| Variable | Uso en este capítulo |
-|---|---|
-| `DEBIAN_SUITE` | Nombre en clave de la versión a descargar (`trixie`) |
-| `DEBIAN_MIRROR` | Réplica desde la que se descarga |
+### 4.1 De `config/servidor.env`
 
-No se usa `DISCO_DESTINO`: esa variable se refiere al disco **interno del servidor**, no a la
-memoria USB. El dispositivo USB se identifica en el momento, porque su nombre cambia según dónde se
-conecte.
+| Variable | Uso en este capítulo | Quién la usa |
+|---|---|---|
+| `DEBIAN_SUITE` | Comprueba que la imagen descargada es la de la versión documentada (`trixie`) | `scripts/01_crear_usb.sh` |
+| `DEBIAN_MIRROR` | Réplica de referencia; la ISO se descarga siempre de `cdimage.debian.org` | `scripts/01_crear_usb.sh` |
+
+En la **vía manual** de la sección 5 no hace falta cargarlas: la imagen se descarga del directorio
+`current` de Debian, que siempre apunta a la versión estable vigente, y su nombre exacto se consulta
+en el paso 2. Solo el script las consume, y las carga por su cuenta.
+
+### 4.2 Variables temporales de esta sesión
+
+Estas **no** están en `config/servidor.env` y **no sobreviven** a cerrar la terminal. Se declaran
+en el paso donde hacen falta:
+
+| Variable | Qué contiene | Se declara en |
+|---|---|---|
+| `BASE` | URL del directorio de imágenes de Debian | Paso 3 |
+| `ISO` | Nombre exacto del archivo de imagen (`debian-13.x.0-amd64-netinst.iso`) | Paso 2 |
+| `USB` | Dispositivo de la memoria USB (`/dev/sdb`) | Paso 8 |
+| `BYTES` | Tamaño exacto de la ISO, para verificar lo escrito | Paso 11 |
+
+> **`USB` es la variable más peligrosa de todo el repositorio.** Si se queda vacía o apunta al
+> disco equivocado, el paso 10 destruye los datos de ese disco sin preguntar y sin posibilidad de
+> deshacer. El paso 8 explica cómo identificarla con certeza y el paso 9 cómo comprobarla antes de
+> escribir. **Compruébala siempre**, aunque creas recordarla.
+
+### 4.3 Lo que este capítulo NO usa
+
+`DISCO_DESTINO` se refiere al disco **interno del servidor**, no a la memoria USB, y no interviene
+aquí. Se determina en el capítulo [02](02_validacion_equipo.md) y se usa en el
+[03](03_instalacion_debian.md).
 
 ---
 
 ## 5. Procedimiento
+
+### Paso 0 — Prepara la sesión
+
+Todo lo de este capítulo ocurre en **tu equipo**. Comprueba que tienes las tres herramientas
+necesarias:
+
+```bash
+# [cliente]
+command -v curl gpg sha256sum
+```
+
+Criterio de aceptación: las tres imprimen una ruta. Si falta alguna, instálala con el comando de tu
+distribución (sección 2).
+
+**Si vuelves a este capítulo tras cerrar la terminal**, las variables `ISO`, `BASE`, `USB` y `BYTES`
+ya no existen. No hace falta repetir la descarga: basta con volver a declararlas, porque los
+archivos siguen en el disco.
+
+```bash
+# [cliente] — recuperar el contexto sin volver a descargar nada
+cd ~/debian-iso
+BASE=https://cdimage.debian.org/debian-cd/current/amd64/iso-cd
+ISO=$(ls -1 debian-*-amd64-netinst.iso 2>/dev/null | head -1)
+echo "Imagen: ${ISO:-(no hay ninguna descargada: empieza por el paso 2)}"
+```
+
+`USB` se vuelve a declarar en el paso 8 y **nunca** se recupera de memoria: hay que identificar el
+dispositivo otra vez, porque su letra puede haber cambiado al reconectarlo.
 
 ### Paso 1 — Crea un directorio de trabajo
 
@@ -153,6 +221,10 @@ curl -fLO "${BASE}/SHA256SUMS"
 curl -fLO "${BASE}/SHA256SUMS.sign"
 ls -lh
 ```
+
+> `BASE` e `ISO` son variables **de esta terminal**. Si la cierras o te desconectas, desaparecen y
+> los comandos siguientes fallarán con rutas vacías. El paso 0 explica cómo volver a declararlas sin
+> repetir la descarga.
 
 Salida esperada: los tres archivos, con la ISO en torno a 700 MB.
 
@@ -256,7 +328,12 @@ es reconocible. Si alguna de las tres no cuadra, no continúes.
 ```bash
 # [cliente]
 USB=/dev/sdb        # ← sustitúyelo por el tuyo
+echo "Se va a escribir en: ${USB}"
 ```
+
+Criterio de aceptación: la línea impresa muestra **el dispositivo que acabas de identificar**. Si
+imprime `Se va a escribir en:` sin nada detrás, la variable está vacía y el paso 10 fallaría de la
+peor forma posible.
 
 > Verifica una vez más:
 > ```bash
@@ -281,6 +358,17 @@ lsblk -o NAME,MOUNTPOINTS "${USB}"
 Criterio de aceptación: ninguna partición tiene punto de montaje.
 
 ### Paso 10 — Escribe la imagen
+
+Última comprobación antes de un comando sin deshacer:
+
+```bash
+# [cliente]
+[ -n "${USB}" ] && [ -b "${USB}" ] && lsblk -o NAME,SIZE,MODEL,TRAN,MOUNTPOINTS "${USB}" \
+  || echo "PARA: la variable USB está vacía o no es un dispositivo de bloques"
+```
+
+Criterio de aceptación: muestra tu memoria USB, con `TRAN` igual a `usb` y sin puntos de montaje del
+sistema.
 
 ```bash
 # [cliente]
@@ -348,15 +436,30 @@ Las utilidades de GNU se instalan con `brew install coreutils` y llevan prefijo 
 
 ## 6. Script asociado
 
+### 6.1 Vía A — con el script
+
 `scripts/01_crear_usb.sh` automatiza los pasos 1 a 11: descarga, verifica la suma, verifica la firma
 OpenPGP, muestra el dispositivo elegido para que lo confirmes, escribe y comprueba el resultado.
 
 ```bash
 # [cliente]
-./scripts/01_crear_usb.sh --help          # qué hace y qué opciones admite
+cd ~/nomad_server
+./scripts/01_crear_usb.sh --help          # qué hace, qué opciones admite y qué NO hace
 ./scripts/01_crear_usb.sh --check         # simula: descarga y verifica, no escribe nada
 sudo ./scripts/01_crear_usb.sh --usb /dev/sdb
 ```
+
+Opciones útiles:
+
+| Opción | Para qué |
+|---|---|
+| `--usb <dispositivo>` | El destino. **Obligatoria para escribir**: el script nunca lo elige por ti |
+| `--dir <ruta>` | Directorio de descarga (por omisión `~/debian-iso`) |
+| `--forzar` | Permite escribir en un dispositivo que no se detecta como extraíble. Solo si estás completamente seguro |
+| `-n, --check` | Descarga y verifica, pero no escribe |
+| `-y, --si` | No pide confirmación antes de escribir |
+
+No hace falta cargar el entorno: el script lee `config/servidor.env` por su cuenta.
 
 Qué hace en modo `--check`: descarga la imagen y los archivos de firma en `~/debian-iso`, verifica
 suma y firma, e informa del dispositivo que **usaría**, sin escribir un solo byte en él.
@@ -364,6 +467,32 @@ suma y firma, e informa del dispositivo que **usaría**, sin escribir un solo by
 Qué no hace: **no elige el dispositivo por ti**. Hay que pasarlo con `--usb`, y el script muestra
 modelo, tamaño y transporte y exige confirmación explícita antes de escribir. Rechaza cualquier
 dispositivo que no sea extraíble o que tenga particiones montadas en rutas del sistema.
+
+### 6.2 Correspondencia entre el script y los pasos manuales
+
+| Pasos de la sección 5 | ¿Lo hace el script? | Nota |
+|---|---|---|
+| 0 — preparar la sesión | Sí | Comprueba las herramientas necesarias |
+| 1 — directorio de trabajo | Sí | Se cambia con `--dir` |
+| 2 — averiguar el nombre de la imagen | Sí | Lee el `SHA256SUMS` publicado |
+| 3 — descargar | Sí | No vuelve a descargar si el archivo ya está y su suma coincide |
+| 4 — verificar la suma | Sí | Aborta si no coincide |
+| 5–6 — importar claves y contrastar huellas | Sí, importa; **la comparación con la web es tuya** | Ver la advertencia del paso 6 |
+| 7 — verificar la firma | Sí | Aborta si la firma no es buena |
+| 8–9 — identificar y desmontar el USB | Parcial | Tú indicas el dispositivo; el script lo valida y desmonta |
+| 10 — escribir | Sí | Con confirmación explícita |
+| 11 — verificar lo escrito | Sí | Compara la lectura del USB con la suma de la ISO |
+| 12 — alternativas en Windows/macOS | No | Es un procedimiento de otro sistema |
+
+### 6.3 Si prefieres la vía manual
+
+Los pasos 1 a 11 de la sección 5 producen exactamente el mismo resultado. Lo que asumes al hacerlo
+a mano:
+
+- [ ] Contrastar las huellas de las claves con <https://www.debian.org/CD/verify> (paso 6).
+- [ ] Comprobar que `${USB}` apunta al dispositivo correcto **antes** de `dd` (pasos 8 a 10).
+- [ ] Desmontar las particiones del USB (paso 9).
+- [ ] Verificar los bytes escritos (paso 11), que es lo que la mayoría de guías se salta.
 
 ---
 
@@ -440,6 +569,10 @@ hay que repetirla, te ahorras la descarga y la verificación.
 | El instalador no detecta la tarjeta de red | Hardware muy reciente cuyo firmware no está ni en la imagen oficial | Conecta un adaptador USB-Ethernet, o descarga la imagen del kernel *backports* | [Debian Wiki — Firmware](https://wiki.debian.org/Firmware) |
 | Rufus deja un USB que no arranca | Se eligió «modo Imagen ISO» en lugar de «modo Imagen DD» | Repite eligiendo **modo DD** | [Rufus FAQ](https://github.com/pbatard/rufus/wiki/FAQ) |
 | En macOS `dd` va lentísimo | Se está usando `/dev/diskN` en vez de `/dev/rdiskN` | Usa el dispositivo *raw* (`rdiskN`) | — |
+| `dd: failed to open '': No such file` | La variable `USB` o `ISO` está vacía: se cerró la terminal y se perdieron | Vuelve a declararlas con el paso 0 | § 4.2 |
+| `curl` falla con «URL rechazada» | `BASE` está vacía por lo mismo | Repite el paso 3 | § 4.2 |
+| Escribí en el disco equivocado | La variable `USB` apuntaba a otro dispositivo | No hay recuperación por software. Es la razón de la comprobación del paso 10 | § 4.2 |
+| El script dice que faltan variables | `config/servidor.env` no existe todavía | `make init` y rellena lo obligatorio | Capítulo [00](00_planificacion.md) |
 
 ---
 
@@ -451,6 +584,8 @@ hay que repetirla, te ahorras la descarga y la verificación.
 - [Debian Wiki — Firmware](https://wiki.debian.org/Firmware)
 - [Guía de instalación de Debian 13](https://www.debian.org/releases/trixie/amd64/)
 - [Rufus — Preguntas frecuentes](https://github.com/pbatard/rufus/wiki/FAQ)
+- Anexo [97 — Las dos vías de montaje](97_vias_de_montaje.md)
+- Anexo [98 — Variables, entorno y sesiones](98_variables_y_entorno.md) § 2.3, sobre las variables temporales
 
 ---
 

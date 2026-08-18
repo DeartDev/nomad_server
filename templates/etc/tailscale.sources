@@ -8,6 +8,22 @@
 #  formato que el resto de repositorios de este servidor (capítulo 04 § 3.1).
 #  'Signed-By' ata este repositorio a la clave de Tailscale: no puede firmar
 #  paquetes que suplanten a los de Debian.
+#
+#  CÓMO APLICARLA A MANO (equivalente a lo que hace el script)
+#
+#      cd ~/nomad_server
+#      source scripts/lib/entorno.sh
+#      nomad_diff etc/tailscale.sources /etc/apt/sources.list.d/tailscale.sources
+#      sudo cp -a /etc/apt/sources.list.d/tailscale.sources \
+#          /etc/apt/sources.list.d/tailscale.sources.bak-$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
+#      nomad_plantilla etc/tailscale.sources \
+#          | sudo tee /etc/apt/sources.list.d/tailscale.sources >/dev/null
+#      sudo chmod 644 /etc/apt/sources.list.d/tailscale.sources
+#
+#  Y después, para que tenga efecto:
+#      sudo apt update
+#
+#  Detalle: templates/README.md y docs/98_variables_y_entorno.md § 4.3
 # ===========================================================================
 
 Types: deb

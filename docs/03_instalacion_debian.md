@@ -33,6 +33,13 @@ SSH funcionando.
 > **Punto de no retorno.** Este capítulo borra el disco entero. Comprueba una última vez que el
 > respaldo del capítulo 02, paso 5, está hecho y verificado.
 
+**Preparar la sesión.** Este capítulo es el único que **no se ejecuta en ninguna terminal**: se
+teclea en el instalador de Debian, delante del equipo. El instalador no puede leer
+`config/servidor.env`, así que los valores hay que tenerlos **escritos o en otra pantalla**.
+
+El paso 0 del procedimiento genera una chuleta con todo lo que el instalador va a preguntar, para
+que no tengas que ir buscándolo en mitad de la instalación.
+
 **Tiempo estimado:** 45 minutos, de los cuales unos 15 son de descarga desatendida.
 
 ---
@@ -139,21 +146,96 @@ más que vigilar.
 
 ## 4. Variables usadas
 
-| Variable | Dónde se introduce en el instalador |
-|---|---|
-| `SERVIDOR_HOSTNAME` | Pantalla «Configurar la red → Nombre de la máquina» |
-| `SERVIDOR_DOMINIO_LOCAL` | Pantalla «Nombre de dominio» |
-| `SERVIDOR_ZONA_HORARIA` | Pantalla «Configurar el reloj» |
-| `SERVIDOR_LOCALE` | Pantallas de idioma y localización |
-| `ADMIN_USUARIO` | Pantalla «Configurar usuarios y contraseñas» |
-| `DISCO_DESTINO` | Pantalla «Particionado de discos» |
-| `DEBIAN_MIRROR` | Pantalla «Configurar el gestor de paquetes» |
+### 4.1 Valores que el instalador va a pedirte
 
-Ten `config/servidor.env` abierto en otro equipo mientras instalas: el instalador no puede leerlo.
+Todos vienen de `config/servidor.env`, pero aquí **no se cargan en ninguna terminal**: se teclean a
+mano en las pantallas del instalador.
+
+| Variable | Pantalla del instalador | Si te equivocas |
+|---|---|---|
+| `SERVIDOR_LOCALE` | «Select a language» / «Configure locales» | Se corrige en el capítulo [04](04_primer_arranque_y_base.md) |
+| `SERVIDOR_ZONA_HORARIA` | «Configure the clock» | Se corrige en el capítulo [04](04_primer_arranque_y_base.md) |
+| `SERVIDOR_HOSTNAME` | «Configure the network → Hostname» | Se corrige en el capítulo [04](04_primer_arranque_y_base.md) |
+| `SERVIDOR_DOMINIO_LOCAL` | «Domain name» | Se corrige en el capítulo [04](04_primer_arranque_y_base.md) |
+| `ADMIN_USUARIO` | «Set up users and passwords» | **Reinstalar es lo más limpio** |
+| `DISCO_DESTINO` | «Partition disks» | **Se pierde el disco equivocado** |
+| `DEBIAN_MIRROR` | «Configure the package manager» | Se corrige en el capítulo [04](04_primer_arranque_y_base.md) |
+| `LAN_IP`, `LAN_PREFIJO`, `LAN_GATEWAY`, `LAN_DNS` | Solo si el DHCP falla | Se corrige en el capítulo [06](06_red_y_firewall.md) |
+
+La columna de la derecha explica por qué solo dos pantallas merecen que te detengas: el usuario y el
+particionado. El resto se arregla después en dos minutos.
+
+### 4.2 Cómo tener los valores delante
+
+El paso 0 imprime una chuleta con todo lo anterior ya resuelto. Puedes dejarla en la pantalla de tu
+equipo, mandártela al móvil o imprimirla.
+
+### 4.3 Variables que este capítulo NO usa
+
+- `LAN_INTERFAZ`: el instalador la detecta y la muestra; se confirma en el capítulo
+  [06](06_red_y_firewall.md).
+- Todo lo de Docker, Traefik, Cloudflare y restic: no interviene hasta mucho más adelante.
 
 ---
 
 ## 5. Procedimiento
+
+### Paso 0 — Prepara la chuleta de valores
+
+**En tu equipo**, antes de encender el servidor:
+
+```bash
+# [cliente]
+cd ~/nomad_server
+set -a; . config/servidor.env; set +a
+cat <<CHULETA
+========= VALORES PARA EL INSTALADOR =========
+ Idioma / locale        : ${SERVIDOR_LOCALE}
+ Zona horaria           : ${SERVIDOR_ZONA_HORARIA}
+ Hostname               : ${SERVIDOR_HOSTNAME}
+ Domain name            : ${SERVIDOR_DOMINIO_LOCAL}
+ Usuario administrador  : ${ADMIN_USUARIO}
+ Contraseña de root     : (VACIA, ver seccion 3.1)
+ Disco de destino       : ${DISCO_DESTINO}
+ Replica de Debian      : ${DEBIAN_MIRROR}
+
+ Si el DHCP falla, red manual:
+   IP                   : ${LAN_IP}/${LAN_PREFIJO}
+   Puerta de enlace     : ${LAN_GATEWAY}
+   DNS                  : ${LAN_DNS}
+
+ Programas a marcar     : SSH server + standard system utilities
+                          (TODO lo demas, desmarcado)
+==============================================
+CHULETA
+```
+
+Salida de ejemplo:
+
+```
+========= VALORES PARA EL INSTALADOR =========
+ Idioma / locale        : en_US.UTF-8
+ Zona horaria           : America/Bogota
+ Hostname               : nomad
+ Domain name            : lan
+ Usuario administrador  : deart
+ Contraseña de root     : (VACIA, ver seccion 3.1)
+ Disco de destino       : /dev/disk/by-id/ata-Samsung_SSD_870_EVO_500GB_S6PENL0T123456
+ Replica de Debian      : deb.debian.org
+```
+
+Criterio de aceptación: ningún campo sale vacío ni con `CAMBIAME`. Si `DISCO_DESTINO` sigue con el
+valor de ejemplo, vuelve al capítulo [02](02_validacion_equipo.md) paso 9 antes de continuar.
+
+Comprobación equivalente con el inspector:
+
+```bash
+# [cliente]
+make faltan
+```
+
+Y **ten la contraseña del usuario administrador a mano**, generada y guardada en tu gestor de
+contraseñas. La vas a teclear en el paso 4 y volverás a necesitarla en el capítulo 04.
 
 ### Paso 1 — Arranca desde el USB
 
@@ -424,7 +506,26 @@ systemctl is-active ssh        # ¿está el servidor SSH?
 Criterio de aceptación: hay IP, hay internet, `sudo` acepta tu contraseña y `ssh` responde
 `active`.
 
-Anota la IP: es la que usarás para conectarte en el capítulo 04.
+**Anota la IP.** Es la que usarás para conectarte en el capítulo 04, y es un dato que solo existe
+en esta pantalla:
+
+```bash
+# [servidor] — en la consola física
+ip -br -4 addr | grep -v '^lo'
+```
+
+Salida de ejemplo:
+
+```
+enp3s0           UP             192.168.1.50/24
+```
+
+Si el router respetó la reserva del capítulo 00, esa IP coincidirá con `${LAN_IP}` y todo encaja. Si
+no coincide, no pasa nada todavía: úsala tal cual para entrar en el capítulo 04, y el capítulo
+[06](06_red_y_firewall.md) fijará la definitiva.
+
+Anota también el nombre de la interfaz (`enp3s0` en el ejemplo): confirma lo que averiguaste en el
+capítulo 02 y se usará en el capítulo 06.
 
 ---
 
@@ -439,16 +540,41 @@ Debian permite responder de antemano a todas las preguntas del instalador median
 *preseed*. `templates/preseed.cfg` contiene una plantilla comentada que reproduce exactamente las
 decisiones de este capítulo.
 
+**Paso 1 — genera tu preseed** a partir de la plantilla y tu configuración. Con el ayudante del
+repositorio es una línea:
+
 ```bash
-# [cliente] — genera tu preseed a partir de la plantilla y tu configuración
+# [cliente]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+nomad_plantilla preseed.cfg > /tmp/preseed.cfg
+```
+
+Y sin el ayudante, el comando completo:
+
+```bash
+# [cliente]
 set -a; . config/servidor.env; set +a
 envsubst "$(grep -oE '^[A-Z][A-Z0-9_]*=' config/servidor.env.example \
             | tr -d '=' | sed 's/^/${/; s/$/}/' | tr '\n' ' ')" \
     < templates/preseed.cfg > /tmp/preseed.cfg
 ```
 
-Hay que pasarle a `envsubst` la lista explícita de variables. Sin ella destrozaría la sintaxis del
-particionador, que también usa `$` para lo suyo (`$primary{ }`, `$lvmok{ }`).
+**Por qué esa lista explícita de variables.** `envsubst` sin argumentos sustituye **todo** lo que
+parezca una variable, y el archivo de preseed usa `$` para su propia sintaxis: `$primary{ }`,
+`$lvmok{ }`, `$defaultignore{ }` pertenecen al particionador `partman`, no a tu configuración. Sin
+la lista, `envsubst` los vaciaría y el particionado fallaría a mitad de la instalación, con el
+disco ya borrado. Ver el anexo [98 § 4.4](98_variables_y_entorno.md).
+
+**Paso 2 — revisa el resultado antes de usarlo**, porque un preseed no pregunta nada:
+
+```bash
+# [cliente]
+grep -E 'disk|hostname|username|mirror' /tmp/preseed.cfg
+```
+
+Criterio de aceptación: aparecen tus valores reales, no `${VARIABLES}` sin sustituir ni cadenas
+vacías. Una línea de disco vacía significa que el instalador elegirá por su cuenta.
 
 Después, sirve el archivo por HTTP desde tu equipo:
 
@@ -589,6 +715,10 @@ gunzip -c /mnt/externo/imagen-disco-completo.img.gz | sudo dd of=/dev/sda bs=4M 
 | GRUB no aparece: arranca directamente | Comportamiento normal cuando solo hay un sistema | Mantén pulsada `Shift` (BIOS) o `Esc` (UEFI) durante el arranque | [Debian Wiki — GRUB](https://wiki.debian.org/GRUB) |
 | El sistema arranca pero sin red | La interfaz cambió de nombre respecto al instalador | Comprueba con `ip -br link` y ajusta en el capítulo [06](06_red_y_firewall.md) | Capítulo 06 |
 | `/boot` se llena al actualizar el kernel | Se creó demasiado pequeño | `sudo apt autoremove --purge` elimina kernels antiguos. Con 1 GB no debería ocurrir | Capítulo [15](15_mantenimiento_y_actualizaciones.md) |
+| La chuleta del paso 0 sale con campos vacíos | Faltan variables en `config/servidor.env` | `make faltan` y rellénalas antes de encender el equipo | § 5 paso 0 |
+| El preseed dejó el disco borrado y falló al particionar | `envsubst` se ejecutó sin la lista de variables y vació la sintaxis de `partman` | Usa `nomad_plantilla preseed.cfg` o el comando completo, y revisa el resultado antes | § 6 |
+| Terminé la instalación y no anoté la IP | Se saltó la comprobación del paso 13 | Conecta el monitor y ejecuta `ip -br -4 addr`. O búscala en la tabla de clientes del router | § 5 paso 13 |
+| El instalador no acepta el disco de `DISCO_DESTINO` | Se anotó una ruta de partición (`-part`) o el disco cambió de posición | Contrasta modelo y tamaño en la pantalla de particionado | Capítulo [02](02_validacion_equipo.md) § 4.2 |
 
 ### Reinstalar GRUB desde el modo rescate
 
@@ -614,6 +744,7 @@ reboot
 - [Debian Wiki — Secure Boot](https://wiki.debian.org/SecureBoot)
 - [Debian — Instalación automatizada con preseed](https://www.debian.org/releases/trixie/amd64/apb)
 - [Debian — Notas de publicación de Trixie](https://www.debian.org/releases/trixie/releasenotes)
+- Anexo [98 — Variables, entorno y sesiones](98_variables_y_entorno.md) § 4.3 y § 4.4, sobre `envsubst`
 
 ---
 

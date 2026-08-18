@@ -22,8 +22,32 @@ falle. Todo accesible únicamente desde tu red privada.
 - Traefik en marcha con su punto de entrada `interna`.
 - La red `${DOCKER_RED_SOCKET}` creada en el capítulo 09.
 - Un canal donde recibir avisos: Telegram, correo, Discord o similar.
+- `TS_IP` persistida (capítulo [08](08_tailscale.md) paso 10), si vas a acceder por Tailscale.
 
-**Tiempo estimado:** 40 minutos, incluida la configuración de los avisos.
+**Preparar la sesión.**
+
+```bash
+# [servidor]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+echo "dozzle=${DOZZLE_HOST} kuma=${UPTIME_KUMA_HOST}"
+echo "acceso por http://<nombre>:${TRAEFIK_PUERTO_INTERNA} en ${TRAEFIK_BIND_INTERNA}"
+echo "tailnet=${TS_IP:-(sin definir)}"
+```
+
+Salida esperada, con los valores de ejemplo:
+
+```
+dozzle=logs.nomad.lan kuma=estado.nomad.lan
+acceso por http://<nombre>:8080 en 127.0.0.1
+tailnet=100.101.102.103
+```
+
+**Este capítulo produce un valor que el capítulo 14 necesita**: la URL del monitor *Push* de
+respaldo (`RESTIC_PUSH_URL`). No se crea aquí, pero sí se crea aquí el monitor de espacio en disco,
+que funciona igual y sirve de ensayo. El paso 8 lo explica.
+
+**Tiempo estimado:** 50 minutos, incluida la configuración de los avisos.
 
 ---
 
@@ -132,18 +156,75 @@ documenta cómo ejecutarlo puntualmente en un contenedor.
 
 ## 4. Variables usadas
 
-| Variable | Uso |
+### 4.1 De `config/servidor.env`
+
+| Variable | Uso | Dónde acaba |
+|---|---|---|
+| `DATOS_RAIZ` | Directorio del proyecto de observabilidad | Rutas de los comandos |
+| `DOZZLE_HOST` | Nombre por el que se llega a Dozzle | Etiqueta `Host(...)` del compose |
+| `UPTIME_KUMA_HOST` | Nombre por el que se llega a Uptime Kuma | Etiqueta `Host(...)` del compose |
+| `DOCKER_RED_PROXY` | Red compartida con Traefik | `docker-compose.yml` |
+| `DOCKER_RED_SOCKET` | Red del intermediario del socket | `docker-compose.yml` |
+| `TRAEFIK_BIND_INTERNA` | Dirección privada donde responde el punto de entrada `interna` | URL de acceso |
+| `TRAEFIK_PUERTO_INTERNA` | Puerto de esa dirección | URL de acceso |
+| `TS_IP` | Destino de los registros DNS internos, si eliges esa vía | Panel de Cloudflare |
+
+Cargar y comprobar:
+
+```bash
+# [servidor]
+cd ~/nomad_server && source scripts/lib/entorno.sh
+echo "http://${DOZZLE_HOST}:${TRAEFIK_PUERTO_INTERNA}  ·  http://${UPTIME_KUMA_HOST}:${TRAEFIK_PUERTO_INTERNA}"
+```
+
+Criterio de aceptación: dos URL completas. Si alguna sale como `http://:8080`, el compose se
+escribiría con una etiqueta `Host()` vacía y Traefik no crearía el router.
+
+### 4.2 Variables que se DESCUBREN aquí y usa el capítulo 14
+
+| Variable | Qué es | Cómo se obtiene | La necesita |
+|---|---|---|---|
+| `RESTIC_PUSH_URL` | URL del monitor *Push* del respaldo nocturno | Se crea en Uptime Kuma, capítulo [14](14_respaldos_restic.md) paso 8 | Capítulo 14 |
+
+El monitor de espacio en disco del paso 8 de **este** capítulo funciona igual y es un buen ensayo:
+si entiendes cómo se obtiene su URL, el del capítulo 14 no tiene misterio.
+
+### 4.3 Valores que viven solo en Uptime Kuma
+
+Estos no van a ningún archivo del repositorio: son estado de la aplicación, y por eso el directorio
+`datos-kuma/` entra en el respaldo del capítulo 14.
+
+| Valor | Dónde vive |
 |---|---|
-| `DATOS_RAIZ` | Directorio del proyecto de observabilidad |
-| `DOZZLE_HOST` | Nombre por el que se llega a Dozzle |
-| `UPTIME_KUMA_HOST` | Nombre por el que se llega a Uptime Kuma |
-| `DOCKER_RED_PROXY` | Red compartida con Traefik |
-| `DOCKER_RED_SOCKET` | Red del intermediario del socket |
-| `TRAEFIK_BIND_INTERNA`, `TRAEFIK_PUERTO_INTERNA` | Dirección y puerto de acceso |
+| La cuenta de administrador de Uptime Kuma | `datos-kuma/` |
+| Los monitores y su histórico | `datos-kuma/` |
+| El token del bot de Telegram y el ID de chat | `datos-kuma/` |
+
+> **Si se pierde `datos-kuma/`, se pierden los monitores y los avisos**, y el servidor deja de
+> avisarte sin que nada lo indique. Es una de las razones por las que el capítulo 14 respalda
+> `${DATOS_RAIZ}` entero.
 
 ---
 
 ## 5. Procedimiento
+
+### Paso 0 — Prepara la sesión
+
+```bash
+# [servidor]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+```
+
+Comprobaciones previas: Traefik en marcha y la red del socket existente.
+
+```bash
+# [servidor]
+docker ps --filter name=traefik --filter name=socket-proxy --format '{{.Names}} {{.Status}}'
+docker network inspect "${DOCKER_RED_SOCKET}" --format 'red {{.Name}} internal={{.Internal}}'
+```
+
+Criterio de aceptación: los dos contenedores `Up (healthy)` y la red con `internal=true`.
 
 ### Paso 1 — Prepara el directorio
 
@@ -151,17 +232,52 @@ documenta cómo ejecutarlo puntualmente en un contenedor.
 # [servidor]
 mkdir -p ${DATOS_RAIZ}/observabilidad/datos-kuma
 cd ${DATOS_RAIZ}/observabilidad
+pwd
 ```
+
+Criterio de aceptación: `pwd` muestra la ruta completa bajo `${DATOS_RAIZ}`, no `/observabilidad`.
 
 ### Paso 2 — Fichero compose
 
 ```bash
 # [servidor]
-cp ~/nomad_server/templates/compose/observabilidad/docker-compose.yml .
-vim docker-compose.yml
+cd ~/nomad_server
+nomad_plantilla compose/observabilidad/docker-compose.yml \
+    > ${DATOS_RAIZ}/observabilidad/docker-compose.yml
+cd ${DATOS_RAIZ}/observabilidad
 ```
 
-Sustituye `${DOZZLE_HOST}` y `${UPTIME_KUMA_HOST}` por tus nombres.
+Eso deja el archivo con tus nombres ya sustituidos. Compruébalo antes de levantar nada, porque una
+etiqueta `Host()` vacía hace que Traefik no cree el router y la herramienta quede inaccesible sin
+mensaje de error:
+
+```bash
+# [servidor]
+grep -E 'Host\(|entrypoints|middlewares' docker-compose.yml
+```
+
+Salida esperada, con los valores de ejemplo:
+
+```
+      - "traefik.http.routers.dozzle.rule=Host(`logs.nomad.lan`)"
+      - "traefik.http.routers.dozzle.entrypoints=interna"
+      - "traefik.http.routers.dozzle.middlewares=interno@file"
+      - "traefik.http.routers.kuma.rule=Host(`estado.nomad.lan`)"
+      - "traefik.http.routers.kuma.entrypoints=interna"
+      - "traefik.http.routers.kuma.middlewares=interno@file"
+```
+
+Criterio de aceptación: los dos `Host()` llevan nombres reales, y **los dos `entrypoints` dicen
+`interna`, nunca `web`**. Un `web` aquí publicaría los registros de todos tus contenedores en
+internet.
+
+```bash
+# [servidor] — validación completa antes de levantar
+docker compose config | grep -E 'published|Host\(|external'
+```
+
+Criterio de aceptación: **ninguna línea `published`** —estas herramientas no publican puertos— y las
+dos redes como externas.
 
 ### Paso 3 — Levanta
 
@@ -179,8 +295,12 @@ Criterio de aceptación: ambos `running` y, tras el período de arranque, `healt
 
 ```bash
 # [servidor]
-tailscale ip -4
+echo "Apunta los registros A a: ${TS_IP}"
+echo "  ${DOZZLE_HOST}      → ${TS_IP}"
+echo "  ${UPTIME_KUMA_HOST} → ${TS_IP}"
 ```
+
+Si `TS_IP` sale vacía, vuelve al capítulo [08](08_tailscale.md) paso 10 y persístela.
 
 En el panel de Cloudflare → **DNS → Records**, añade dos registros:
 
@@ -195,13 +315,23 @@ En el panel de Cloudflare → **DNS → Records**, añade dos registros:
 **Opción sin DNS — archivo `hosts` del cliente:**
 
 ```bash
-# [cliente]
-echo "100.x.y.z  logs.midominio.com estado.midominio.com" | sudo tee -a /etc/hosts
+# [cliente] — con el entorno cargado en tu equipo
+cd ~/nomad_server && source scripts/lib/entorno.sh
+echo "${TS_IP}  ${DOZZLE_HOST} ${UPTIME_KUMA_HOST}" | sudo tee -a /etc/hosts
+getent hosts ${DOZZLE_HOST}
 ```
+
+Criterio de aceptación: la última línea devuelve la IP de Tailscale. Hay que repetirlo en cada
+dispositivo desde el que quieras entrar, que es la pega de esta opción.
 
 ### Paso 5 — Comprueba Dozzle
 
-Abre `http://${DOZZLE_HOST}:${TRAEFIK_PUERTO_INTERNA}` desde un dispositivo de tu tailnet.
+```bash
+# [servidor] — la URL exacta, ya resuelta
+echo "http://${DOZZLE_HOST}:${TRAEFIK_PUERTO_INTERNA}"
+```
+
+Ábrela desde un dispositivo de tu tailnet.
 
 Deberías ver la lista de contenedores y sus registros en tiempo real.
 
@@ -218,7 +348,10 @@ docker exec dozzle wget -qO- http://socket-proxy:2375/v1.24/containers/json | he
 
 ### Paso 6 — Configura Uptime Kuma
 
-Abre `http://${UPTIME_KUMA_HOST}:${TRAEFIK_PUERTO_INTERNA}`.
+```bash
+# [servidor]
+echo "http://${UPTIME_KUMA_HOST}:${TRAEFIK_PUERTO_INTERNA}"
+```
 
 La primera vez pide crear una cuenta de administrador. Usa una contraseña de tu gestor.
 
@@ -265,32 +398,27 @@ Ajustes recomendados:
 El disco lleno es la causa más frecuente de caída en un servidor doméstico, y ningún monitor HTTP la
 detecta hasta que ya es tarde.
 
-En Uptime Kuma, crea un monitor de tipo **Push** llamado `Espacio en disco`. Te dará una URL con un
-identificador.
-
-```bash
-# [servidor]
-sudo vim /etc/systemd/system/nomad-espacio.service
-```
+En Uptime Kuma, **Añadir nuevo monitor** de tipo **Push**, llamado `Espacio en disco`. Nada más
+crearlo, la propia pantalla muestra una **Push URL** con este aspecto:
 
 ```
-[Unit]
-Description=Avisa a Uptime Kuma si queda espacio suficiente
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/nomad-espacio.sh
+http://estado.nomad.lan:8080/api/push/a1B2c3D4e5
 ```
 
-```bash
-# [servidor]
-sudo vim /usr/local/bin/nomad-espacio.sh
-```
+De ahí solo interesa el identificador final (`a1B2c3D4e5` en el ejemplo). **Anótalo ahora**: es un
+valor que solo existe en esa pantalla.
+
+> Cómo funciona un monitor *Push*, porque es al revés de lo habitual: Uptime Kuma **espera** recibir
+> una petición cada cierto tiempo. Si llega, verde. Si no llega, rojo. Por eso el script de abajo
+> avisa solo cuando **todo está bien**, y el silencio es la señal de alarma. Es el mismo mecanismo
+> del respaldo nocturno del capítulo [14](14_respaldos_restic.md) § 3.6.
+
+**Así queda el script** (con el identificador de ejemplo):
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-URL="http://localhost:8080/api/push/XXXXXX"   # el identificador de tu monitor
+URL="http://uptime-kuma:3001/api/push/a1B2c3D4e5"
 UMBRAL=85
 USO=$(df --output=pcent / | tail -1 | tr -dc '0-9')
 USO_VAR=$(df --output=pcent /var | tail -1 | tr -dc '0-9')
@@ -300,13 +428,67 @@ fi
 # Si supera el umbral no se envía nada: Uptime Kuma lo detecta como caída.
 ```
 
+**Y estos son los comandos que lo instalan.** Declara primero el identificador como variable
+temporal, para no tener que buscarlo tres veces:
+
 ```bash
 # [servidor]
-sudo chmod +x /usr/local/bin/nomad-espacio.sh
-sudo systemctl edit --force --full nomad-espacio.timer
+PUSH_ID=a1B2c3D4e5        # ← el tuyo, de la pantalla del monitor
+echo "URL: http://uptime-kuma:3001/api/push/${PUSH_ID}"
 ```
 
+```bash
+# [servidor]
+sudo tee /usr/local/bin/nomad-espacio.sh >/dev/null <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+URL="http://uptime-kuma:3001/api/push/${PUSH_ID}"
+UMBRAL=85
+USO=\$(df --output=pcent / | tail -1 | tr -dc '0-9')
+USO_VAR=\$(df --output=pcent /var | tail -1 | tr -dc '0-9')
+if (( USO < UMBRAL && USO_VAR < UMBRAL )); then
+    curl -fsS "\${URL}?status=up&msg=raiz+\${USO}%25+var+\${USO_VAR}%25" >/dev/null
+fi
+EOF
+sudo chmod +x /usr/local/bin/nomad-espacio.sh
 ```
+
+Fíjate en las barras invertidas: `${PUSH_ID}` **sí** se expande (es tuya, ahora), mientras que
+`\${URL}`, `\${USO}` y `\${USO_VAR}` se escapan para que lleguen literales al archivo y las
+resuelva el script cuando se ejecute. Es la mezcla de los dos casos del anexo
+[98 § 4.1](98_variables_y_entorno.md).
+
+Compruébalo antes de seguir:
+
+```bash
+# [servidor]
+grep -n 'api/push' /usr/local/bin/nomad-espacio.sh
+sudo bash -n /usr/local/bin/nomad-espacio.sh && echo "SINTAXIS CORRECTA"
+```
+
+Criterio de aceptación: la URL contiene tu identificador real y la sintaxis es válida.
+
+> **Sobre la dirección del monitor.** Se usa `http://uptime-kuma:3001` —el nombre del contenedor—
+> en lugar de `localhost:8080`, y no es un detalle: el script corre en el **host**, no dentro de un
+> contenedor, así que ese nombre no resolvería. Usa la dirección que sí funcione en tu caso:
+> `http://${TRAEFIK_BIND_INTERNA}:${TRAEFIK_PUERTO_INTERNA}/api/push/…` si el punto de entrada
+> interno está publicado, que es lo habitual. Compruébalo con el `curl` del final del paso.
+
+```bash
+# [servidor] — el servicio y el temporizador de systemd
+sudo tee /etc/systemd/system/nomad-espacio.service >/dev/null <<'EOF'
+[Unit]
+Description=Avisa a Uptime Kuma si queda espacio suficiente
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/nomad-espacio.sh
+EOF
+```
+
+```bash
+# [servidor]
+sudo tee /etc/systemd/system/nomad-espacio.timer >/dev/null <<'EOF'
 [Unit]
 Description=Comprobación periódica de espacio en disco
 
@@ -316,15 +498,24 @@ OnUnitActiveSec=15min
 
 [Install]
 WantedBy=timers.target
+EOF
 ```
 
 ```bash
 # [servidor]
+sudo systemctl daemon-reload
 sudo systemctl enable --now nomad-espacio.timer
 sudo systemctl start nomad-espacio.service
+sudo journalctl -u nomad-espacio -n 20 --no-pager
 ```
 
-Criterio de aceptación: el monitor pasa a verde en Uptime Kuma en pocos minutos.
+Criterio de aceptación: el servicio termina sin errores y el monitor pasa a verde en Uptime Kuma en
+pocos minutos. Si el `curl` falla, prueba la URL a mano para ver qué responde:
+
+```bash
+# [servidor]
+curl -v "http://${TRAEFIK_BIND_INTERNA}:${TRAEFIK_PUERTO_INTERNA}/api/push/${PUSH_ID}?status=up&msg=prueba"
+```
 
 ### Paso 9 — Herramientas de línea de comandos
 
@@ -391,10 +582,12 @@ Un proyecto no responde desde internet
 
 ## 6. Script asociado
 
+### 6.1 Vía A — con el script
+
 `scripts/13_observabilidad.sh` automatiza los pasos 1 a 3 y comprueba el acceso.
 
 ```bash
-# [servidor]
+# [servidor] — SIN sudo
 cd ~/nomad_server
 ./scripts/13_observabilidad.sh --help
 ./scripts/13_observabilidad.sh --check
@@ -411,6 +604,33 @@ Comportamiento destacable:
   los avisos.
 
 En modo `--check` muestra las diferencias del compose y valida su sintaxis, sin levantar nada.
+
+### 6.2 Correspondencia entre el script y los pasos manuales
+
+| Paso de la sección 5 | ¿Lo hace el script? | Nota |
+|---|---|---|
+| 0 — preparar la sesión | Sí | Comprueba Traefik y las redes |
+| 1 — directorio | Sí | |
+| 2 — fichero compose | Sí | Desde `templates/compose/observabilidad/docker-compose.yml` |
+| 3 — levantar | Sí | Y verifica que Dozzle alcanza el intermediario del socket |
+| 4 — acceso por nombre | **No** | Registros DNS o `/etc/hosts` |
+| 5 — comprobar Dozzle | Parcial | Verifica el socket; mirar la interfaz es tuyo |
+| 6 — cuenta y monitores de Uptime Kuma | **No** | Interfaz web con estado propio |
+| 7 — canal de avisos y su prueba | **No** | Depende de un servicio externo |
+| 8 — monitor de espacio en disco | **No** | Necesita el identificador que da Uptime Kuma |
+| 9–10 — herramientas y árbol de diagnóstico | — | Son referencia, no configuración |
+
+### 6.3 Lo que ninguna vía hace por ti
+
+Y esta vez la lista importa más que de costumbre, porque **un sistema de avisos a medias es peor que
+no tenerlo**: da la sensación de estar cubierto.
+
+- [ ] Crear la cuenta de administrador de Uptime Kuma con una contraseña de tu gestor.
+- [ ] Configurar al menos tres monitores (§ 5 paso 6).
+- [ ] Configurar el canal de avisos **y enviar una notificación de prueba**.
+- [ ] Marcar esa notificación como activa **en cada monitor**. Configurarla no basta.
+- [ ] Crear el monitor de espacio en disco y comprobar que pasa a verde.
+- [ ] Hacer la prueba real: parar un contenedor y ver llegar el aviso (§ 7).
 
 ---
 
@@ -462,9 +682,24 @@ Criterio de aceptación: `200`.
 ```bash
 # [servidor] — el temporizador de espacio en disco está activo
 systemctl is-active nomad-espacio.timer
+systemctl show nomad-espacio.service -p Result --value
 ```
 
-Criterio de aceptación: `active`.
+Criterio de aceptación: `active` y `success`.
+
+```bash
+# [servidor] — el compose no quedó con variables sin sustituir
+grep -n '\${' ${DATOS_RAIZ}/observabilidad/docker-compose.yml && echo "REVISAR" || echo "CORRECTO"
+```
+
+Criterio de aceptación: `CORRECTO`.
+
+```bash
+# [servidor] — el script de espacio apunta a una URL real
+grep 'api/push' /usr/local/bin/nomad-espacio.sh
+```
+
+Criterio de aceptación: aparece un identificador, no `XXXXXX` ni una URL cortada.
 
 **Comprobaciones manuales:**
 
@@ -529,6 +764,11 @@ histórico están en `datos-kuma/`, que el respaldo del capítulo 14 recoge.
 | Dozzle es accesible desde internet | Se le puso `entrypoints=web` | Cámbialo a `interna` y elimina cualquier registro DNS proxiado | § 3.3 |
 | Uptime Kuma consume mucha CPU | Demasiados monitores con intervalo muy corto | Sube el intervalo a 60 s o más. 20 segundos rara vez aporta algo | [Uptime Kuma](https://github.com/louislam/uptime-kuma/wiki) |
 | Tras actualizar Uptime Kuma se pierden los monitores | El volumen `datos-kuma` no estaba montado | Restaura desde el respaldo. Verifica el montaje en el compose | Capítulo [14](14_respaldos_restic.md) |
+| Traefik no crea el router de Dozzle | La etiqueta quedó como ``Host(`` `` `)`` porque `${DOZZLE_HOST}` estaba vacía | Renderiza el compose con el entorno cargado y recrea | § 5 paso 2 |
+| El script de espacio no avisa nunca | La URL de push apunta a un nombre que el host no resuelve | Usa `${TRAEFIK_BIND_INTERNA}:${TRAEFIK_PUERTO_INTERNA}` y prueba con `curl -v` | § 5 paso 8 |
+| El script de espacio se escribió con `${URL}` vacío | No se escaparon las variables internas al usar el heredoc | Reescríbelo con las barras invertidas del paso 8 | § 5 paso 8 |
+| Los registros DNS internos apuntan a la nada | `TS_IP` estaba vacía al crearlos | Capítulo [08](08_tailscale.md) paso 10, y corrige los registros | § 4.1 |
+| Perdí los monitores y los avisos al recrear el proyecto | Se borró `datos-kuma/` | Restaura desde el respaldo del capítulo 14 | § 4.3 |
 
 ---
 
@@ -540,6 +780,8 @@ histórico están en `datos-kuma/`, que el respaldo del capítulo 14 recoge.
 - [Docker — Comando stats](https://docs.docker.com/reference/cli/docker/container/stats/)
 - [systemd — Temporizadores](https://www.freedesktop.org/software/systemd/man/systemd.timer.html)
 - [`journalctl(1)`](https://manpages.debian.org/trixie/systemd/journalctl.1.en.html)
+- [templates/README.md](../templates/README.md) — el compose de observabilidad
+- Anexo [98 — Variables, entorno y sesiones](98_variables_y_entorno.md) § 4.1, sobre escapar variables en un heredoc
 
 ---
 

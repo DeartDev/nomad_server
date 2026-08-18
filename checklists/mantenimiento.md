@@ -8,6 +8,28 @@
 
 ---
 
+## Al empezar cualquiera de las tres rutinas
+
+```bash
+# [cliente]
+ssh nomad
+```
+
+```bash
+# [servidor]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+```
+
+- [ ] Entorno cargado. **Sin esto, los comandos con `${RESTIC_USB_MOUNT}`, `${DATOS_RAIZ}` o
+      `${DOMINIO_PUBLICO}` no hacen lo que dicen**, y algunos —como `df -h ${RESTIC_USB_MOUNT}`—
+      responden con datos de otro disco sin dar ningún error
+
+Los scripts (`verificar_sistema.sh`, `deploy.sh`, `14_restic.sh`) no lo necesitan: cargan la
+configuración por su cuenta. Los comandos manuales, sí.
+
+---
+
 ## Semanal — 2 minutos
 
 ```bash
@@ -99,10 +121,13 @@ docker logs traefik --since 720h 2>&1 | grep -i error | tail -20
 ### 8. Verificación final
 
 ```bash
-./scripts/verificar_sistema.sh
+sudo ./scripts/verificar_sistema.sh
+./scripts/variables.sh --estado
 ```
 
 - [ ] Sin fallos
+- [ ] `config/servidor.env` sigue coincidiendo con lo que hay montado: ninguna fila `FALTA` ni
+      `SIN CAMBIAR`
 
 ---
 
@@ -193,11 +218,19 @@ sudo vgs && sudo lvs && df -h
 - [ ] Ningún volumen por encima del 70 %
 - [ ] Ampliado lo que hiciera falta con `sudo lvextend -r -L +20G /dev/vg0/<lv>`
 
-### 8. Documentación
+### 8. Documentación y configuración
 
 - [ ] Los cambios hechos este trimestre están reflejados en el capítulo correspondiente
-- [ ] `config/servidor.env` sigue coincidiendo con la realidad
+- [ ] `config/servidor.env` sigue coincidiendo con la realidad (`./scripts/variables.sh --estado`)
+- [ ] **La copia de `config/servidor.env` en mi equipo está al día:**
+
+```bash
+# [cliente]
+scp ${ADMIN_USUARIO}@${LAN_IP}:~/nomad_server/config/servidor.env ./config/servidor.env
+```
+
 - [ ] `make check` pasa en el repositorio
+- [ ] El repositorio del servidor está al día: `git -C ~/nomad_server pull`
 
 ---
 
@@ -223,4 +256,4 @@ sudo vgs && sudo lvs && df -h
 
 ---
 
-**Anterior:** [Después de instalar](post_instalacion.md)
+**Anterior:** [Después de instalar](post_instalacion.md) · **Ver también:** [Empezar o retomar una sesión](reanudar_sesion.md)

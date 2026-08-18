@@ -24,6 +24,7 @@ ayuda: ## Muestra esta ayuda
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "    \033[1;34m%-22s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "  Empieza por:  docs/00_planificacion.md"
+	@echo "  Si vas a trabajar a mano:  source scripts/lib/entorno.sh"
 	@echo ""
 
 .PHONY: init
@@ -36,6 +37,32 @@ init: ## Crea config/servidor.env a partir de la plantilla
 		echo "[OK]    Creado config/servidor.env (permisos 600)."; \
 		echo "[INFO]  Edítalo antes de ejecutar cualquier script."; \
 	fi
+
+.PHONY: variables
+variables: ## Estado de config/servidor.env: qué está relleno y qué falta
+	@scripts/variables.sh --estado
+
+.PHONY: faltan
+faltan: ## Solo lo pendiente, con el capítulo y el comando que lo averigua
+	@scripts/variables.sh --faltan
+
+.PHONY: entorno
+entorno: ## Recuerda cómo cargar las variables en una sesión interactiva
+	@echo ""
+	@echo "  Las variables de config/servidor.env NO están en tu terminal."
+	@echo "  Para trabajar a mano, cárgalas en la sesión actual con:"
+	@echo ""
+	@echo "      source scripts/lib/entorno.sh"
+	@echo ""
+	@echo "  Ojo: 'source', no './'. Ejecutarlo crearía un proceso hijo y las"
+	@echo "  variables se perderían al terminar. Por eso este objetivo solo te"
+	@echo "  lo recuerda: make no puede modificar el shell que lo invoca."
+	@echo ""
+	@echo "  Hay que repetirlo en cada sesión nueva: al reconectar por SSH, tras"
+	@echo "  reiniciar el servidor, en cada terminal y en cada ventana de tmux."
+	@echo ""
+	@echo "  Detalle completo:  docs/98_variables_y_entorno.md"
+	@echo ""
 
 .PHONY: check
 check: ## Valida el repositorio completo (documentación + scripts)

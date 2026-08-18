@@ -227,6 +227,46 @@ mediante binarios setuid.
 **Lynis** — Herramienta de auditoría. Su valor no es la puntuación, sino poder comparar con la de
 hace seis meses (capítulo 07 § 3.5).
 
+### Variables y entorno
+
+**Variable del despliegue** — Cada valor concreto del servidor, declarado una sola vez en
+`config/servidor.env` y referenciado como `${NOMBRE}` en toda la documentación. Van siempre en
+mayúsculas (capítulo [98](98_variables_y_entorno.md)).
+
+**Variable decidida** — La que eliges en la planificación: nombre, red, dominio, usuario. Vive en
+`config/servidor.env` desde el capítulo 00.
+
+**Variable descubierta** — La que genera el propio montaje o depende del hardware real:
+`DISCO_DESTINO`, `LAN_INTERFAZ`, `TS_IP`, `CF_TUNEL_ID`, `RESTIC_USB_UUID`, `RESTIC_PUSH_URL`.
+**Hay que escribirla en `config/servidor.env` en cuanto se conoce**, o se pierde al cerrar la
+sesión.
+
+**Variable temporal de sesión** — La que solo tiene sentido durante unos minutos y **no** va en la
+configuración: `ISO`, `USB`, `DISCO`, `PROYECTO`, `INSTANTANEA`. Muere con el shell que la declaró.
+
+**Cargar el entorno** — Poner las variables de `config/servidor.env` a disposición de tu terminal,
+con `source scripts/lib/entorno.sh`. Hace falta **en cada sesión nueva** y solo en la vía manual:
+los scripts leen el archivo por su cuenta.
+
+**`source` (o `.`)** — Ejecutar un archivo **dentro** del shell actual, en lugar de en un proceso
+hijo. Es lo que hace que las variables se queden en tu sesión. Ejecutar `./entorno.sh` no serviría.
+
+**`export`** — Marcar una variable para que la hereden los programas que lances. Sin ella, la
+variable existe en tu shell pero `envsubst` o `docker compose` no la ven. `set -a` exporta
+automáticamente todo lo que se defina a continuación.
+
+**Heredoc** — El bloque `<<EOF … EOF` que alimenta un comando con varias líneas de texto. **Con
+comillas** (`<<'EOF'`) el texto llega literal; **sin comillas** (`<<EOF`) el shell sustituye las
+variables. Elegir mal es la causa de que un archivo quede con `${…}` sin sustituir, o al revés
+(capítulo [98 § 4.1](98_variables_y_entorno.md)).
+
+**`envsubst`** — Programa que sustituye variables dentro de un archivo. Aquí se le pasa siempre la
+**lista explícita** de nombres, para que no toque los `$` que pertenecen a otros programas.
+
+**`env_reset`** — Comportamiento por omisión de `sudo` en Debian: limpia el entorno antes de
+ejecutar el comando. Por eso `sudo sh -c '…${VAR}…'` no sustituye nada
+(capítulo [98 § 4.2](98_variables_y_entorno.md)).
+
 ### Este repositorio
 
 **Idempotente** — Que ejecutarlo dos veces deja el mismo resultado que ejecutarlo una vez. Todos los
@@ -234,8 +274,16 @@ scripts lo son.
 
 **Modo simulación (`--check`)** — Muestra lo que haría un script sin modificar nada.
 
+**Vía A / Vía B** — Las dos formas de recorrer el montaje: con los scripts, o a mano comando a
+comando. Producen el mismo resultado y se pueden mezclar (capítulo [97](97_vias_de_montaje.md)).
+
 **Plantilla** — Archivo de `templates/` con `${VARIABLES}` que se sustituyen por los valores de
-`config/servidor.env`.
+`config/servidor.env`. Se renderiza con `nomad_plantilla` o con el script del capítulo
+correspondiente ([templates/README.md](../templates/README.md)).
+
+**`nomad_plantilla`, `nomad_diff`, `nomad_fijar`, `nomad_estado`** — Ayudantes que quedan
+disponibles en la sesión tras cargar el entorno: renderizar una plantilla, compararla con lo
+instalado, persistir un valor descubierto y ver qué falta.
 
 **Manifiesto del sistema** — Lista de paquetes, imágenes y contenedores que se genera antes de cada
 respaldo. No vive en ningún archivo del sistema, y es lo primero que hace falta al reconstruir
@@ -246,6 +294,14 @@ respaldo. No vive en ningún archivo del sistema, y es lo primero que hace falta
 ## Referencias oficiales
 
 Solo documentación de origen. Los blogs y tutoriales envejecen mal y no se enlazan.
+
+### Shell y entorno
+
+- [Manual de `bash` — Expansión de parámetros](https://www.gnu.org/software/bash/manual/bash.html#Shell-Parameter-Expansion)
+- [Manual de `bash` — Documentos en línea (heredocs)](https://www.gnu.org/software/bash/manual/bash.html#Here-Documents)
+- [`sudoers(5)`](https://manpages.debian.org/trixie/sudo/sudoers.5.en.html)
+- [`envsubst(1)`](https://manpages.debian.org/trixie/gettext-base/envsubst.1.en.html)
+- [`tmux(1)`](https://manpages.debian.org/trixie/tmux/tmux.1.en.html)
 
 ### Debian
 
@@ -344,6 +400,18 @@ Solo documentación de origen. Los blogs y tutoriales envejecen mal y no se enla
 Los que más se usan, reunidos.
 
 ```bash
+# Empezar una sesión de trabajo (vía manual)
+cd ~/nomad_server
+source scripts/lib/entorno.sh               # carga las variables en ESTA terminal
+./scripts/variables.sh --faltan             # qué valores quedan pendientes
+
+# Variables
+./scripts/variables.sh --estado             # tabla completa
+./scripts/variables.sh --fijar VAR=valor    # persistir un valor descubierto
+./scripts/variables.sh --ver DATOS_RAIZ     # consultar un valor
+nomad_plantilla etc/nftables.conf           # renderizar una plantilla
+nomad_diff etc/nftables.conf /etc/nftables.conf
+
 # Estado general
 ./scripts/verificar_sistema.sh              # verificación completa
 ./scripts/verificar_sistema.sh --rapido     # rutina semanal
@@ -376,4 +444,4 @@ tailscale status
 
 ---
 
-**Anterior:** [16 — Recuperación ante desastres](16_recuperacion_ante_desastres.md) · **Índice:** [README](../README.md)
+**Anterior:** [98 — Variables, entorno y sesiones](98_variables_y_entorno.md) · **Índice:** [README](../README.md)

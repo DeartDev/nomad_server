@@ -52,6 +52,22 @@ fallar() {
 
 # ===========================================================================
 #  1. Comprobaciones previas
+#
+#  CÓMO APLICARLA A MANO (equivalente a lo que hace el script)
+#
+#      cd ~/nomad_server
+#      source scripts/lib/entorno.sh
+#      nomad_diff etc/nomad-respaldo.sh /usr/local/bin/nomad-respaldo.sh
+#      sudo cp -a /usr/local/bin/nomad-respaldo.sh \
+#          /usr/local/bin/nomad-respaldo.sh.bak-$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
+#      nomad_plantilla etc/nomad-respaldo.sh \
+#          | sudo tee /usr/local/bin/nomad-respaldo.sh >/dev/null
+#      sudo chmod 700 /usr/local/bin/nomad-respaldo.sh
+#
+#  Y después, para que tenga efecto:
+#      sudo bash -n /usr/local/bin/nomad-respaldo.sh && echo 'SINTAXIS CORRECTA'
+#
+#  Detalle: templates/README.md y docs/98_variables_y_entorno.md § 4.3
 # ===========================================================================
 registrar "=== Respaldo de ${servidor} ==="
 

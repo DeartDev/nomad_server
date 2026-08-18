@@ -28,7 +28,31 @@ hablar con él.
 - Un navegador para autorizar el nodo.
 - El cliente de Tailscale instalado en tu equipo y en tu móvil.
 
-**Tiempo estimado:** 20 minutos.
+**Preparar la sesión.**
+
+```bash
+# [servidor]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+echo "nodo=${TS_HOSTNAME} interfaz=${TS_INTERFAZ} rango=${TS_CIDR} suite=${DEBIAN_SUITE}"
+```
+
+Salida esperada, con los valores de ejemplo:
+
+```
+nodo=nomad interfaz=tailscale0 rango=100.64.0.0/10 suite=trixie
+```
+
+**Este capítulo produce un valor nuevo que hay que persistir**: `TS_IP`, la dirección del servidor
+dentro de tu tailnet. Sin ella, los capítulos [10](10_traefik.md) y [13](13_observabilidad.md) no
+podrán publicar el panel ni las herramientas de operación en una dirección alcanzable desde tu
+móvil. El paso 10 explica cómo escribirla.
+
+> **Trabaja por la LAN, no por Tailscale.** Es lo evidente —la VPN aún no existe— pero conviene
+> dejarlo dicho: si más adelante repites este capítulo, hazlo también desde la LAN. `tailscale up`
+> y `tailscale down` cortan tu propia sesión si estás conectado a través de la VPN.
+
+**Tiempo estimado:** 30 minutos.
 
 ---
 
@@ -125,17 +149,49 @@ Se combina bien con las actualizaciones desatendidas del capítulo 07.
 
 ## 4. Variables usadas
 
-| Variable | Uso |
-|---|---|
-| `TS_HOSTNAME` | Nombre del nodo dentro de la tailnet |
-| `TS_CIDR` | Rango permitido en el cortafuegos (capítulo 06) |
-| `TS_INTERFAZ` | Interfaz permitida en el cortafuegos |
-| `DEBIAN_SUITE` | Suite del repositorio de Tailscale |
-| `ADMIN_USUARIO` | Usuario con el que se entrará por SSH sobre la VPN |
+### 4.1 De `config/servidor.env`
+
+| Variable | Uso | Dónde |
+|---|---|---|
+| `TS_HOSTNAME` | Nombre del nodo dentro de la tailnet | Paso 3 |
+| `TS_CIDR` | Rango permitido en el cortafuegos (capítulo 06) | Paso 1 |
+| `TS_INTERFAZ` | Interfaz permitida en el cortafuegos | Paso 1 |
+| `DEBIAN_SUITE` | Suite del repositorio de Tailscale | Paso 2 |
+| `ADMIN_USUARIO` | Usuario con el que se entrará por SSH sobre la VPN | Pasos 5 y 8 |
+
+### 4.2 Variables que se DESCUBREN en este capítulo
+
+| Variable | Qué es | Cómo se obtiene | La necesitan |
+|---|---|---|---|
+| `TS_IP` | Dirección del servidor dentro de tu tailnet (`100.x.y.z`) | `tailscale ip -4` | Capítulos [10](10_traefik.md), [13](13_observabilidad.md) |
+| `TRAEFIK_BIND_INTERNA` | Dónde se publica el panel de Traefik. Pasa de `127.0.0.1` a `${TS_IP}` si eliges esa opción | Decisión tuya, en el paso 10 | Capítulos [10](10_traefik.md), [13](13_observabilidad.md) |
+
+Ambas se escriben en el paso 10. **Es un paso de treinta segundos que ahorra confusión dos capítulos
+después**: si `TS_IP` se queda vacía, Traefik intentará atarse a una dirección inexistente y Docker
+se negará a arrancar el contenedor con un mensaje que no menciona Tailscale por ningún lado.
+
+### 4.3 Valores que no van en `config/servidor.env`
+
+| Valor | Dónde vive | Por qué no |
+|---|---|---|
+| La clave de autenticación (`tskey-auth-…`) | Se genera y se usa en el momento | Es un secreto de un solo uso; guardarla sería el peor de los dos mundos |
+| El nombre completo MagicDNS (`nomad.tuorg.ts.net`) | Lo asigna Tailscale | Se consulta con `tailscale status`; no hace falta fijarlo |
+| Las ACL de la tailnet | En la consola web de Tailscale | No hay forma de gestionarlas desde el servidor |
 
 ---
 
 ## 5. Procedimiento
+
+### Paso 0 — Prepara la sesión
+
+```bash
+# [servidor]
+cd ~/nomad_server
+source scripts/lib/entorno.sh
+echo "nodo=${TS_HOSTNAME} interfaz=${TS_INTERFAZ} suite=${DEBIAN_SUITE}"
+```
+
+Criterio de aceptación: los tres tienen valor.
 
 ### Paso 1 — Comprueba que el cortafuegos ya permite la VPN
 
@@ -158,10 +214,7 @@ curl -fsSL https://pkgs.tailscale.com/stable/debian/${DEBIAN_SUITE}.noarmor.gpg 
 sudo chmod 644 /usr/share/keyrings/tailscale-archive-keyring.gpg
 ```
 
-```bash
-# [servidor]
-sudo vim /etc/apt/sources.list.d/tailscale.sources
-```
+**Así queda el archivo del repositorio** (con los valores de ejemplo):
 
 ```
 Types: deb
@@ -171,11 +224,46 @@ Components: main
 Signed-By: /usr/share/keyrings/tailscale-archive-keyring.gpg
 ```
 
+**Y este es el comando que lo escribe con tu suite:**
+
+```bash
+# [servidor]
+nomad_plantilla etc/tailscale.sources \
+    | sudo tee /etc/apt/sources.list.d/tailscale.sources >/dev/null
+```
+
+O sin la plantilla:
+
+```bash
+# [servidor]
+sudo tee /etc/apt/sources.list.d/tailscale.sources >/dev/null <<EOF
+Types: deb
+URIs: https://pkgs.tailscale.com/stable/debian
+Suites: ${DEBIAN_SUITE}
+Components: main
+Signed-By: /usr/share/keyrings/tailscale-archive-keyring.gpg
+EOF
+```
+
+Comprueba que la suite ha quedado escrita, porque una línea `Suites:` vacía hace que `apt update`
+falle con un error que no menciona el motivo:
+
+```bash
+# [servidor]
+grep '^Suites:' /etc/apt/sources.list.d/tailscale.sources
+```
+
+Criterio de aceptación: `Suites: trixie` (o tu suite real).
+
 ```bash
 # [servidor]
 sudo apt update
 sudo apt install -y tailscale
 ```
+
+> **Sobre la clave del repositorio.** Se descarga en formato binario (`.noarmor.gpg`), no ASCII. Es
+> el error más frecuente al añadir este repositorio a mano: con el archivo `.asc`, `apt update`
+> avisa de firma no válida.
 
 ### Paso 3 — Conecta el nodo
 
@@ -206,7 +294,9 @@ Salida esperada:
 100.101.102.103  nomad    tu@correo    linux   -
 ```
 
-Anota esa IP `100.x.y.z`: es la dirección del servidor **dentro de tu tailnet**, y es fija.
+Esa IP `100.x.y.z` es la dirección del servidor **dentro de tu tailnet**, y es fija mientras no
+cierres sesión y vuelvas a registrar el nodo. **No la anotes en un papel: persístela** en el paso
+10, que es donde se hace junto con el resto.
 
 ### Paso 4 — Desactiva la caducidad de la clave
 
@@ -336,11 +426,58 @@ tailscale status --json | jq -r '.Peer[] | "\(.HostName)\t\(.CurAddr // "relé D
 
 Si todo pasa por relé, revisa que la regla `udp dport 41641` del capítulo 06 está aplicada.
 
+### Paso 10 — Persiste la dirección de la tailnet
+
+**Este es el paso que evita un atasco dos capítulos más adelante.** La IP de Tailscale existe ahora
+mismo en la salida de un comando y en ningún archivo: si cierras la sesión sin escribirla, el
+capítulo 10 no sabrá dónde publicar el panel.
+
+```bash
+# [servidor]
+./scripts/variables.sh --fijar TS_IP="$(tailscale ip -4)"
+source scripts/lib/entorno.sh
+echo "TS_IP=${TS_IP}"
+```
+
+Criterio de aceptación: imprime una dirección `100.x.y.z`. Si imprime `TS_IP=`, `tailscale ip -4`
+no devolvió nada: comprueba `tailscale status` antes de seguir.
+
+**Y decide ahora dónde quieres el panel de Traefik y las herramientas de operación.** Es una
+decisión del capítulo [10](10_traefik.md), pero el momento de tomarla es este, con la VPN recién
+levantada:
+
+| Opción | `TRAEFIK_BIND_INTERNA` | Cómo se accede |
+|---|---|---|
+| **Por túnel SSH** (lo más cerrado) | `127.0.0.1` | `ssh -L 8080:127.0.0.1:8080 nomad` y luego `http://localhost:8080/dashboard/` |
+| **Por la tailnet** (lo más cómodo) | `${TS_IP}` | `http://100.x.y.z:8080/dashboard/` desde cualquier dispositivo tuyo, incluido el móvil |
+
+Las dos son privadas: `100.64.0.0/10` no se enruta por internet. La segunda es la que casi todo el
+mundo acaba usando.
+
+```bash
+# [servidor] — si eliges la tailnet
+./scripts/variables.sh --fijar TRAEFIK_BIND_INTERNA="$(tailscale ip -4)"
+source scripts/lib/entorno.sh
+```
+
+```bash
+# [servidor] — comprobación final de lo persistido
+./scripts/variables.sh --faltan
+```
+
+Criterio de aceptación: `TS_IP` ya no aparece en la lista de pendientes.
+
+> **Si repites el capítulo o reinstalas el nodo**, la IP puede cambiar. Vuelve a ejecutar este paso:
+> es idempotente y tarda dos segundos. Y recuerda que Traefik se niega a arrancar si intenta atarse
+> a una dirección que no existe en el sistema (capítulo 10 § 9).
+
 ---
 
 ## 6. Script asociado
 
-`scripts/08_tailscale.sh` automatiza los pasos 1, 2, 6 y 9, y guía los que necesitan navegador.
+### 6.1 Vía A — con el script
+
+`scripts/08_tailscale.sh` automatiza los pasos 1, 2, 3, 6 y 9, y guía los que necesitan navegador.
 
 ```bash
 # [servidor]
@@ -349,6 +486,13 @@ cd ~/nomad_server
 sudo ./scripts/08_tailscale.sh --check
 sudo ./scripts/08_tailscale.sh
 ```
+
+| Opción | Para qué |
+|---|---|
+| `--authkey <clave>` | Registra el nodo sin navegador. Usa siempre claves de un solo uso y caducidad corta |
+| `--etiqueta <tag>` | Registra el nodo con una etiqueta (`tag:servidor`). Los nodos etiquetados **no caducan nunca** |
+| `-n, --check` | Muestra qué cambiaría, sin instalar ni conectar |
+| `-y, --si` | No pide confirmación |
 
 Comportamiento destacable:
 
@@ -369,8 +513,34 @@ Genera siempre claves **de un solo uso y con caducidad corta**: una clave reutil
 permite a cualquiera meter un nodo en tu red privada. El script no la guarda en ningún archivo ni
 la muestra en el registro.
 
-Lo que **no** hace: los pasos 4, 5 y 7 (caducidad, MagicDNS y ACL) se hacen en la consola web y no
-tienen equivalente local.
+### 6.2 Correspondencia entre el script y los pasos manuales
+
+| Paso de la sección 5 | ¿Lo hace el script? | Nota |
+|---|---|---|
+| 0 — preparar la sesión | Sí | Carga la configuración por su cuenta |
+| 1 — comprobar el cortafuegos | Sí | **Aborta si no permite `${TS_INTERFAZ}`** |
+| 2 — repositorio y clave | Sí | Instala `templates/etc/tailscale.sources` |
+| 3 — conectar el nodo | Sí | Imprime la URL, o usa `--authkey` |
+| 4 — desactivar la caducidad de clave | **No** | Consola web. Es el paso que más se olvida |
+| 5 — MagicDNS | **No** | Consola web |
+| 6 — actualizaciones automáticas | Sí | |
+| 7 — ACL | **No** | Consola web |
+| 8 — probar desde fuera de casa | **No** | Requiere datos móviles |
+| 9 — diagnóstico | Sí | |
+| 10 — persistir `TS_IP` | **No** | `./scripts/variables.sh --fijar TS_IP="$(tailscale ip -4)"` |
+
+### 6.3 Lo que ninguna vía hace por ti
+
+Cuatro cosas, y las cuatro tienen consecuencias que aparecen tarde:
+
+- [ ] **Desactivar la caducidad de clave** (paso 4). Si se olvida, a los 180 días pierdes el acceso
+      remoto sin ningún aviso previo.
+- [ ] **Activar MagicDNS** (paso 5). Sin ella, hay que usar direcciones `100.x.y.z` en todas partes.
+- [ ] **Definir las ACL** (paso 7). Por omisión, todos tus dispositivos se alcanzan entre sí por
+      cualquier puerto.
+- [ ] **Persistir `TS_IP`** (paso 10). Sin ella, el capítulo 10 no puede publicar el panel.
+
+Las tres primeras se hacen en <https://login.tailscale.com/admin>; la cuarta, con un comando.
 
 ---
 
@@ -426,6 +596,27 @@ sudo nft list chain inet nomad_filter entrada | grep -c 'policy drop'
 
 Criterio de aceptación: `1`.
 
+```bash
+# [servidor] — la IP de la tailnet quedó persistida y coincide con la real
+./scripts/variables.sh --ver TS_IP
+tailscale ip -4
+```
+
+Criterio de aceptación: las dos líneas son iguales. Si difieren, el nodo se volvió a registrar:
+repite el paso 10.
+
+```bash
+# [servidor] — si elegiste publicar el panel en la tailnet, la dirección existe en el sistema
+source scripts/lib/entorno.sh
+ip -br addr | grep -q "${TRAEFIK_BIND_INTERNA}" \
+  && echo "DIRECCION VALIDA" \
+  || echo "REVISAR: ${TRAEFIK_BIND_INTERNA} no existe en este servidor"
+```
+
+Criterio de aceptación: `DIRECCION VALIDA`, o bien el valor es `127.0.0.1` (que siempre existe).
+Esta comprobación evita el fallo del capítulo 10 en el que Docker se niega a arrancar Traefik con un
+«cannot assign requested address».
+
 **Prueba de reinicio:** `sudo reboot` y comprobar que la VPN vuelve sola, sin autorizar nada.
 
 ---
@@ -474,6 +665,11 @@ como un dispositivo fantasma.
 | Dos nodos con el mismo nombre | Se reinstaló el servidor sin eliminar el nodo anterior | Elimina el antiguo en la consola. Tailscale renombra a `nomad-1`, `nomad-2`… | [Tailscale — Machines](https://tailscale.com/kb/1131/machine-names) |
 | La IP `100.x` cambia | Se cerró sesión y se volvió a registrar como nodo nuevo | Usa el nombre MagicDNS en lugar de la IP en tus configuraciones | [Tailscale — MagicDNS](https://tailscale.com/kb/1081/magicdns) |
 | `apt update` avisa de firma no válida en el repositorio de Tailscale | La clave se descargó en formato ASCII y no binario | Usa el archivo `.noarmor.gpg`, no el `.asc` | [Tailscale — Debian](https://tailscale.com/kb/1187/install-debian-trixie) |
+| `apt update` falla y `tailscale.sources` tiene `Suites:` vacío | El entorno no estaba cargado al escribir el archivo | `source scripts/lib/entorno.sh` y repite el paso 2 | § 5 paso 2 |
+| En el capítulo 10, Traefik no arranca: «cannot assign requested address» | `TRAEFIK_BIND_INTERNA` apunta a una IP de Tailscale que ya no existe o quedó vacía | Repite el paso 10 y comprueba con `ip -br addr` | § 5 paso 10 |
+| El capítulo 13 no encuentra a dónde apuntar los registros DNS internos | `TS_IP` no se persistió | `./scripts/variables.sh --fijar TS_IP="$(tailscale ip -4)"` | § 5 paso 10 |
+| Reinstalé el nodo y `TS_IP` ya no coincide | Al volver a registrarse, Tailscale puede asignar otra dirección | Repite el paso 10; usa el nombre MagicDNS donde puedas | § 4.2 |
+| `tailscale up` corta mi sesión SSH | Estabas conectado a través de la propia VPN | Trabaja desde la LAN mientras configuras Tailscale | § 2 |
 
 ---
 
@@ -487,6 +683,7 @@ como un dispositivo fantasma.
 - [Tailscale — Claves de autenticación](https://tailscale.com/kb/1085/auth-keys)
 - [Tailscale — Puertos y cortafuegos](https://tailscale.com/kb/1082/firewall-ports)
 - [Tailscale — Solución de problemas](https://tailscale.com/kb/1023/troubleshooting)
+- Anexo [98 — Variables, entorno y sesiones](98_variables_y_entorno.md) § 6, sobre persistir lo descubierto
 
 ---
 

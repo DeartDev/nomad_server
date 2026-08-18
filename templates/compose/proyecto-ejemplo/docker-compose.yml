@@ -6,6 +6,29 @@
 #  Copia este archivo a tu proyecto y ajusta lo marcado con «CAMBIAR».
 #  Todo lo demás son decisiones del servidor que conviene no tocar.
 #
+#  CÓMO COPIARLA. Hay dos formas, y la diferencia importa:
+#
+#  A) Con las variables ya sustituidas (recomendada la primera vez: el archivo
+#     queda legible y no depende del entorno al levantarlo).
+#
+#         cd ~/nomad_server
+#         source scripts/lib/entorno.sh
+#         PROYECTO=mi-proyecto
+#         nomad_plantilla compose/proyecto-ejemplo/docker-compose.yml \
+#             > ${DATOS_RAIZ}/${PROYECTO}/docker-compose.yml
+#
+#  B) Tal cual, dejando que Docker Compose resuelva ${VARIABLE} al levantar el
+#     proyecto. Compose las busca en el .env del proyecto o en el entorno, así
+#     que solo funciona si están declaradas allí.
+#
+#         cp ~/nomad_server/templates/compose/proyecto-ejemplo/docker-compose.yml .
+#
+#  OJO CON EL DOBLE DÓLAR del healthcheck de la base de datos:
+#      pg_isready -U $${POSTGRES_USER}
+#  Ese '$$' es el escape de Compose para que la variable la resuelva el
+#  CONTENEDOR y no Compose. No lo quites ni lo dupliques.
+#  Ver docs/98_variables_y_entorno.md § 4.4
+#
 #  LA REGLA QUE NO SE ROMPE: no hay sección 'ports:'. El acceso público llega
 #  por Traefik a través del túnel; el acceso privado, por el punto de entrada
 #  interno. Publicar un puerto aquí saltaría el cortafuegos (capítulo 09 § 3.2).
