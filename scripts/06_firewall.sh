@@ -247,6 +247,34 @@ if head -3 /etc/resolv.conf 2>/dev/null | grep -qiE '^#.*(generated|dhcpcd|dhcli
     log_aviso "que hace que este archivo pase a estar bajo tu control."
 fi
 
+# dhcpcd viene de serie en Debian y gestiona /etc/resolv.conf por omisión. Con
+# la interfaz en estático deja de hacerlo, pero al soltar el arrendamiento
+# RETIRA las entradas que había puesto y deja el archivo sin ningún
+# 'nameserver'. El servidor se queda sin resolución de nombres, y el síntoma no
+# aparece al hacer el cambio: aparece en el siguiente reinicio, cuando ya nadie
+# lo relaciona con esto. Desactivarle el hook lo cierra de raíz.
+if [[ -f /etc/dhcpcd.conf ]]; then
+    if grep -qE '^[[:space:]]*nohook[[:space:]]+resolv\.conf' /etc/dhcpcd.conf; then
+        log_sinca "dhcpcd ya tiene desactivado el hook de resolv.conf."
+    else
+        log_aviso "dhcpcd puede reescribir /etc/resolv.conf: se le desactiva ese hook."
+        respaldar_archivo /etc/dhcpcd.conf
+        if (( MODO_CHECK == 1 )); then
+            log_check "añadiría 'nohook resolv.conf' a /etc/dhcpcd.conf"
+            marcar_cambio
+        else
+            {
+                echo
+                echo "# Añadido por scripts/06_firewall.sh — docs/06_red_y_firewall.md § 3.3"
+                echo "# Este servidor gestiona /etc/resolv.conf a mano."
+                echo "nohook resolv.conf"
+            } >> /etc/dhcpcd.conf
+            marcar_cambio
+            log_ok "'nohook resolv.conf' añadido a /etc/dhcpcd.conf"
+        fi
+    fi
+fi
+
 DOMINIO_BUSQUEDA="${SERVIDOR_DOMINIO_LOCAL:-}"
 {
     echo "# Generado por scripts/06_firewall.sh — docs/06_red_y_firewall.md"
