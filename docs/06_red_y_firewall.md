@@ -474,6 +474,21 @@ Cómo funciona: se lanza en segundo plano (`&`) un proceso que espera cinco minu
 **todas** las reglas. Si el cortafuegos te expulsa, no puedes cancelarlo, así que a los cinco
 minutos se retira solo y recuperas el acceso.
 
+> **Cómo se cancela, y por qué importa el detalle.** El script no la cancela matando un proceso,
+> sino borrando un archivo centinela en `/run` que el proceso en segundo plano comprueba antes de
+> vaciar nada. La razón es que una cancelación por PID es poco fiable —el PID de `setsid` no es el
+> del proceso que duerme— y aquí un fallo no deja un proceso inofensivo: deja **un
+> `nft flush ruleset` armado** que se dispara minutos después, cuando ya no lo relacionas con el
+> comando que lo lanzó, y que se lleva por delante también las reglas de Docker.
+>
+> Si lanzas la red de seguridad a mano, cancélala con el mismo criterio y **comprueba que no queda
+> nada vivo**:
+>
+> ```bash
+> # [servidor]
+> ps -ef | grep -E 'nft flush ruleset' | grep -v grep || echo "  (ninguna armada)"
+> ```
+
 Sus tres limitaciones, que conviene tener claras:
 
 | Limitación | Consecuencia |
@@ -916,6 +931,8 @@ sudo systemctl restart networking
 | Tras reiniciar, la red no levanta y `/etc/network/interfaces` tiene la interfaz vacía | El entorno no estaba cargado al escribir el archivo | Consola física: restaura la copia `.bak-*` y repite el paso 6 con el entorno cargado | § 5 paso 6 |
 | `/etc/resolv.conf` tiene una sola línea con dos IP juntas | Se entrecomilló `${LAN_DNS}` en el bucle | Repite el paso 7 sin comillas alrededor de la variable | § 5 paso 7 |
 | La red de seguridad no me rescató | Se reinició el servidor, o murió al cerrar la sesión que la lanzó | Consola física. Trabaja dentro de `tmux` para que no muera | § 5 paso 5 |
+| El cortafuegos se vació solo minutos después, sin motivo aparente | Una red de seguridad de una ejecución anterior que no se canceló bien y se disparó tarde | `ps -ef \| grep 'nft flush ruleset'` para ver si queda alguna armada. Después `sudo systemctl restart nftables` y `sudo systemctl restart docker` | § 5 paso 5 |
+| Tras un flush inesperado, los contenedores pierden la red | `nft flush ruleset` borra también las cadenas de Docker | `sudo systemctl restart docker` las recrea | Capítulo [09](09_docker.md) § 3.2 |
 | Tras el paso 8, `ssh nomad` va a la dirección antigua | `~/.ssh/config` sigue con la IP anterior | Actualiza `HostName` (§ 5 paso 8) | Capítulo [05](05_usuarios_y_acceso_ssh.md) |
 
 ---

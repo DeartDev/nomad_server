@@ -133,30 +133,67 @@ else
         log_check "cargaría las reglas y habilitaría nftables.service"
     else
         # --- Red de seguridad ---------------------------------------------
-        RED_SEGURIDAD_PID=""
+        # Se cancela borrando un archivo centinela, no matando un PID.
+        #
+        # Guardar el PID de 'setsid' no sirve: no es el del proceso que duerme.
+        # Y un 'pkill -f' sobre la línea de comando es frágil. Si la
+        # cancelación falla, lo que queda no es un proceso inofensivo: es un
+        # 'nft flush ruleset' armado que se dispara minutos después, cuando ya
+        # nadie lo relaciona con este script, y que se lleva por delante también
+        # las reglas de Docker.
+        CENTINELA=""
         if (( MARGEN > 0 )); then
+            CENTINELA="$(mktemp /run/nomad-red-seguridad.XXXXXX)"
             log_info "Red de seguridad: el cortafuegos se retirará en ${MARGEN}s si algo falla."
-            setsid bash -c "sleep ${MARGEN}; nft flush ruleset" >/dev/null 2>&1 &
-            RED_SEGURIDAD_PID=$!
-            log_info "  (proceso ${RED_SEGURIDAD_PID})"
+            log_info "  (para cancelarla a mano: sudo rm -f ${CENTINELA})"
+            setsid bash -c "
+                sleep ${MARGEN}
+                [[ -e '${CENTINELA}' ]] || exit 0
+                rm -f '${CENTINELA}'
+                nft flush ruleset
+                logger -t nomad_server 'red de seguridad: cortafuegos retirado tras ${MARGEN}s'
+            " >/dev/null 2>&1 &
         else
             log_aviso "Red de seguridad desactivada (--margen 0)."
         fi
 
         systemctl enable --now nftables
-        systemctl reload nftables 2>/dev/null || systemctl restart nftables
-        marcar_cambio
-        log_ok "Cortafuegos cargado."
+        if systemctl reload nftables 2>/dev/null || systemctl restart nftables; then
+            marcar_cambio
+            log_ok "Cortafuegos cargado."
+        else
+            [[ -n "${CENTINELA}" ]] && rm -f "${CENTINELA}"
+            die "No se ha podido cargar el cortafuegos. Revisa: systemctl status nftables"
+        fi
 
-        # Comprobar que la política es la esperada.
-        if nft list chain inet nomad_filter entrada 2>/dev/null | grep -q 'policy drop'; then
+        # Comprobar que la política es la esperada. Se reintenta: dar por bueno
+        # un 'no' a la primera sería tan malo como dar por bueno un 'sí'.
+        POLITICA_OK=0
+        for _ in 1 2 3; do
+            if nft list chain inet nomad_filter entrada 2>/dev/null | grep -q 'policy drop'; then
+                POLITICA_OK=1
+                break
+            fi
+            sleep 1
+        done
+
+        if (( POLITICA_OK == 1 )); then
             log_ok "Cadena de entrada con política 'drop'."
         else
-            log_error "La cadena de entrada no tiene política 'drop'."
+            # Sin política 'drop' no hay nada bloqueando, así que no puedes
+            # quedarte fuera: la red de seguridad ya no protege de nada y
+            # dejarla armada solo serviría para borrarle las reglas a Docker.
+            [[ -n "${CENTINELA}" ]] && rm -f "${CENTINELA}"
+            log_error "La cadena de entrada NO tiene política 'drop'."
+            log_error "El cortafuegos no está protegiendo el servidor."
+            log_error "Diagnostica con:"
+            log_error "    sudo nft list ruleset | head -30"
+            log_error "    systemctl status nftables"
+            die "Se detiene antes de tocar la red."
         fi
 
         # Si seguimos aquí y hay sesión SSH, la conexión ha sobrevivido.
-        if [[ -n "${RED_SEGURIDAD_PID}" ]]; then
+        if [[ -n "${CENTINELA}" ]]; then
             echo
             log_aviso "COMPRUEBA AHORA, desde OTRA terminal, que puedes entrar:"
             log_aviso "    ssh ${ADMIN_USUARIO:-usuario}@${LAN_IP}"
@@ -164,8 +201,7 @@ else
             log_aviso "Si NO puedes, no hagas nada: en ${MARGEN}s el cortafuegos se retira solo."
             echo
             if confirmar "¿Has comprobado que sigues teniendo acceso?"; then
-                kill "${RED_SEGURIDAD_PID}" 2>/dev/null || true
-                pkill -f "sleep ${MARGEN}; nft flush ruleset" 2>/dev/null || true
+                rm -f "${CENTINELA}"
                 log_ok "Red de seguridad cancelada."
             else
                 log_aviso "Red de seguridad ACTIVA: el cortafuegos se retirará en breve."
