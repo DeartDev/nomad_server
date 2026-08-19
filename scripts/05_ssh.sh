@@ -108,7 +108,16 @@ if [[ "$(stat -c '%a' "${AUTORIZADAS}")" != "600" ]]; then
 else
     log_sinca "Permisos de authorized_keys correctos (600)."
 fi
-ejecutar chown -R "${ADMIN_USUARIO}:${ADMIN_USUARIO}" "${HOME_ADMIN}/.ssh"
+# El propietario también importa: OpenSSH ignora un authorized_keys que no
+# pertenezca al usuario. Se corrige solo si hace falta; hacerlo siempre
+# contaría como un cambio en cada ejecución.
+DUENO_ACTUAL="$(stat -c '%U:%G' "${HOME_ADMIN}/.ssh")"
+if [[ "${DUENO_ACTUAL}" != "${ADMIN_USUARIO}:${ADMIN_USUARIO}" ]] \
+   || find "${HOME_ADMIN}/.ssh" ! -user "${ADMIN_USUARIO}" -print -quit | grep -q .; then
+    ejecutar chown -R "${ADMIN_USUARIO}:${ADMIN_USUARIO}" "${HOME_ADMIN}/.ssh"
+else
+    log_sinca "Propietario de ~/.ssh correcto (${ADMIN_USUARIO})."
+fi
 
 # ===========================================================================
 #  2. ssh.socket → ssh.service
