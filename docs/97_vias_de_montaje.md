@@ -271,12 +271,24 @@ fallan meses después.
 
 | Propiedad | Qué significa en la práctica |
 |---|---|
-| **Idempotencia** | Ejecutarlo dos veces deja el sistema igual que ejecutarlo una. La segunda vez informa con `[=]` de lo que ya estaba en su sitio |
+| **Idempotencia** | Ejecutarlo dos veces deja el sistema igual que ejecutarlo una. La segunda vez informa con `[=]` de lo que ya estaba en su sitio, y termina con **`Cambios aplicados: 0`** |
+| **Reinicios condicionados** | Un servicio solo se reinicia o se recarga si su configuración ha cambiado. `apt-get update` solo se ejecuta si cambió la definición de repositorios o falta por instalar algo |
 | **Copia previa** | Todo archivo del sistema que se modifique se copia antes a `<archivo>.bak-<fecha-hora>` |
 | **Validación antes de aplicar** | `sshd -t`, `nft -c`, `docker compose config` y `unattended-upgrade --dry-run` se ejecutan **antes** de reiniciar nada |
 | **Carga del entorno** | Cada script lee `config/servidor.env` por su cuenta y aborta si falta una variable obligatoria |
 | **Código de salida** | `0` correcto, distinto de `0` fallo. Se pueden encadenar con `&&` |
 | **Privilegios** | Los de sistema piden `sudo`; los de Docker (10, 11, 13, `deploy.sh`) se ejecutan **sin** `sudo`, con el grupo `docker` |
+
+> **El criterio de «capítulo terminado» es que su script informe de cero cambios.** No basta con que
+> no dé errores: mientras siga proponiendo algo, hay una diferencia entre lo documentado y lo
+> instalado, aunque sea inofensiva. Es la comprobación que conviene repetir al final de cada
+> capítulo:
+>
+> ```bash
+> sudo ./scripts/NN_*.sh --check 2>&1 | tail -3
+> ```
+>
+> Criterio de aceptación: `Cambios que se aplicarían: 0`.
 
 Prefijos de salida, iguales en todos:
 

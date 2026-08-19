@@ -104,6 +104,7 @@ fi
 # ===========================================================================
 log_paso "2/7 · Repositorios APT"
 
+CAMBIOS_ANTES_REPO="${NOMAD_CAMBIOS}"
 instalar_plantilla etc/debian.sources /etc/apt/sources.list.d/debian.sources 644 root:root
 
 # El formato antiguo, si sigue presente, duplicaría las definiciones.
@@ -115,7 +116,14 @@ else
     log_sinca "No hay un sources.list antiguo con entradas activas."
 fi
 
-ejecutar apt-get update
+# 'apt-get update' solo tiene sentido si la definición de repositorios ha
+# cambiado, o si aún falta por instalar lo que este capítulo necesita. Hacerlo
+# siempre convertiría cada pasada en un cambio.
+if (( NOMAD_CAMBIOS > CAMBIOS_ANTES_REPO )); then
+    ejecutar apt-get update
+else
+    log_sinca "Los repositorios no han cambiado: no se actualiza el índice."
+fi
 
 # ===========================================================================
 #  3. ACTUALIZACIÓN DEL SISTEMA

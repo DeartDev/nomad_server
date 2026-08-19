@@ -95,11 +95,16 @@ fi
 # ===========================================================================
 log_paso "2/6 · Límites del registro"
 
+CAMBIOS_ANTES_JOURNALD="${NOMAD_CAMBIOS}"
 instalar_plantilla etc/journald-nomad.conf \
     /etc/systemd/journald.conf.d/50-nomad.conf 644 root:root
 
 if (( MODO_CHECK == 0 )); then
-    ejecutar systemctl restart systemd-journald
+    if (( NOMAD_CAMBIOS > CAMBIOS_ANTES_JOURNALD )); then
+        ejecutar systemctl restart systemd-journald
+    else
+        log_sinca "La configuración del registro no ha cambiado: no se reinicia journald."
+    fi
 
     USO_ACTUAL="$(journalctl --disk-usage 2>/dev/null | grep -oE '[0-9.]+[KMG]' | head -1)"
     log_info "Espacio usado por el registro: ${USO_ACTUAL:-desconocido}"
@@ -126,11 +131,16 @@ else
     log_ok "Nadie está desactivando net.ipv4.ip_forward."
 fi
 
+CAMBIOS_ANTES_SYSCTL="${NOMAD_CAMBIOS}"
 instalar_plantilla etc/sysctl-nomad.conf \
     /etc/sysctl.d/60-nomad-endurecimiento.conf 644 root:root
 
 if (( MODO_CHECK == 0 )); then
-    ejecutar sysctl --system >/dev/null
+    if (( NOMAD_CAMBIOS > CAMBIOS_ANTES_SYSCTL )); then
+        ejecutar sysctl --system >/dev/null
+    else
+        log_sinca "Los parámetros del kernel no han cambiado: no se recargan."
+    fi
 
     log_info "Valores aplicados:"
     for parametro in kernel.kptr_restrict kernel.dmesg_restrict \
