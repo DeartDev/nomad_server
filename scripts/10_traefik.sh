@@ -100,7 +100,7 @@ case "${TRAEFIK_BIND_INTERNA}" in
         log_ok "El punto de entrada interno se atará a 127.0.0.1 (túnel SSH)."
         ;;
     *)
-        if ip -br -4 addr | grep -qw "${TRAEFIK_BIND_INTERNA}"; then
+        if ip -br -4 addr | contiene -w "${TRAEFIK_BIND_INTERNA}"; then
             log_ok "La dirección ${TRAEFIK_BIND_INTERNA} existe en este host."
         else
             log_error "La dirección ${TRAEFIK_BIND_INTERNA} no existe en este host."
@@ -187,7 +187,7 @@ if (( MODO_CHECK == 0 )); then
         log_error "Eso contradice el diseño de este servidor (capítulo 09 § 3.2)."
     fi
 
-    if ss -tlnp 2>/dev/null | grep -qE '0\.0\.0\.0:80\b|:::80\b'; then
+    if ss -tlnp 2>/dev/null | contiene -E '0\.0\.0\.0:80\b|:::80\b'; then
         log_error "El puerto 80 está escuchando en todas las interfaces."
         log_error "Traefik no debe publicar su punto de entrada público."
     else

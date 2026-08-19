@@ -220,7 +220,7 @@ case "${ACCION}" in
         fi
 
         # 3. ¿Están las credenciales del túnel?
-        if r ls latest 2>/dev/null | grep -q 'cloudflared'; then
+        if r ls latest 2>/dev/null | contiene 'cloudflared'; then
             log_ok "Las credenciales del túnel están en el respaldo."
         else
             log_error "Las credenciales del túnel NO están en el respaldo."
@@ -229,7 +229,7 @@ case "${ACCION}" in
         fi
 
         # 4. ¿Está el manifiesto del sistema?
-        if r ls latest 2>/dev/null | grep -q 'paquetes.txt'; then
+        if r ls latest 2>/dev/null | contiene 'paquetes.txt'; then
             log_ok "El manifiesto del sistema está en el respaldo."
         else
             log_aviso "Falta el manifiesto del sistema. Ejecuta un respaldo nuevo."
@@ -287,7 +287,7 @@ LINEA_FSTAB="UUID=${RESTIC_USB_UUID}  ${RESTIC_USB_MOUNT}  ext4  defaults,nofail
 
 if grep -q "${RESTIC_USB_UUID}" /etc/fstab; then
     log_sinca "El disco ya está declarado en /etc/fstab."
-    if ! grep "${RESTIC_USB_UUID}" /etc/fstab | grep -q nofail; then
+    if ! grep "${RESTIC_USB_UUID}" /etc/fstab | contiene nofail; then
         log_error "Su entrada en fstab NO tiene 'nofail'."
         log_error "Si el disco falla, el servidor no arrancará."
         log_error "Añade 'nofail' a las opciones de esa línea."

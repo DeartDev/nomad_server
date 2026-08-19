@@ -88,7 +88,7 @@ elif ! nft list chain inet nomad_filter entrada >/dev/null 2>&1; then
     log_aviso "Ejecuta antes: sudo ./scripts/06_firewall.sh"
     confirmar "¿Continuar de todos modos?" || die "Cancelado."
 else
-    if nft list chain inet nomad_filter entrada | grep -q "${TS_INTERFAZ}"; then
+    if nft list chain inet nomad_filter entrada | contiene "${TS_INTERFAZ}"; then
         log_ok "El cortafuegos permite la interfaz ${TS_INTERFAZ}."
     else
         log_error "El cortafuegos NO permite ${TS_INTERFAZ}."
@@ -96,7 +96,7 @@ else
         die "Ejecuta antes: sudo ./scripts/06_firewall.sh"
     fi
 
-    if nft list chain inet nomad_filter entrada | grep -q '41641'; then
+    if nft list chain inet nomad_filter entrada | contiene '41641'; then
         log_ok "El cortafuegos permite las conexiones directas (UDP 41641)."
     else
         log_aviso "Falta la regla 'udp dport 41641': la VPN funcionará, pero por relé."
@@ -141,7 +141,7 @@ fi
 # cambiado, o si aún falta por instalar lo que este capítulo necesita. Hacerlo
 # siempre convertiría cada pasada en un cambio.
 if (( NOMAD_CAMBIOS > CAMBIOS_ANTES_REPO )) \
-   || ! dpkg-query -W -f='${Status}' tailscale 2>/dev/null | grep -q "ok installed"; then
+   || ! dpkg-query -W -f='${Status}' tailscale 2>/dev/null | contiene "ok installed"; then
     ejecutar apt-get update
 else
     log_sinca "El repositorio no ha cambiado y tailscale ya está instalado."
@@ -162,7 +162,7 @@ log_paso "4/6 · Conexión a la tailnet"
 
 if (( MODO_CHECK == 1 )); then
     log_check "ejecutaría: tailscale up --hostname=${TS_HOSTNAME}"
-elif tailscale status >/dev/null 2>&1 && ! tailscale status 2>&1 | grep -q 'Logged out'; then
+elif tailscale status >/dev/null 2>&1 && ! tailscale status 2>&1 | contiene 'Logged out'; then
     log_sinca "El nodo ya está conectado a la tailnet."
     tailscale status | head -5 | sed 's/^/          /'
 else
@@ -215,7 +215,7 @@ if (( MODO_CHECK == 0 )); then
     log_info "Conectividad:"
     tailscale netcheck 2>/dev/null | grep -E 'UDP|IPv4|DERP' | sed 's/^/          /' || true
 
-    if tailscale netcheck 2>/dev/null | grep -q 'UDP: true'; then
+    if tailscale netcheck 2>/dev/null | contiene 'UDP: true'; then
         log_ok "Hay conectividad UDP directa."
     else
         log_aviso "Sin conectividad UDP directa: el tráfico irá por relé y será más lento."

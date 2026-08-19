@@ -77,7 +77,7 @@ instalar_plantilla etc/apt-periodic.conf \
 
 if (( MODO_CHECK == 0 )); then
     log_info "Comprobando la configuración con una ejecución en seco…"
-    if unattended-upgrade --dry-run 2>&1 | grep -q "${DEBIAN_SUITE}-security"; then
+    if unattended-upgrade --dry-run 2>&1 | contiene "${DEBIAN_SUITE}-security"; then
         log_ok "Los parches de seguridad de ${DEBIAN_SUITE} están cubiertos."
     else
         log_error "unattended-upgrades NO cubre ${DEBIAN_SUITE}-security."

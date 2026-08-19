@@ -139,7 +139,7 @@ fi
 # cambiado, o si aún falta por instalar lo que este capítulo necesita. Hacerlo
 # siempre convertiría cada pasada en un cambio.
 if (( NOMAD_CAMBIOS > CAMBIOS_ANTES_REPO )) \
-   || ! dpkg-query -W -f='${Status}' docker-ce 2>/dev/null | grep -q "ok installed"; then
+   || ! dpkg-query -W -f='${Status}' docker-ce 2>/dev/null | contiene "ok installed"; then
     ejecutar apt-get update
 else
     log_sinca "El repositorio no ha cambiado y docker-ce ya está instalado."
@@ -151,7 +151,7 @@ fi
 log_paso "3/7 · Docker CE y Compose v2"
 
 # El paquete docker.io de Debian entraría en conflicto con docker-ce.
-if dpkg-query -W -f='${Status}' docker.io 2>/dev/null | grep -q "ok installed"; then
+if dpkg-query -W -f='${Status}' docker.io 2>/dev/null | contiene "ok installed"; then
     log_aviso "El paquete 'docker.io' de Debian está instalado y entra en conflicto."
     confirmar "¿Eliminarlo antes de instalar docker-ce?" \
         && ejecutar apt-get purge -y docker.io \
@@ -197,7 +197,7 @@ fi
 # ===========================================================================
 log_paso "5/7 · Grupo docker"
 
-if id -nG "${ADMIN_USUARIO}" | tr ' ' '\n' | grep -qx docker; then
+if id -nG "${ADMIN_USUARIO}" | tr ' ' '\n' | contiene -x docker; then
     log_sinca "'${ADMIN_USUARIO}' ya pertenece al grupo docker."
 else
     log_aviso "Pertenecer al grupo 'docker' equivale a ser root sin contraseña:"
@@ -293,7 +293,7 @@ fi
 # ===========================================================================
 resumen_final "09_docker"
 
-if (( MODO_CHECK == 0 )) && ! id -nG "${ADMIN_USUARIO}" | tr ' ' '\n' | grep -qx docker; then
+if (( MODO_CHECK == 0 )) && ! id -nG "${ADMIN_USUARIO}" | tr ' ' '\n' | contiene -x docker; then
     :
 else
     echo

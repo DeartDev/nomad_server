@@ -210,6 +210,28 @@ comprobar_scripts() {
         grep -q 'mostrar_ayuda' "${script}" \
             || fallo "${script} no define mostrar_ayuda() (--help es obligatorio)"
     done < <(find scripts -name '*.sh' -type f | sort)
+
+    # 'grep -q' al final de una tubería es incorrecto con 'set -o pipefail':
+    # cierra la tubería al primer acierto, el productor recibe SIGPIPE y termina
+    # con 141, y pipefail convierte ese 141 en el resultado de la tubería. La
+    # coincidencia se encuentra y se interpreta como fallo, de forma
+    # intermitente. Se usa contiene(), de lib/common.sh.
+    local tuberias
+    tuberias="$(grep -rnE '\|[[:space:]]*grep[[:space:]]+-[a-zA-Z]*q' scripts/ || true)"
+    if [[ -z "${tuberias}" ]]; then
+        log_ok "ninguna tubería termina en 'grep -q' (se usa contiene())"
+    else
+        fallo "hay tuberías que terminan en 'grep -q'; usa contiene() de lib/common.sh:"
+        printf '%s\n' "${tuberias}" | sed 's/^/          /'
+    fi
+
+    # Lo mismo con 'head', que también cierra la tubería en cuanto tiene lo suyo.
+    local cabeceras
+    cabeceras="$(grep -rnE '\|[[:space:]]*head[[:space:]]+-c' scripts/ || true)"
+    if [[ -n "${cabeceras}" ]]; then
+        log_aviso "tuberías con 'head -c': el productor puede recibir SIGPIPE."
+        printf '%s\n' "${cabeceras}" | sed 's/^/          /'
+    fi
 }
 
 # ===========================================================================
@@ -277,7 +299,7 @@ comprobar_docs() {
         for variable in ${usadas}; do
             grep -qx "${variable}" <<<"${definidas}" && continue
             grep -qx "${variable}" <<<"${locales}" && continue
-            printf '%s\n' "${VARIABLES_PERMITIDAS[@]}" | grep -qx "${variable}" && continue
+            printf '%s\n' "${VARIABLES_PERMITIDAS[@]}" | contiene -x "${variable}" && continue
             fallo "${archivo}: \${${variable}} no está en config/servidor.env.example ni se define en el propio archivo"
         done
     done < <(find docs templates -type f \( -name '*.md' -o -name '*.cfg' -o -name '*.yml' -o -name '*.conf' \) | sort)

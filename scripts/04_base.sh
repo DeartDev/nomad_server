@@ -92,7 +92,7 @@ else
     fi
 fi
 
-if id -nG "${ADMIN_USUARIO}" | tr ' ' '\n' | grep -qx sudo; then
+if id -nG "${ADMIN_USUARIO}" | tr ' ' '\n' | contiene -x sudo; then
     log_sinca "'${ADMIN_USUARIO}' ya pertenece al grupo sudo."
 else
     ejecutar usermod -aG sudo "${ADMIN_USUARIO}"
@@ -184,7 +184,7 @@ else
     ejecutar timedatectl set-ntp true
 fi
 
-if locale -a 2>/dev/null | grep -qiF "${SERVIDOR_LOCALE//-/}"; then
+if locale -a 2>/dev/null | contiene -iF "${SERVIDOR_LOCALE//-/}"; then
     log_sinca "La configuración regional ${SERVIDOR_LOCALE} ya está generada."
 else
     ejecutar sed -i "s/^# *\(${SERVIDOR_LOCALE}\)/\1/" /etc/locale.gen

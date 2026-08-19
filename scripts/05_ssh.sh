@@ -113,7 +113,7 @@ fi
 # contaría como un cambio en cada ejecución.
 DUENO_ACTUAL="$(stat -c '%U:%G' "${HOME_ADMIN}/.ssh")"
 if [[ "${DUENO_ACTUAL}" != "${ADMIN_USUARIO}:${ADMIN_USUARIO}" ]] \
-   || find "${HOME_ADMIN}/.ssh" ! -user "${ADMIN_USUARIO}" -print -quit | grep -q .; then
+   || find "${HOME_ADMIN}/.ssh" ! -user "${ADMIN_USUARIO}" -print -quit | contiene .; then
     ejecutar chown -R "${ADMIN_USUARIO}:${ADMIN_USUARIO}" "${HOME_ADMIN}/.ssh"
 else
     log_sinca "Propietario de ~/.ssh correcto (${ADMIN_USUARIO})."
@@ -229,7 +229,7 @@ else
 
     if (( MODO_CHECK == 0 )); then
         sleep 2
-        if fail2ban-client status sshd 2>/dev/null | grep -q 'Journal matches'; then
+        if fail2ban-client status sshd 2>/dev/null | contiene 'Journal matches'; then
             log_ok "fail2ban lee el journal de systemd (backend correcto)."
         else
             log_aviso "fail2ban no parece estar leyendo el journal."

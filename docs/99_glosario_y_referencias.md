@@ -270,7 +270,13 @@ ejecutar el comando. Por eso `sudo sh -c '…${VAR}…'` no sustituye nada
 ### Este repositorio
 
 **Idempotente** — Que ejecutarlo dos veces deja el mismo resultado que ejecutarlo una vez. Todos los
-scripts lo son.
+scripts lo son, y un capítulo terminado hace que su script informe de **cero cambios**.
+
+**`contiene()`** — Función de `scripts/lib/common.sh` que sustituye a `comando | grep -q patrón`.
+Esa combinación es incorrecta con `set -o pipefail`: `grep -q` cierra la tubería al primer acierto,
+el productor recibe `SIGPIPE` y termina con 141, y `pipefail` propaga ese 141 como resultado de la
+tubería. La coincidencia se encuentra y se interpreta como fallo, de forma intermitente. `make
+check` comprueba que no reaparezca el patrón.
 
 **Modo simulación (`--check`)** — Muestra lo que haría un script sin modificar nada.
 

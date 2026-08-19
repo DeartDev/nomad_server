@@ -151,7 +151,7 @@ verificar_seguridad() {
             && log_ok "Acceso de root por SSH denegado." \
             || fallo "root PUEDE entrar por SSH."
 
-        if sudo passwd -S root 2>/dev/null | awk '{print $2}' | grep -qx L; then
+        if sudo passwd -S root 2>/dev/null | awk '{print $2}' | contiene -x L; then
             log_ok "Cuenta de root bloqueada."
         else
             aviso "La cuenta de root no está bloqueada."
@@ -163,7 +163,7 @@ verificar_seguridad() {
     if systemctl is-active --quiet fail2ban 2>/dev/null; then
         log_ok "fail2ban activo."
         if puede_sudo; then
-            sudo fail2ban-client status sshd 2>/dev/null | grep -q 'Journal matches' \
+            sudo fail2ban-client status sshd 2>/dev/null | contiene 'Journal matches' \
                 && log_ok "fail2ban lee el journal (backend correcto)." \
                 || aviso "fail2ban podría no estar leyendo nada: revisa 'backend = systemd'."
         fi
@@ -203,7 +203,7 @@ verificar_red() {
     log_paso "Red y cortafuegos"
 
     if puede_sudo; then
-        if sudo nft list chain inet nomad_filter entrada 2>/dev/null | grep -q 'policy drop'; then
+        if sudo nft list chain inet nomad_filter entrada 2>/dev/null | contiene 'policy drop'; then
             log_ok "Cortafuegos con política 'drop' en entrada."
         else
             fallo "El cortafuegos NO tiene política 'drop' en entrada."
@@ -240,7 +240,7 @@ verificar_red() {
     fi
 
     if command -v tailscale >/dev/null 2>&1; then
-        if tailscale status >/dev/null 2>&1 && ! tailscale status 2>&1 | grep -q 'Logged out'; then
+        if tailscale status >/dev/null 2>&1 && ! tailscale status 2>&1 | contiene 'Logged out'; then
             log_ok "Tailscale conectado ($(tailscale ip -4 2>/dev/null | head -1))."
             local caducidad
             caducidad="$(tailscale status --json 2>/dev/null | jq -r '.Self.KeyExpiry // "null"' 2>/dev/null || echo null)"
@@ -322,7 +322,7 @@ verificar_publicacion() {
         return
     }
 
-    if docker ps --format '{{.Names}}' | grep -qx traefik; then
+    if docker ps --format '{{.Names}}' | contiene -x traefik; then
         log_ok "Traefik en marcha."
         docker exec traefik traefik healthcheck --ping >/dev/null 2>&1 \
             && log_ok "Traefik responde a su comprobación de salud." \
@@ -331,13 +331,13 @@ verificar_publicacion() {
         fallo "Traefik NO está en marcha: ningún proyecto es accesible."
     fi
 
-    if docker ps --format '{{.Names}}' | grep -qx socket-proxy; then
+    if docker ps --format '{{.Names}}' | contiene -x socket-proxy; then
         log_ok "Intermediario del socket en marcha."
     else
         fallo "El intermediario del socket no está en marcha: Traefik no verá los contenedores."
     fi
 
-    if docker ps --format '{{.Names}}' | grep -qx cloudflared; then
+    if docker ps --format '{{.Names}}' | contiene -x cloudflared; then
         local conexiones
         conexiones="$(docker logs cloudflared 2>&1 | grep -c 'Registered tunnel connection' || true)"
         if (( conexiones >= 2 )); then

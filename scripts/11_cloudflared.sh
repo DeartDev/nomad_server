@@ -180,7 +180,7 @@ fi
 # ===========================================================================
 log_paso "3/5 · Origen del túnel"
 
-if docker ps --format '{{.Names}}' | grep -qx traefik; then
+if docker ps --format '{{.Names}}' | contiene -x traefik; then
     log_ok "Traefik está en marcha."
 else
     log_error "Traefik no está en marcha: el túnel se conectaría a un origen inexistente."

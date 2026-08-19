@@ -152,7 +152,7 @@ else
 fi
 
 # La regla del servidor: nadie publica puertos.
-if docker compose -f "${COMPOSE}" config 2>/dev/null | grep -qE '^\s+published:' ; then
+if docker compose -f "${COMPOSE}" config 2>/dev/null | contiene -E '^\s+published:' ; then
     log_aviso "El compose publica puertos en el host."
     log_aviso "Salvo que estén atados a una dirección privada, eso salta el"
     log_aviso "cortafuegos (capítulo 12 § 3.2). Para depurar usa un túnel SSH:"
@@ -251,7 +251,7 @@ else
     if (( CONSTRUIR == 1 )); then
         log_info "Reconstruyendo sin caché…"
         docker compose -f "${COMPOSE}" build --no-cache || { revertir; die "La construcción ha fallado."; }
-    elif docker compose -f "${COMPOSE}" config 2>/dev/null | grep -q 'build:'; then
+    elif docker compose -f "${COMPOSE}" config 2>/dev/null | contiene 'build:'; then
         log_info "Construyendo…"
         docker compose -f "${COMPOSE}" build || { revertir; die "La construcción ha fallado."; }
     fi

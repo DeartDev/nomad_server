@@ -134,7 +134,7 @@ fi
 # ===========================================================================
 log_paso "Verificación de la suma de comprobación"
 
-if sha256sum --ignore-missing -c SHA256SUMS 2>/dev/null | grep -q "${ISO}"; then
+if sha256sum --ignore-missing -c SHA256SUMS 2>/dev/null | contiene "${ISO}"; then
     log_ok "La suma SHA256 de la imagen coincide."
 else
     rm -f "${ISO}"
@@ -177,7 +177,7 @@ fi
 
 # La firma es válida: comprobamos además que provenga de una clave conocida.
 HUELLA_FIRMANTE="$(grep -m1 'VALIDSIG' <<<"${SALIDA_GPG}" | awk '{print $3}')"
-if printf '%s\n' "${CLAVES_DEBIAN[@]}" | grep -qx "${HUELLA_FIRMANTE}"; then
+if printf '%s\n' "${CLAVES_DEBIAN[@]}" | contiene -x "${HUELLA_FIRMANTE}"; then
     log_ok "Firma válida de una clave de Debian conocida:"
     log_ok "  ${HUELLA_FIRMANTE}"
 else

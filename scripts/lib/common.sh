@@ -78,6 +78,31 @@ die() {
 # Marca que se ha aplicado un cambio real en el sistema.
 marcar_cambio() { NOMAD_CAMBIOS=$((NOMAD_CAMBIOS + 1)); }
 
+# ¿Aparece el patrón en la entrada estándar?
+#
+#   comando | contiene 'patrón'          en lugar de   comando | contiene 'patrón'
+#   comando | contiene -E 'expresión'
+#   comando | contiene -x 'línea exacta'
+#
+# POR QUÉ NO SE USA 'grep -q' EN UNA TUBERÍA
+# ------------------------------------------
+# Todos los scripts declaran 'set -o pipefail', y esa combinación es incorrecta:
+#
+#   1. 'grep -q' termina en cuanto encuentra la PRIMERA coincidencia y cierra
+#      su extremo de la tubería.
+#   2. Si el productor todavía está escribiendo, recibe SIGPIPE y termina con
+#      código 141.
+#   3. 'pipefail' hace que el resultado de la tubería sea ese 141.
+#
+# O sea: la coincidencia SÍ se encontró, y el 'if' la interpreta como fallo. El
+# error depende de la planificación del sistema, así que aparece de forma
+# intermitente y en el peor sitio posible — por ejemplo, concluyendo que el
+# cortafuegos no tiene política 'drop' cuando sí la tiene.
+#
+# 'grep' sin '-q' lee toda la entrada, así que el productor nunca recibe
+# SIGPIPE. La salida se descarta, que era el único motivo para usar '-q'.
+contiene() { grep "$@" >/dev/null; }
+
 # Resumen final para el cierre de cada script.
 resumen_final() {
     local nombre="${1:-script}"
@@ -359,7 +384,7 @@ instalar_paquetes() {
     local pendientes=()
     local paquete
     for paquete in "$@"; do
-        if ! dpkg-query -W -f='${Status}' "${paquete}" 2>/dev/null | grep -q "ok installed"; then
+        if ! dpkg-query -W -f='${Status}' "${paquete}" 2>/dev/null | contiene "ok installed"; then
             pendientes+=("${paquete}")
         fi
     done

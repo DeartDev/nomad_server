@@ -63,11 +63,11 @@ DIR_OBS="${DATOS_RAIZ}/observabilidad"
 # ===========================================================================
 log_paso "1/5 · Condiciones previas"
 
-docker ps --format '{{.Names}}' | grep -qx traefik \
+docker ps --format '{{.Names}}' | contiene -x traefik \
     || die "Traefik no está en marcha. Ejecuta antes: ./scripts/10_traefik.sh"
 log_ok "Traefik está en marcha."
 
-docker ps --format '{{.Names}}' | grep -qx socket-proxy \
+docker ps --format '{{.Names}}' | contiene -x socket-proxy \
     || die "El intermediario del socket no está en marcha. Ejecuta antes: ./scripts/10_traefik.sh"
 log_ok "El intermediario del socket está en marcha."
 
@@ -142,8 +142,14 @@ if (( MODO_CHECK == 1 )); then
 else
     # Es el fallo más probable y el más confuso: Dozzle carga bien pero sale
     # vacío, sin ningún mensaje de error visible en la interfaz.
-    if docker exec dozzle wget -qO- --timeout=5 \
-         http://socket-proxy:2375/v1.24/containers/json 2>/dev/null | head -c 20 | grep -q '\['; then
+    # Se captura la respuesta en una variable en lugar de encadenar tuberías.
+    # 'head -c' cerraría la tubería en cuanto tuviera sus bytes, wget recibiría
+    # SIGPIPE y, con 'set -o pipefail', la comprobación fallaría aunque la
+    # respuesta fuera correcta. Es el mismo motivo por el que aquí no se usa
+    # 'grep -q' (ver contiene() en lib/common.sh).
+    RESPUESTA_SOCKET="$(docker exec dozzle wget -qO- --timeout=5 \
+        http://socket-proxy:2375/v1.24/containers/json 2>/dev/null || true)"
+    if [[ "${RESPUESTA_SOCKET:0:1}" == "[" ]]; then
         log_ok "Dozzle alcanza el intermediario del socket."
     else
         log_error "Dozzle NO alcanza el intermediario del socket."
