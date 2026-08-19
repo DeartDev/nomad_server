@@ -189,9 +189,26 @@ log_paso "2/3 · Resolución de nombres"
 
 # 'dns-nameservers' en /etc/network/interfaces NO tiene efecto sin el paquete
 # resolvconf, que una instalación mínima no lleva (capítulo 06 § 3.3).
-if dpkg-query -W -f='${Status}' resolvconf 2>/dev/null | grep -q "ok installed"; then
-    log_aviso "El paquete 'resolvconf' está instalado: gestionará /etc/resolv.conf por su cuenta."
-    log_aviso "Lo que escriba este script podría perderse. Considera desinstalarlo."
+#
+# Pero resolvconf no es el único que reclama /etc/resolv.conf. Si algo lo está
+# generando, escribirlo a mano da una falsa sensación de control: el archivo
+# vuelve a su sitio en la siguiente renovación del arrendamiento DHCP o al
+# reiniciar, y el síntoma —«el DNS se me cambia solo»— cuesta de atribuir.
+for GESTOR in resolvconf openresolv systemd-resolved; do
+    if dpkg-query -W -f='${Status}' "${GESTOR}" 2>/dev/null | grep -q "ok installed"; then
+        log_aviso "El paquete '${GESTOR}' está instalado: gestionará /etc/resolv.conf por su cuenta."
+        log_aviso "Lo que escriba este script podría perderse. Considera desinstalarlo."
+    fi
+done
+
+# El caso más frecuente y el que no delata ningún paquete sospechoso: la
+# interfaz sigue en DHCP y es el cliente quien reescribe resolv.conf.
+if head -3 /etc/resolv.conf 2>/dev/null | grep -qiE '^#.*(generated|dhcpcd|dhclient|NetworkManager)'; then
+    log_aviso "/etc/resolv.conf lo genera un cliente DHCP:"
+    head -1 /etc/resolv.conf | sed 's/^/          /'
+    log_aviso "Mientras ${LAN_INTERFAZ} siga en DHCP, lo que se escriba aquí"
+    log_aviso "se perderá en la siguiente renovación. Fijar la IP estática (paso 3/3) es lo"
+    log_aviso "que hace que este archivo pase a estar bajo tu control."
 fi
 
 DOMINIO_BUSQUEDA="${SERVIDOR_DOMINIO_LOCAL:-}"
