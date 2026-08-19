@@ -95,6 +95,8 @@ comprobar_estructura() {
         README.md LICENSE .gitignore Makefile
         config/servidor.env.example
         scripts/lib/common.sh
+        scripts/lib/entorno.sh
+        scripts/lib/leer_config.sh
     )
     local ruta
     for ruta in "${obligatorios[@]}"; do
@@ -281,6 +283,47 @@ comprobar_docs() {
     done < <(find docs templates -type f \( -name '*.md' -o -name '*.cfg' -o -name '*.yml' -o -name '*.conf' \) | sort)
 
     log_ok "variables usadas en docs/ y templates/ contrastadas con la plantilla"
+
+    log_paso "Documentación: contrato de las variables"
+
+    # Toda variable que un script exige con requerir_variables debe llevar una
+    # etiqueta en la plantilla ([OBLIGATORIA], [REQUERIDA] o [SE-DESCUBRE]).
+    # Sin esta comprobación, la plantilla puede prometer que 'variables.sh
+    # --faltan' avisa de lo que falta y no hacerlo: fue exactamente lo que
+    # ocurrió con SERVIDOR_LOCALE, DEBIAN_MIRROR y DEBIAN_SUITE.
+    local etiquetadas
+    etiquetadas="$(awk '
+        /^[[:space:]]*$/ { et = 0; next }
+        /^#/ {
+            if ($0 ~ /\[OBLIGATORIA\]|\[REQUERIDA\]|\[SE-DESCUBRE:/) et = 1
+            next
+        }
+        /^[A-Z][A-Z0-9_]*=/ {
+            if (et) { nombre = $0; sub(/=.*/, "", nombre); print nombre }
+            et = 0; next
+        }
+    ' config/servidor.env.example | sort -u)"
+
+    # Nombres exigidos por los scripts. Se extraen de las llamadas a
+    # requerir_variables, incluidas sus continuaciones de línea.
+    local exigidas
+    exigidas="$(sed -n '/requerir_variables/,/[^\\]$/p' scripts/*.sh \
+        | tr ' ' '\n' \
+        | grep -oE '^[A-Z][A-Z0-9_]+$' | sort -u)"
+
+    local sin_etiqueta=() variable
+    while IFS= read -r variable; do
+        [[ -n "${variable}" ]] || continue
+        grep -qx "${variable}" <<<"${etiquetadas}" || sin_etiqueta+=("${variable}")
+    done <<<"${exigidas}"
+
+    if (( ${#sin_etiqueta[@]} == 0 )); then
+        log_ok "toda variable exigida por un script está etiquetada en la plantilla"
+    else
+        fallo "variables exigidas por algún script y sin etiquetar en config/servidor.env.example:"
+        fallo "    ${sin_etiqueta[*]}"
+        fallo "    Añádeles [OBLIGATORIA], [REQUERIDA] o [SE-DESCUBRE: …]"
+    fi
 
     log_paso "Documentación: enlaces"
 

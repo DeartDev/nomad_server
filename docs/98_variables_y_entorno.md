@@ -110,6 +110,27 @@ Y escribirlas sin abrir un editor:
 El comando conserva el orden y los comentarios del archivo, deja una copia previa en
 `config/servidor.env.bak-<fecha>` y vuelve a poner los permisos en `600`.
 
+### 2.2.bis Las etiquetas de la plantilla
+
+`config/servidor.env.example` marca cada variable, y esas marcas son las que usan
+`scripts/variables.sh` y `scripts/lib/entorno.sh` para decidir de qué quejarse:
+
+| Etiqueta | Significa | Vacía es… |
+|---|---|---|
+| `[OBLIGATORIA]` | Hay que decidirla: no trae un valor por omisión que sirva | **un error** |
+| `[REQUERIDA]` | Algún script la exige, pero la plantilla trae un valor que funciona | **un error**: la vaciaste tú |
+| `[SE-DESCUBRE: cmd]` | Se averigua durante el montaje, con ese comando | correcto hasta ese capítulo |
+| sin etiqueta | Opcional de verdad | correcto siempre |
+
+La distinción entre las dos primeras importa en la práctica: `[OBLIGATORIA]` son seis y responden a
+«¿qué tengo que decidir?»; `[REQUERIDA]` son la mayoría y responden a «¿qué no puedo dejar en
+blanco?». El fallo típico es borrar el valor de ejemplo de una `[REQUERIDA]` para rellenarla más
+tarde, y no volver: el capítulo que la necesite abortará.
+
+`make check` comprueba que **toda** variable exigida por algún script lleve una de las tres
+etiquetas. Sin esa comprobación la plantilla podría prometer un aviso que nunca llega, que es lo que
+ocurría con `SERVIDOR_LOCALE`, `DEBIAN_MIRROR` y `DEBIAN_SUITE`.
+
 ### 2.3 Valores temporales de sesión (clase 3)
 
 Existen durante unos minutos y **no van en `config/servidor.env`** porque no describen el servidor,
@@ -209,8 +230,88 @@ Esto es tan importante como lo que sí hace:
 - **No sobrevive a `sudo`** en todos los casos. Ver la sección 4.2, que es donde más gente tropieza.
 - **No modifica el sistema.** Cargar el entorno es una operación de solo lectura: se puede repetir
   todas las veces que quieras, y ante la duda, repítelo.
+- **No convierte tu entorno en la verdad.** Lo que valida es el contenido del archivo, no el
+  resultado de mezclarlo con lo que ya tuvieras. Ver § 3.4, que es la razón de que exista
+  `scripts/lib/leer_config.sh`.
 
-### 3.4 Atajo permanente (opcional pero recomendable)
+### 3.4 El archivo manda, tu sesión no
+
+Esta es la trampa más difícil de diagnosticar de todo el montaje, y merece un apartado propio porque
+**no produce ningún error hasta mucho después**.
+
+Durante un montaje manual es natural exportar variables a mano para que los comandos de la
+documentación funcionen:
+
+```bash
+# [servidor]
+export ADMIN_USUARIO=compass
+```
+
+A partir de ese momento tus comandos funcionan. Pero si esa variable **no está escrita en
+`config/servidor.env`**, ocurre lo siguiente:
+
+| Quién | Qué ve | Por qué |
+|---|---|---|
+| Tus comandos manuales | `compass` | Está en tu entorno |
+| `source scripts/lib/entorno.sh` | `compass` | Carga el archivo **encima** de tu entorno; lo que el archivo no define, sobrevive |
+| `sudo ./scripts/04_base.sh` | **nada** | `sudo` limpia el entorno (`env_reset`) y solo lee el archivo |
+| Una terminal nueva mañana | **nada** | El `export` murió con la sesión |
+
+El síntoma es desconcertante: una herramienta dice que la configuración está completa y otra dice
+que faltan variables, **y tiene razón la segunda**.
+
+Por eso `scripts/variables.sh` y `scripts/lib/entorno.sh` leen el archivo **en un entorno vacío**
+(`scripts/lib/leer_config.sh`), de modo que informan de lo mismo que verá un script con `sudo`. Ese
+caso concreto se señala como **`ENMASCARADA`**:
+
+```bash
+# [servidor]
+./scripts/variables.sh --estado
+```
+
+```
+  ADMIN_USUARIO                  (sin valor)                  ENMASCARADA
+
+[ERROR] Variables ENMASCARADAS: 1
+[ERROR] Tienen valor en tu sesión pero NO en el archivo.
+```
+
+Y `--faltan` te da el comando ya resuelto con el valor que tienes en la sesión:
+
+```bash
+# [servidor]
+./scripts/variables.sh --faltan
+```
+
+```
+  ADMIN_USUARIO  ← tiene valor en tu sesión, pero NO en el archivo
+    valor en tu sesión: compass
+    se fija con   : scripts/variables.sh --fijar ADMIN_USUARIO="compass"
+```
+
+**Comprobación directa**, por si quieres verlo con tus propios ojos. Así lee el archivo un script
+ejecutado con `sudo`:
+
+```bash
+# [servidor]
+env -i HOME="${HOME}" bash -c 'set -a; . config/servidor.env; set +a
+echo "ADMIN_USUARIO=[${ADMIN_USUARIO}]"'
+```
+
+Si eso imprime `[]` y `echo "${ADMIN_USUARIO}"` en tu shell imprime un nombre, tienes una variable
+enmascarada.
+
+> **Y revisa tu `~/.bashrc`.** Un `export` puesto ahí durante el montaje manual enmascara la
+> variable en **todas** las sesiones futuras, con lo que el problema deja de ser transitorio:
+>
+> ```bash
+> grep -nE 'export\s+(ADMIN_|SERVIDOR_|LAN_|DOMINIO_|DATOS_|TS_|CF_|RESTIC_|DOCKER_)' \
+>     ~/.bashrc ~/.profile 2>/dev/null || echo "(ninguna)"
+> ```
+>
+> Si aparece alguna, escríbela en `config/servidor.env` con `--fijar` y quítala del perfil.
+
+### 3.5 Atajo permanente (opcional pero recomendable)
 
 Si vas a repetirlo muchas veces, añade una función a tu `~/.bashrc` del servidor:
 
@@ -240,7 +341,7 @@ nomad
 > que el archivo tenga un error de sintaxis, o que estés en un servidor distinto, no habría ninguna
 > señal. Que la carga sea explícita y muestre un resumen es parte de la comprobación.
 
-### 3.5 Comprobar que está cargado
+### 3.6 Comprobar que está cargado
 
 Antes de pegar cualquier comando destructivo:
 
@@ -641,7 +742,11 @@ nada. Lo habitual es usar la B la primera vez y la A al reconstruir.
 | `sudo sh -c '…${VAR}…'` no sustituye nada | `sudo` limpia el entorno y las comillas simples impiden la expansión previa | Usa comillas dobles, `sudo -E`, o pasa la variable explícitamente (§ 4.2) |
 | Tras reiniciar, nada de lo que había definido existe | Es el comportamiento normal: el entorno vive en el shell | Repite el ritual de la § 5.3 |
 | `envsubst` ha destrozado una plantilla | Se ejecutó sin la lista explícita de variables | Usa `nomad_plantilla` o el comando completo de la § 4.3 |
-| El script dice «Variables sin definir» aunque las veo en mi shell | El script lee el archivo, no tu entorno | Escríbelas en `config/servidor.env` con `--fijar` |
+| El script dice «Variables sin definir» aunque las veo en mi shell | Están **enmascaradas**: en tu entorno sí, en el archivo no | `./scripts/variables.sh --faltan` te da el comando `--fijar` ya resuelto (§ 3.4) |
+| `entorno.sh` dice que todo está bien y `sudo ./scripts/…` dice que faltan variables | Lo mismo, visto desde los dos lados | Tiene razón el que usa `sudo`. Ver § 3.4 |
+| `--estado` marca una variable como `ENMASCARADA` | Tiene valor en tu sesión y no en el archivo | Escríbela con `--fijar`; al cerrar la terminal se perdería |
+| Cada sesión nueva vuelve a estar mal | Hay un `export` en `~/.bashrc` que la enmascara siempre | Escríbela en el archivo y quítala del perfil (§ 3.4) |
+| Vacié una variable «para rellenarla luego» y ahora un script aborta | Era `[REQUERIDA]`: traía un valor por omisión que funcionaba | Cópialo de `config/servidor.env.example` (§ 2.2.bis) |
 | `./scripts/lib/entorno.sh` no hace nada | Se ejecutó en lugar de importarse | Usa `source scripts/lib/entorno.sh` (§ 3.1) |
 | En la segunda terminal las variables no existen | El entorno no se propaga entre terminales | Cárgalo también allí |
 | Un contenedor no ve una variable que sí tengo en el shell | Estaba definida pero sin exportar | El ayudante exporta; si lo hiciste a mano, usa `set -a` (§ 3.2) |

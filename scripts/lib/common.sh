@@ -26,6 +26,12 @@ NOMAD_CONFIG="${NOMAD_RAIZ}/config/servidor.env"
 NOMAD_CONFIG_EJEMPLO="${NOMAD_RAIZ}/config/servidor.env.example"
 NOMAD_TEMPLATES="${NOMAD_RAIZ}/templates"
 
+# Lectura del archivo de configuración aislada del entorno actual. Ver la
+# cabecera de leer_config.sh: es lo que permite distinguir «lo que dice el
+# archivo» de «lo que hay en mi shell».
+# shellcheck source=leer_config.sh
+. "${NOMAD_LIB_DIR}/leer_config.sh"
+
 # --- Estado global -----------------------------------------------------------
 # MODO_CHECK=1  → simular: se muestra lo que se haría, no se modifica nada.
 : "${MODO_CHECK:=0}"
@@ -196,6 +202,12 @@ cargar_entorno() {
 
 # Verifica que las variables indicadas existen y no están vacías.
 #   requerir_variables SERVIDOR_HOSTNAME LAN_CIDR
+#
+# Comprueba el valor EFECTIVO (el que usará el script) y, cuando falta alguna,
+# vuelve a mirar el archivo por separado para poder explicar el caso confuso:
+# una variable que existe en tu shell pero no en config/servidor.env. Ahí el
+# comando manual funciona y el script falla, y sin esta distinción el mensaje
+# resultaría incomprensible.
 requerir_variables() {
     local faltan=()
     local nombre
@@ -205,7 +217,25 @@ requerir_variables() {
     if (( ${#faltan[@]} > 0 )); then
         log_error "Variables sin definir en ${NOMAD_CONFIG}: ${faltan[*]}"
         log_error "Consulta ${NOMAD_CONFIG_EJEMPLO} para saber qué valor corresponde."
+        log_error "O ejecuta: ${NOMAD_SCRIPTS_DIR}/variables.sh --faltan"
         exit 1
+    fi
+
+    # Aviso preventivo: variables que este script NO exige ahora mismo pero que
+    # están enmascaradas por el entorno. Hoy funcionan; mañana, bajo sudo o en
+    # una sesión nueva, no.
+    local enmascaradas=() linea valor_archivo
+    while IFS= read -r linea; do
+        nombre="${linea%%=*}"
+        valor_archivo="${linea#*=}"
+        [[ -z "${valor_archivo}" && -n "${!nombre:-}" ]] && enmascaradas+=("${nombre}")
+    done < <(nomad_leer_config "${NOMAD_CONFIG}" "$@" 2>/dev/null || true)
+
+    if (( ${#enmascaradas[@]} > 0 )); then
+        log_aviso "Estas variables tienen valor en el entorno pero NO en ${NOMAD_CONFIG}:"
+        log_aviso "    ${enmascaradas[*]}"
+        log_aviso "Escríbelas en el archivo o se perderán en la próxima sesión:"
+        log_aviso "    ${NOMAD_SCRIPTS_DIR}/variables.sh --fijar NOMBRE=valor"
     fi
 }
 
@@ -235,12 +265,22 @@ confirmar() {
 # ===========================================================================
 
 # Copia de seguridad de un archivo antes de modificarlo.
-# El sufijo incluye la fecha, así que nunca se pisa una copia anterior.
+#
+# El sufijo lleva fecha y hora al segundo. Eso basta para el uso normal, pero
+# no para varias escrituras seguidas: 'variables.sh --fijar' llamado siete
+# veces en un bucle cae en el mismo segundo y cada copia pisaría a la anterior,
+# dejando una sola que ya no refleja el estado original. Por eso, si el nombre
+# está ocupado, se añade un contador.
 respaldar_archivo() {
     local archivo="$1"
     [[ -e "${archivo}" ]] || return 0
-    local destino
-    destino="${archivo}.bak-$(date +%Y%m%d-%H%M%S)"
+    local base destino n=0
+    base="${archivo}.bak-$(date +%Y%m%d-%H%M%S)"
+    destino="${base}"
+    while [[ -e "${destino}" ]]; do
+        n=$((n + 1))
+        destino="${base}.${n}"
+    done
     if (( MODO_CHECK == 1 )); then
         log_check "respaldaría ${archivo} → ${destino}"
         return 0

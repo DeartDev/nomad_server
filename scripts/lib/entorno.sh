@@ -50,6 +50,8 @@ fi
 #  Rutas
 # ===========================================================================
 NOMAD_ENTORNO_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=leer_config.sh
+. "${NOMAD_ENTORNO_LIB}/leer_config.sh"
 NOMAD_RAIZ="$(cd "${NOMAD_ENTORNO_LIB}/../.." && pwd)"
 NOMAD_CONFIG="${NOMAD_RAIZ}/config/servidor.env"
 NOMAD_CONFIG_EJEMPLO="${NOMAD_RAIZ}/config/servidor.env.example"
@@ -119,32 +121,83 @@ set +a
 _e_ok "Entorno cargado desde ${NOMAD_CONFIG}"
 
 # ===========================================================================
-#  4. Comprobar las variables obligatorias
+#  4. Comprobar el ARCHIVO, no el entorno resultante
 # ===========================================================================
-# La lista de obligatorias se deduce de la plantilla: son las que llevan el
-# marcador [OBLIGATORIA] en sus comentarios. Así no hay dos listas que
-# mantener sincronizadas.
-_e_obligatorias() {
+# Aquí está la comprobación que de verdad importa, y el motivo de que exista
+# leer_config.sh.
+#
+# Acabamos de cargar el archivo ENCIMA de tu entorno. Si una variable no está
+# en el archivo pero sí exportada en tu sesión —cosa habitual durante un
+# montaje manual—, después de cargar tendría valor igualmente. Comprobar
+# "${!nombre}" en este punto daría la configuración por buena, y luego
+# 'sudo ./scripts/04_base.sh' fallaría diciendo que falta esa misma variable.
+# Tendría razón el script: sudo limpia el entorno y solo ve el archivo.
+#
+# Por eso lo que se valida es el contenido del archivo, leído aparte y en un
+# entorno vacío.
+
+# Nombres y clases declarados en la plantilla.
+_e_metadatos() {
     awk '
-        /^#.*\[OBLIGATORIA\]/ { marcada = 1; next }
-        /^[A-Z][A-Z0-9_]*=/   { if (marcada) { sub(/=.*/, ""); print } ; marcada = 0; next }
-        /^[[:space:]]*$/      { marcada = 0 }
+        /^[[:space:]]*$/ { clase = ""; desc = ""; next }
+        /^#/ {
+            if ($0 ~ /\[OBLIGATORIA\]/) clase = "OBLIGATORIA"
+            if ($0 ~ /\[REQUERIDA\]/ && clase == "") clase = "REQUERIDA"
+            if ($0 ~ /\[SE-DESCUBRE:/) desc = "s"
+            next
+        }
+        /^[A-Z][A-Z0-9_]*=/ {
+            nombre = $0; sub(/=.*/, "", nombre)
+            printf "%s\t%s\n", nombre, (desc != "" ? "DESCUBRE" : (clase != "" ? clase : "OPCIONAL"))
+            clase = ""; desc = ""
+            next
+        }
     ' "${NOMAD_CONFIG_EJEMPLO}"
 }
 
+_e_nombres=()
+_e_clases=()
+while IFS=$'\t' read -r _e_n _e_c; do
+    [[ -n "${_e_n}" ]] || continue
+    _e_nombres+=("${_e_n}")
+    _e_clases+=("${_e_c}")
+done < <(_e_metadatos)
+
+# Valores tal como los verá un script ejecutado con sudo.
+declare -A _e_del_archivo=()
+while IFS= read -r _e_linea; do
+    _e_del_archivo["${_e_linea%%=*}"]="${_e_linea#*=}"
+done < <(nomad_leer_config "${NOMAD_CONFIG}" "${_e_nombres[@]}")
+
 _e_faltan=()
 _e_placeholder=()
-while read -r _e_nombre; do
-    [[ -n "${_e_nombre}" ]] || continue
-    if [[ -z "${!_e_nombre:-}" ]]; then
-        _e_faltan+=("${_e_nombre}")
-    elif [[ "${!_e_nombre}" == *CAMBIAME* ]]; then
-        _e_placeholder+=("${_e_nombre}")
-    fi
-done < <(_e_obligatorias)
+_e_enmascaradas=()
+for _e_i in "${!_e_nombres[@]}"; do
+    _e_nombre="${_e_nombres[${_e_i}]}"
+    _e_clase="${_e_clases[${_e_i}]}"
+    _e_valor="${_e_del_archivo[${_e_nombre}]:-}"
 
+    if [[ -n "${_e_valor}" ]]; then
+        [[ "${_e_valor}" == *CAMBIAME* ]] && _e_placeholder+=("${_e_nombre}")
+        continue
+    fi
+    # Vacía en el archivo.
+    if [[ -n "${!_e_nombre:-}" ]]; then
+        _e_enmascaradas+=("${_e_nombre}")
+    elif [[ "${_e_clase}" == "OBLIGATORIA" || "${_e_clase}" == "REQUERIDA" ]]; then
+        _e_faltan+=("${_e_nombre}")
+    fi
+done
+
+if (( ${#_e_enmascaradas[@]} > 0 )); then
+    _e_error "ENMASCARADAS: tienen valor en tu sesión pero NO en el archivo:"
+    _e_error "    ${_e_enmascaradas[*]}"
+    _e_error "Tus comandos funcionarán y los scripts con sudo fallarán, porque"
+    _e_error "sudo limpia el entorno y solo ve el archivo. Escríbelas con:"
+    _e_error "    ${NOMAD_RAIZ}/scripts/variables.sh --fijar NOMBRE=valor"
+fi
 if (( ${#_e_faltan[@]} > 0 )); then
-    _e_error "Variables OBLIGATORIAS sin valor: ${_e_faltan[*]}"
+    _e_error "Variables sin valor que algún script exige: ${_e_faltan[*]}"
     _e_error "Rellénalas antes de continuar:  \${EDITOR:-vim} ${NOMAD_CONFIG}"
     _e_error "O consulta qué falta y por qué:  ${NOMAD_RAIZ}/scripts/variables.sh --faltan"
 fi
@@ -167,7 +220,8 @@ cat <<RESUMEN
 RESUMEN
 printf '%s' "${_e_fin}"
 
-unset _e_faltan _e_placeholder _e_nombre
+unset _e_faltan _e_placeholder _e_enmascaradas _e_nombre _e_clase _e_valor
+unset _e_nombres _e_clases _e_del_archivo _e_linea _e_i _e_n _e_c
 
 # ===========================================================================
 #  6. Ayudantes disponibles en la sesión

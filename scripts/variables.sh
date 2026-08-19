@@ -24,23 +24,38 @@ Uso: scripts/variables.sh [opción]
 
 Inspecciona y edita config/servidor.env sin abrir un editor.
 
+Todo lo que informa este script se refiere al CONTENIDO DEL ARCHIVO, no a las
+variables de tu sesión. Es la diferencia que importa: los scripts se ejecutan
+con sudo, que limpia el entorno, así que solo ven el archivo. Una variable
+exportada a mano funciona en tus comandos y no existe para ellos.
+
 Opciones:
-  --estado            Tabla completa: valor actual y estado de cada variable.
-                      Es lo que se muestra si no indicas nada.
+  --estado            Tabla completa: valor en el archivo y estado de cada
+                      variable. Es lo que se muestra si no indicas nada.
+                      Señala como ENMASCARADA la que tiene valor en tu sesión
+                      pero no en el archivo.
   --faltan            Solo lo que queda por rellenar, con el capítulo y el
                       comando que averigua cada valor.
   --fijar VAR=valor   Escribe (o sustituye) una variable en config/servidor.env
                       conservando comentarios, orden y permisos.
-  --ver VAR           Imprime el valor efectivo de una variable, sin más.
+  --ver VAR           Imprime el valor que la variable tiene EN EL ARCHIVO.
+                      Si está vacía ahí pero sí la tienes en la sesión, lo
+                      dice: es el caso ENMASCARADA.
   --exportar          Emite líneas 'export VAR="valor"'. Pensado para:
                           eval "$(scripts/variables.sh --exportar)"
                       La vía recomendada, sin embargo, es:
                           source scripts/lib/entorno.sh
   -h, --help          Muestra esta ayuda.
 
+Etiquetas de la plantilla config/servidor.env.example:
+  [OBLIGATORIA]       hay que decidirla; no trae un valor útil por omisión
+  [REQUERIDA]         un script la exige; trae valor por omisión que funciona,
+                      pero no puede quedarse vacía
+  [SE-DESCUBRE: cmd]  se averigua durante el montaje, con ese comando
+
 Código de salida:
   0  todo correcto
-  1  faltan variables obligatorias (con --estado o --faltan), o error
+  1  faltan variables, hay alguna enmascarada, o error
 
 Ejemplos:
   scripts/variables.sh --faltan
@@ -55,18 +70,24 @@ AYUDA
 # ===========================================================================
 #  La plantilla config/servidor.env.example marca cada variable con etiquetas
 #  en sus comentarios:
-#      [OBLIGATORIA]              → no puede quedarse vacía
+#      [OBLIGATORIA]              → hay que decidirla; no trae valor útil
+#      [REQUERIDA]                → un script la exige; trae valor por omisión
+#                                   que funciona, pero no puede quedarse vacía
 #      [SE-DESCUBRE: texto]       → su valor se averigua durante el montaje
 #      [CAPITULO: nn]             → dónde se usa o se averigua
+#
 #  Así no hay dos listas que mantener sincronizadas: la plantilla es la única
-#  fuente de verdad, igual que para los valores.
+#  fuente de verdad, igual que para los valores. Y 'make check' comprueba que
+#  toda variable exigida por algún script lleve una de las tres primeras
+#  etiquetas, de modo que la promesa no se puede desincronizar en silencio.
 # ===========================================================================
 metadatos() {
     awk '
-        /^[[:space:]]*$/ { com = ""; obl = 0; desc = ""; cap = ""; next }
+        /^[[:space:]]*$/ { clase = ""; desc = ""; cap = ""; next }
         /^#/ {
             linea = $0
-            if (linea ~ /\[OBLIGATORIA\]/)  obl = 1
+            if (linea ~ /\[OBLIGATORIA\]/) clase = "OBLIGATORIA"
+            if (linea ~ /\[REQUERIDA\]/ && clase == "") clase = "REQUERIDA"
             if (linea ~ /\[SE-DESCUBRE:/) {
                 desc = linea
                 sub(/.*\[SE-DESCUBRE:[[:space:]]*/, "", desc)
@@ -82,22 +103,67 @@ metadatos() {
         /^[A-Z][A-Z0-9_]*=/ {
             nombre = $0
             sub(/=.*/, "", nombre)
-            printf "%s\t%d\t%s\t%s\n", nombre, obl, (desc == "" ? "-" : desc), (cap == "" ? "-" : cap)
-            obl = 0; desc = ""; cap = ""
+            efectiva = (desc != "" ? "DESCUBRE" : (clase != "" ? clase : "OPCIONAL"))
+            printf "%s\t%s\t%s\t%s\n", nombre, efectiva, (desc == "" ? "-" : desc), (cap == "" ? "-" : cap)
+            clase = ""; desc = ""; cap = ""
             next
         }
     ' "${NOMAD_CONFIG_EJEMPLO}"
 }
 
-# Valor actual de una variable dentro de config/servidor.env, ya expandido
-# (algunos valores se componen a partir de otros, como RESTIC_REPO_LOCAL).
-valor_actual() {
-    local nombre="$1"
-    ( set -a
-      # shellcheck disable=SC1090
-      . "${NOMAD_CONFIG}" 2>/dev/null || true
-      set +a
-      printf '%s' "${!nombre:-}" )
+# Nombres declarados en la plantilla, en orden.
+nombres_declarados() { metadatos | cut -f1; }
+
+# ===========================================================================
+#  Valores: los del ARCHIVO, no los del entorno
+# ===========================================================================
+#  Esta es la corrección más importante de este script. Antes se leía el
+#  archivo dentro de un subshell, que hereda el entorno del shell padre: una
+#  variable exportada a mano —cosa habitual durante un montaje manual— se
+#  contaba como si estuviera en el archivo. El resultado era que este script
+#  daba por buena una configuración incompleta, y luego 'sudo ./scripts/…'
+#  fallaba con una lista de variables que aquí aparecían rellenas.
+#
+#  nomad_leer_config lee el archivo en un entorno vacío, así que informa de lo
+#  mismo que verá un script ejecutado con sudo.
+# ===========================================================================
+declare -A VALOR_ARCHIVO=()
+declare -A VALOR_ENTORNO=()
+
+cargar_valores() {
+    local nombres=() linea nombre
+    mapfile -t nombres < <(nombres_declarados)
+    (( ${#nombres[@]} > 0 )) || return 0
+
+    while IFS= read -r linea; do
+        nombre="${linea%%=*}"
+        VALOR_ARCHIVO["${nombre}"]="${linea#*=}"
+    done < <(nomad_leer_config "${NOMAD_CONFIG}" "${nombres[@]}")
+
+    # Y el valor que tiene ahora mismo tu sesión, para poder señalar las
+    # discrepancias en lugar de esconderlas.
+    for nombre in "${nombres[@]}"; do
+        VALOR_ENTORNO["${nombre}"]="${!nombre:-}"
+    done
+}
+
+# Estado de una variable: ok | FALTA | pendiente | opcional | ENMASCARADA
+estado_de() {
+    local nombre="$1" clase="$2"
+    local archivo="${VALOR_ARCHIVO[${nombre}]:-}"
+    local entorno="${VALOR_ENTORNO[${nombre}]:-}"
+
+    if [[ -n "${archivo}" ]]; then
+        [[ "${archivo}" == *CAMBIAME* ]] && { echo "SIN CAMBIAR"; return; }
+        echo "ok"; return
+    fi
+    # Vacía en el archivo. ¿La está tapando el entorno?
+    if [[ -n "${entorno}" ]]; then echo "ENMASCARADA"; return; fi
+    case "${clase}" in
+        OBLIGATORIA|REQUERIDA) echo "FALTA" ;;
+        DESCUBRE)              echo "pendiente" ;;
+        *)                     echo "opcional" ;;
+    esac
 }
 
 exigir_configuracion() {
@@ -113,48 +179,55 @@ exigir_configuracion() {
 # ===========================================================================
 accion_estado() {
     exigir_configuracion
+    cargar_valores
     log_paso "Estado de ${NOMAD_CONFIG}"
+    log_info "Se muestra el valor que tiene el ARCHIVO, que es el que verán los"
+    log_info "scripts al ejecutarse con sudo. Tu entorno actual no cuenta."
 
-    printf '\n  %-30s %-28s %s\n' "VARIABLE" "VALOR ACTUAL" "ESTADO"
+    printf '\n  %-30s %-28s %s\n' "VARIABLE" "VALOR EN EL ARCHIVO" "ESTADO"
     printf '  %-30s %-28s %s\n' "------------------------------" \
            "----------------------------" "------"
 
-    local pendientes=0 nombre obligatoria descubre capitulo valor estado recorte
-    while IFS=$'\t' read -r nombre obligatoria descubre capitulo; do
+    local rotas=0 enmascaradas=0 sin_cambiar=0 nombre clase descubre capitulo valor estado color recorte
+    while IFS=$'\t' read -r nombre clase descubre capitulo; do
         [[ -n "${nombre}" ]] || continue
-        valor="$(valor_actual "${nombre}")"
+        valor="${VALOR_ARCHIVO[${nombre}]:-}"
+        estado="$(estado_de "${nombre}" "${clase}")"
 
-        if [[ -z "${valor}" ]]; then
-            if (( obligatoria == 1 )); then
-                estado="${C_ROJO}FALTA${C_FIN}"
-                pendientes=$((pendientes + 1))
-            elif [[ "${descubre}" != "-" ]]; then
-                estado="${C_AMARILLO}pendiente${C_FIN}"
-            else
-                estado="${C_GRIS}vacía (opcional)${C_FIN}"
-            fi
-        elif [[ "${valor}" == *CAMBIAME* ]]; then
-            estado="${C_ROJO}SIN CAMBIAR${C_FIN}"
-            pendientes=$((pendientes + 1))
-        else
-            estado="${C_VERDE}ok${C_FIN}"
-        fi
+        case "${estado}" in
+            ok)           color="${C_VERDE}" ;;
+            pendiente)    color="${C_AMARILLO}" ;;
+            opcional)     color="${C_GRIS}"; estado="vacía (opcional)" ;;
+            ENMASCARADA)  color="${C_ROJO}"; enmascaradas=$((enmascaradas + 1)) ;;
+            "SIN CAMBIAR") color="${C_ROJO}"; sin_cambiar=$((sin_cambiar + 1)) ;;
+            *)            color="${C_ROJO}"; rotas=$((rotas + 1)) ;;
+        esac
 
         recorte="${valor}"
         (( ${#recorte} > 27 )) && recorte="${recorte:0:24}..."
-        printf '  %-30s %-28s %b\n' "${nombre}" "${recorte:-(sin valor)}" "${estado}"
-        # 'capitulo' se usa en --faltan; aquí se ignora a propósito.
-        : "${capitulo}"
+        printf '  %-30s %-28s %b\n' "${nombre}" "${recorte:-(sin valor)}" "${color}${estado}${C_FIN}"
+        : "${descubre}" "${capitulo}"
     done < <(metadatos)
 
     echo
-    if (( pendientes == 0 )); then
-        log_ok "No queda ninguna variable obligatoria por rellenar."
-    else
-        log_aviso "Variables obligatorias pendientes: ${pendientes}"
-        log_aviso "Detalle y cómo obtenerlas:  scripts/variables.sh --faltan"
-        return 1
+    if (( enmascaradas > 0 )); then
+        log_error "Variables ENMASCARADAS: ${enmascaradas}"
+        log_error "Tienen valor en tu sesión pero NO en el archivo. Los comandos que"
+        log_error "escribas ahora funcionarán; los scripts con sudo, no. Y al cerrar"
+        log_error "la terminal se pierden. Escríbelas con --fijar."
     fi
+    if (( rotas > 0 )); then
+        log_aviso "Variables vacías que algún script exige: ${rotas}"
+    fi
+    if (( sin_cambiar > 0 )); then
+        log_aviso "Variables que conservan el valor de ejemplo: ${sin_cambiar}"
+    fi
+    if (( rotas == 0 && enmascaradas == 0 && sin_cambiar == 0 )); then
+        log_ok "El archivo está completo para todo lo hecho hasta ahora."
+        return 0
+    fi
+    log_aviso "Detalle y cómo obtenerlas:  scripts/variables.sh --faltan"
+    return 1
 }
 
 # ===========================================================================
@@ -162,22 +235,38 @@ accion_estado() {
 # ===========================================================================
 accion_faltan() {
     exigir_configuracion
+    cargar_valores
     log_paso "Variables pendientes"
 
-    local hay=0 nombre obligatoria descubre capitulo valor
-    while IFS=$'\t' read -r nombre obligatoria descubre capitulo; do
+    local hay=0 nombre clase descubre capitulo estado
+    while IFS=$'\t' read -r nombre clase descubre capitulo; do
         [[ -n "${nombre}" ]] || continue
-        valor="$(valor_actual "${nombre}")"
-        [[ -n "${valor}" && "${valor}" != *CAMBIAME* ]] && continue
-        # Una variable opcional y vacía no es un pendiente: es una decisión.
-        (( obligatoria == 0 )) && [[ "${descubre}" == "-" ]] && continue
+        estado="$(estado_de "${nombre}" "${clase}")"
+        case "${estado}" in
+            ok|opcional) continue ;;
+        esac
 
         hay=1
         echo
-        printf '  %s%s%s\n' "${C_NEGRITA}" "${nombre}" "${C_FIN}"
+        printf '  %s%s%s' "${C_NEGRITA}" "${nombre}" "${C_FIN}"
+        case "${estado}" in
+            ENMASCARADA)  printf '  %s← tiene valor en tu sesión, pero NO en el archivo%s\n' "${C_ROJO}" "${C_FIN}" ;;
+            "SIN CAMBIAR") printf '  %s← conserva el valor de ejemplo%s\n' "${C_ROJO}" "${C_FIN}" ;;
+            *)            printf '\n' ;;
+        esac
+
         [[ "${capitulo}" != "-" ]] && printf '    capítulo : %s\n' "${capitulo}"
+        if [[ "${estado}" == "ENMASCARADA" ]]; then
+            printf '    valor en tu sesión: %s\n' "${VALOR_ENTORNO[${nombre}]:-}"
+            printf '    se fija con   : scripts/variables.sh --fijar %s="%s"\n' \
+                   "${nombre}" "${VALOR_ENTORNO[${nombre}]:-}"
+            continue
+        fi
         if [[ "${descubre}" != "-" ]]; then
             printf '    se obtiene con: %s\n' "${descubre}"
+        elif [[ "${clase}" == "REQUERIDA" ]]; then
+            printf '    trae valor por omisión en la plantilla: cópialo de\n'
+            printf '                    %s\n' "${NOMAD_CONFIG_EJEMPLO}"
         else
             printf '    se decide en la planificación (capítulo 00)\n'
         fi
@@ -252,11 +341,16 @@ accion_fijar() {
 # ===========================================================================
 accion_ver() {
     exigir_configuracion
-    local nombre="$1"
-    local valor
-    valor="$(valor_actual "${nombre}")"
+    local nombre="$1" linea valor
+    linea="$(nomad_leer_config "${NOMAD_CONFIG}" "${nombre}")" || {
+        log_error "No se puede leer ${NOMAD_CONFIG}"; exit 1; }
+    valor="${linea#*=}"
     if [[ -z "${valor}" ]]; then
         log_error "${nombre} no tiene valor en ${NOMAD_CONFIG}"
+        if [[ -n "${!nombre:-}" ]]; then
+            log_error "Ojo: sí lo tiene en tu sesión ('${!nombre}'), pero eso no cuenta:"
+            log_error "los scripts leen el archivo. Escríbelo con --fijar."
+        fi
         exit 1
     fi
     printf '%s\n' "${valor}"
@@ -264,11 +358,11 @@ accion_ver() {
 
 accion_exportar() {
     exigir_configuracion
-    local nombre valor
+    cargar_valores
+    local nombre
     while IFS=$'\t' read -r nombre _ _ _; do
         [[ -n "${nombre}" ]] || continue
-        valor="$(valor_actual "${nombre}")"
-        printf 'export %s="%s"\n' "${nombre}" "${valor}"
+        printf 'export %s="%s"\n' "${nombre}" "${VALOR_ARCHIVO[${nombre}]:-}"
     done < <(metadatos)
 }
 
