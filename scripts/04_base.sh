@@ -200,7 +200,7 @@ instalar_paquetes \
     vim less tmux rsync jq unzip tree \
     btop ncdu \
     smartmontools lm-sensors \
-    dnsutils iproute2 \
+    bind9-dnsutils iproute2 \
     unattended-upgrades
 
 # ===========================================================================
@@ -223,10 +223,18 @@ else
     ejecutar systemctl mask "${POR_ENMASCARAR[@]}"
 fi
 
+# Se recarga logind solo si el archivo ha cambiado. Hacerlo siempre contaría
+# como un cambio en cada ejecución y rompería la promesa de la idempotencia:
+# que una segunda pasada informe de que no había nada que hacer.
+CAMBIOS_ANTES="${NOMAD_CAMBIOS}"
 printf '[Login]\nHandlePowerKey=ignore\nHandleLidSwitch=ignore\nHandleSuspendKey=ignore\nHandleHibernateKey=ignore\n' \
     | instalar_archivo /etc/systemd/logind.conf.d/50-nomad-servidor.conf 644 root:root
 
-recargar_servicio systemd-logind
+if (( NOMAD_CAMBIOS > CAMBIOS_ANTES )); then
+    recargar_servicio systemd-logind
+else
+    log_sinca "logind no necesita recargarse."
+fi
 
 # ===========================================================================
 #  RESUMEN

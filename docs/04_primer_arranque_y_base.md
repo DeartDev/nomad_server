@@ -134,7 +134,8 @@ sin motivo aparente.
 | `tmux` | Que un `apt upgrade` largo sobreviva a una desconexión SSH |
 | `jq` | Leer la salida JSON de Docker, Tailscale y cloudflared |
 | `smartmontools`, `lm-sensors` | Salud de discos y temperaturas |
-| `dnsutils`, `net-tools` | Diagnóstico de red |
+| `bind9-dnsutils` | Diagnóstico de DNS: `dig`, `nslookup`, `host`. En Debian 12 y posteriores el nombre `dnsutils` es solo un alias virtual que este paquete proporciona; instalarlo por el nombre real es lo que permite comprobar después si ya está |
+| `iproute2` | Diagnóstico de red: `ip`, `ss` |
 | `unattended-upgrades` | Se configura en el capítulo 07 |
 
 No se instalan `nginx`, `python3-pip`, `nodejs` ni bases de datos. Todo eso va en contenedores.
@@ -587,7 +588,7 @@ sudo apt install -y --no-install-recommends \
     vim less tmux rsync jq unzip tree \
     btop ncdu \
     smartmontools lm-sensors \
-    dnsutils iproute2 \
+    bind9-dnsutils iproute2 \
     unattended-upgrades
 ```
 
@@ -866,6 +867,8 @@ capítulo [16](16_recuperacion_ante_desastres.md).
 | Tras reiniciar, los comandos vuelven a fallar con valores vacíos | Es lo normal: el entorno vive en el shell y murió con el reinicio | Repite el ritual del paso 11 | Anexo [98](98_variables_y_entorno.md) § 5 |
 | `su -` no reconoce `${ADMIN_USUARIO}` | El shell de root no hereda tu entorno | Usa `su -c "usermod -aG sudo ${ADMIN_USUARIO}"` | § 5 paso 3 |
 | Abrí una segunda ventana de tmux y no hay variables | Cada ventana es un shell independiente | Carga el entorno también allí | § 5 paso 0 |
+| El script dice «Paquetes por instalar: dnsutils» en cada ejecución | `dnsutils` es un nombre virtual: lo proporciona `bind9-dnsutils`, así que `dpkg-query` nunca lo da por instalado | Instala `bind9-dnsutils`, que es el nombre real | § 3.6 |
+| `apt` responde «Note, selecting 'bind9-dnsutils' instead of 'dnsutils'» | Lo mismo, visto desde `apt` | No es un error: te está resolviendo el alias | § 3.6 |
 
 ---
 
