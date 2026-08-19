@@ -37,7 +37,14 @@ Opciones:
   --faltan            Solo lo que queda por rellenar, con el capítulo y el
                       comando que averigua cada valor.
   --fijar VAR=valor   Escribe (o sustituye) una variable en config/servidor.env
-                      conservando comentarios, orden y permisos.
+                      conservando comentarios, orden y permisos. Si la clave no
+                      existía, se inserta en la posición que ocupa en la
+                      plantilla: añadirla al final rompería cualquier variable
+                      anterior que la referencie.
+  --reordenar         Reescribe el archivo siguiendo la estructura de la
+                      plantilla, conservando tus valores tal cual (una variable
+                      derivada sigue siendo derivada). Muestra las diferencias
+                      y pide confirmación. Admite --check y --si.
   --ver VAR           Imprime el valor que la variable tiene EN EL ARCHIVO.
                       Si está vacía ahí pero sí la tienes en la sesión, lo
                       dice: es el caso ENMASCARADA.
@@ -45,6 +52,8 @@ Opciones:
                           eval "$(scripts/variables.sh --exportar)"
                       La vía recomendada, sin embargo, es:
                           source scripts/lib/entorno.sh
+  -n, --check         Con --reordenar: muestra las diferencias sin aplicarlas.
+  -y, --si            No pide confirmación.
   -h, --help          Muestra esta ayuda.
 
 Etiquetas de la plantilla config/servidor.env.example:
@@ -283,6 +292,129 @@ accion_faltan() {
 }
 
 # ===========================================================================
+#  Orden del archivo
+# ===========================================================================
+#  El orden importa: config/servidor.env lo lee bash de arriba abajo, y varias
+#  variables se componen a partir de otras
+#
+#      TRAEFIK_DASHBOARD_HOST="traefik.${SERVIDOR_HOSTNAME}.${SERVIDOR_DOMINIO_LOCAL}"
+#
+#  Si una clave nueva se añadiera al final, toda variable anterior que la
+#  referencie se evaluaría con ella todavía vacía, y el resultado sería un
+#  valor malformado —'traefik.nomad.'— que no da ningún error. Por eso las
+#  claves nuevas se insertan en la posición que ocupan en la plantilla.
+# ===========================================================================
+
+# Línea del archivo tras la cual debe insertarse una clave nueva, según el
+# orden de la plantilla. Devuelve 0 si debe ir antes de la primera variable.
+posicion_para() {
+    local nombre="$1"
+    local orden=() previas=() k n
+    mapfile -t orden < <(grep -oE '^[A-Z][A-Z0-9_]*=' "${NOMAD_CONFIG_EJEMPLO}" | tr -d '=')
+
+    for k in "${orden[@]}"; do
+        [[ "${k}" == "${nombre}" ]] && break
+        previas+=("${k}")
+    done
+
+    # De la más cercana a la más lejana: la primera que exista manda.
+    local i
+    for (( i = ${#previas[@]} - 1; i >= 0; i-- )); do
+        n="$(grep -n "^${previas[i]}=" "${NOMAD_CONFIG}" | head -1 | cut -d: -f1)"
+        if [[ -n "${n}" ]]; then printf '%s\n' "${n}"; return 0; fi
+    done
+    printf '0\n'
+}
+
+# ===========================================================================
+#  --reordenar
+# ===========================================================================
+#  Reescribe config/servidor.env siguiendo la estructura de la plantilla y
+#  conservando TUS valores tal cual están escritos, sin expandirlos: una
+#  variable derivada sigue siendo derivada.
+#
+#  Sirve para dos cosas: recolocar claves que quedaron fuera de sitio, y
+#  recuperar los comentarios de la plantilla cuando esta se amplía.
+# ===========================================================================
+accion_reordenar() {
+    exigir_configuracion
+
+    local -A crudo=()
+    local linea nombre
+    while IFS= read -r linea; do
+        [[ "${linea}" =~ ^([A-Z][A-Z0-9_]*)= ]] || continue
+        nombre="${BASH_REMATCH[1]}"
+        [[ -v "crudo[${nombre}]" ]] || crudo["${nombre}"]="${linea#*=}"
+    done < "${NOMAD_CONFIG}"
+
+    local tmp agregadas=() extras=()
+    tmp="$(mktemp)"
+
+    local -A vistas=()
+    while IFS= read -r linea; do
+        if [[ "${linea}" =~ ^([A-Z][A-Z0-9_]*)= ]]; then
+            nombre="${BASH_REMATCH[1]}"
+            vistas["${nombre}"]=1
+            if [[ -v "crudo[${nombre}]" ]]; then
+                printf '%s=%s\n' "${nombre}" "${crudo[${nombre}]}" >> "${tmp}"
+            else
+                printf '%s=""\n' "${nombre}" >> "${tmp}"
+                agregadas+=("${nombre}")
+            fi
+        else
+            printf '%s\n' "${linea}" >> "${tmp}"
+        fi
+    done < "${NOMAD_CONFIG_EJEMPLO}"
+
+    # Claves tuyas que la plantilla no conoce: se conservan al final.
+    for nombre in "${!crudo[@]}"; do
+        [[ -v "vistas[${nombre}]" ]] && continue
+        extras+=("${nombre}")
+    done
+    if (( ${#extras[@]} > 0 )); then
+        {
+            echo
+            echo "# ---------------------------------------------------------------------------"
+            echo "# Variables propias, ajenas a config/servidor.env.example"
+            echo "# ---------------------------------------------------------------------------"
+            for nombre in $(printf '%s\n' "${extras[@]}" | sort); do
+                printf '%s=%s\n' "${nombre}" "${crudo[${nombre}]}"
+            done
+        } >> "${tmp}"
+    fi
+
+    log_paso "Reordenar ${NOMAD_CONFIG} según la plantilla"
+    if cmp -s "${NOMAD_CONFIG}" "${tmp}"; then
+        rm -f "${tmp}"
+        log_ok "El archivo ya sigue el orden y la estructura de la plantilla."
+        return 0
+    fi
+
+    log_info "Diferencias que se aplicarían (los valores no cambian, solo su sitio):"
+    diff -u "${NOMAD_CONFIG}" "${tmp}" | sed 's/^/    /' || true
+    (( ${#agregadas[@]} > 0 )) && log_aviso "Se añaden vacías: ${agregadas[*]}"
+    (( ${#extras[@]} > 0 ))   && log_info  "Se conservan al final: ${extras[*]}"
+
+    if (( MODO_CHECK == 1 )); then
+        rm -f "${tmp}"
+        log_check "Simulación: no se ha modificado nada."
+        return 0
+    fi
+    if ! confirmar "¿Reescribir ${NOMAD_CONFIG} con este orden?"; then
+        rm -f "${tmp}"
+        log_info "No se ha tocado nada."
+        return 1
+    fi
+
+    respaldar_archivo "${NOMAD_CONFIG}"
+    cat "${tmp}" > "${NOMAD_CONFIG}"
+    rm -f "${tmp}"
+    chmod 600 "${NOMAD_CONFIG}"
+    log_ok "Archivo reordenado. Recarga el entorno:"
+    log_ok "    source ${NOMAD_RAIZ}/scripts/lib/entorno.sh"
+}
+
+# ===========================================================================
 #  --fijar
 # ===========================================================================
 accion_fijar() {
@@ -318,13 +450,32 @@ accion_fijar() {
             END { if (!hecho) printf "%s=\"%s\"\n", n, v }
         ' "${NOMAD_CONFIG}" > "${tmp}"
     else
-        # Añadir al final, con una nota de dónde salió.
-        cat "${NOMAD_CONFIG}" > "${tmp}"
-        {
-            echo
-            echo "# Añadida por scripts/variables.sh el $(date +%F)"
-            printf '%s="%s"\n' "${nombre}" "${valor}"
-        } >> "${tmp}"
+        # Insertar en la posición que ocupa en la plantilla. Añadirla al final
+        # rompería cualquier variable anterior que la referencie.
+        local tras
+        tras="$(posicion_para "${nombre}")"
+        awk -v n="${nombre}" -v v="${valor}" -v tras="${tras}" -v fecha="$(date +%F)" '
+            NR == tras {
+                print
+                printf "\n# Añadida por scripts/variables.sh el %s\n", fecha
+                printf "%s=\"%s\"\n", n, v
+                hecho = 1
+                next
+            }
+            tras == 0 && !hecho && /^[A-Z][A-Z0-9_]*=/ {
+                printf "# Añadida por scripts/variables.sh el %s\n", fecha
+                printf "%s=\"%s\"\n\n", n, v
+                hecho = 1
+            }
+            { print }
+            END {
+                if (!hecho) {
+                    printf "\n# Añadida por scripts/variables.sh el %s\n", fecha
+                    printf "%s=\"%s\"\n", n, v
+                }
+            }
+        ' "${NOMAD_CONFIG}" > "${tmp}"
+        log_info "Clave nueva: se inserta en el orden de la plantilla, no al final."
     fi
 
     cat "${tmp}" > "${NOMAD_CONFIG}"
@@ -373,12 +524,18 @@ ACCION="estado"
 ARGUMENTO=""
 
 while (( $# > 0 )); do
+    # MODO_SI no se lee en este archivo: lo consulta confirmar(), definida en
+    # lib/common.sh, cuando --reordenar pide confirmación.
+    # shellcheck disable=SC2034
     case "$1" in
         --estado)    ACCION="estado" ;;
+        --reordenar) ACCION="reordenar" ;;
         --faltan)    ACCION="faltan" ;;
         --exportar)  ACCION="exportar" ;;
         --fijar)     ACCION="fijar"; ARGUMENTO="${2:-}"; shift ;;
         --ver)       ACCION="ver";   ARGUMENTO="${2:-}"; shift ;;
+        -n|--check)  MODO_CHECK=1 ;;
+        -y|--si)     MODO_SI=1 ;;
         -h|--help)   mostrar_ayuda; exit 0 ;;
         *)           die "Opción desconocida: $1 (usa --help)" ;;
     esac
@@ -386,7 +543,8 @@ while (( $# > 0 )); do
 done
 
 case "${ACCION}" in
-    estado)   accion_estado ;;
+    estado)    accion_estado ;;
+    reordenar) accion_reordenar ;;
     faltan)   accion_faltan ;;
     fijar)    [[ -n "${ARGUMENTO}" ]] || die "--fijar necesita NOMBRE=valor"; accion_fijar "${ARGUMENTO}" ;;
     ver)      [[ -n "${ARGUMENTO}" ]] || die "--ver necesita el nombre de una variable"; accion_ver "${ARGUMENTO}" ;;

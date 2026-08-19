@@ -653,6 +653,7 @@ descubriendo:
 ./scripts/variables.sh --faltan                  # solo lo pendiente
 ./scripts/variables.sh --fijar LAN_IP=10.0.0.50  # escribir un valor
 ./scripts/variables.sh --ver DATOS_RAIZ          # consultar un valor
+./scripts/variables.sh --reordenar --check       # ¿está el archivo en orden?
 ```
 
 `--fijar` conserva el orden y los comentarios del archivo, deja una copia previa en

@@ -210,13 +210,19 @@ fi
 # ===========================================================================
 # Ver de un vistazo con qué valores estás trabajando evita el error clásico de
 # aplicar el capítulo con la configuración de otro servidor.
+# Nada de valores por omisión en este resumen. Escribir
+# "${SERVIDOR_DOMINIO_LOCAL:-lan}" haría que una variable VACÍA se mostrara
+# como 'lan', y el resumen pasaría de informar a tranquilizar: exactamente el
+# problema que este archivo existe para evitar.
+_e_muestra() { [[ -n "${1}" ]] && printf '%s' "${1}" || printf '<SIN DEFINIR>'; }
+
 printf '%s' "${_e_gris}"
 cat <<RESUMEN
-        servidor   : ${SERVIDOR_HOSTNAME:-<sin definir>}.${SERVIDOR_DOMINIO_LOCAL:-lan}
-        usuario    : ${ADMIN_USUARIO:-<sin definir>}
-        LAN        : ${LAN_IP:-<sin definir>}/${LAN_PREFIJO:-?} en ${LAN_CIDR:-<sin definir>}
-        dominio    : ${DOMINIO_PUBLICO:-<sin definir>}
-        proyectos  : ${DATOS_RAIZ:-<sin definir>}
+        servidor   : $(_e_muestra "${SERVIDOR_HOSTNAME:-}").$(_e_muestra "${SERVIDOR_DOMINIO_LOCAL:-}")
+        usuario    : $(_e_muestra "${ADMIN_USUARIO:-}")
+        LAN        : $(_e_muestra "${LAN_IP:-}")/$(_e_muestra "${LAN_PREFIJO:-}") en $(_e_muestra "${LAN_CIDR:-}")
+        dominio    : $(_e_muestra "${DOMINIO_PUBLICO:-}")
+        proyectos  : $(_e_muestra "${DATOS_RAIZ:-}")
 RESUMEN
 printf '%s' "${_e_fin}"
 

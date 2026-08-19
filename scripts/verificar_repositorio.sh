@@ -307,9 +307,19 @@ comprobar_docs() {
     # Nombres exigidos por los scripts. Se extraen de las llamadas a
     # requerir_variables, incluidas sus continuaciones de línea.
     local exigidas
-    exigidas="$(sed -n '/requerir_variables/,/[^\\]$/p' scripts/*.sh \
-        | tr ' ' '\n' \
-        | grep -oE '^[A-Z][A-Z0-9_]+$' | sort -u)"
+    exigidas="$( {
+        # a) las que un script exige explícitamente
+        sed -n '/requerir_variables/,/[^\\]$/p' scripts/*.sh \
+            | tr ' ' '\n' | grep -oE '^[A-Z][A-Z0-9_]+$'
+        # b) las que otra variable de la plantilla referencia en su valor. Una
+        #    variable así puede no exigirla ningún script y aun así romperlo
+        #    todo si queda vacía: SERVIDOR_DOMINIO_LOCAL vacía convierte
+        #    TRAEFIK_DASHBOARD_HOST en 'traefik.nomad.', sin ningún error.
+        grep -E '^[A-Z][A-Z0-9_]*=' config/servidor.env.example \
+            | cut -d= -f2- \
+            | grep -oE '\$\{[A-Z][A-Z0-9_]*\}' \
+            | tr -d '${}'
+    } | sort -u)"
 
     local sin_etiqueta=() variable
     while IFS= read -r variable; do

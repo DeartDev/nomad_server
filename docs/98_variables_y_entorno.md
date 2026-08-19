@@ -131,6 +131,50 @@ tarde, y no volver: el capítulo que la necesite abortará.
 etiquetas. Sin esa comprobación la plantilla podría prometer un aviso que nunca llega, que es lo que
 ocurría con `SERVIDOR_LOCALE`, `DEBIAN_MIRROR` y `DEBIAN_SUITE`.
 
+### 2.2.ter El orden del archivo importa
+
+`config/servidor.env` lo lee bash de arriba abajo, y varias variables se componen a partir de otras:
+
+```bash
+SERVIDOR_DOMINIO_LOCAL="lan"
+…
+TRAEFIK_DASHBOARD_HOST="traefik.${SERVIDOR_HOSTNAME}.${SERVIDOR_DOMINIO_LOCAL}"
+```
+
+Si una clave se escribiera **al final** del archivo, toda variable anterior que la referencie se
+evaluaría con ella todavía vacía. El resultado es un valor malformado que **no produce ningún
+error**:
+
+```
+TRAEFIK_DASHBOARD_HOST = traefik.nomad.
+```
+
+Por eso `--fijar` inserta las claves nuevas en la posición que ocupan en la plantilla, en lugar de
+añadirlas al final. Y si tu archivo ya quedó desordenado —por ejemplo porque lo fuiste construyendo
+a mano—, se arregla de una vez:
+
+```bash
+# [servidor]
+./scripts/variables.sh --reordenar --check    # enseña las diferencias
+./scripts/variables.sh --reordenar            # las aplica, tras confirmar
+source scripts/lib/entorno.sh
+```
+
+`--reordenar` reescribe el archivo siguiendo la estructura de la plantilla y **conserva tus valores
+tal cual están escritos**, sin expandirlos: una variable derivada sigue siendo derivada. Recupera
+además los comentarios de la plantilla cuando esta se amplía, y deja al final, bajo su propio
+encabezado, cualquier variable tuya que la plantilla no conozca.
+
+Comprobación de que ha quedado bien, leyendo el archivo como lo leería `sudo`:
+
+```bash
+# [servidor]
+env -i HOME="${HOME}" bash --norc -c 'set -a; . config/servidor.env; set +a
+echo "${TRAEFIK_DASHBOARD_HOST} · ${DOZZLE_HOST} · ${UPTIME_KUMA_HOST}"'
+```
+
+Criterio de aceptación: tres nombres completos, ninguno terminado en punto.
+
 ### 2.3 Valores temporales de sesión (clase 3)
 
 Existen durante unos minutos y **no van en `config/servidor.env`** porque no describen el servidor,
@@ -747,6 +791,8 @@ nada. Lo habitual es usar la B la primera vez y la A al reconstruir.
 | `--estado` marca una variable como `ENMASCARADA` | Tiene valor en tu sesión y no en el archivo | Escríbela con `--fijar`; al cerrar la terminal se perdería |
 | Cada sesión nueva vuelve a estar mal | Hay un `export` en `~/.bashrc` que la enmascara siempre | Escríbela en el archivo y quítala del perfil (§ 3.4) |
 | Vacié una variable «para rellenarla luego» y ahora un script aborta | Era `[REQUERIDA]`: traía un valor por omisión que funcionaba | Cópialo de `config/servidor.env.example` (§ 2.2.bis) |
+| Un nombre derivado sale con un punto al final: `traefik.nomad.` | La variable que lo completa está definida **después** en el archivo | `./scripts/variables.sh --reordenar` (§ 2.2.ter) |
+| Fijé una variable, el comando dijo `[OK]`, y no surte efecto | Se escribió al final y quien la usa está antes | Ídem (§ 2.2.ter) |
 | `./scripts/lib/entorno.sh` no hace nada | Se ejecutó en lugar de importarse | Usa `source scripts/lib/entorno.sh` (§ 3.1) |
 | En la segunda terminal las variables no existen | El entorno no se propaga entre terminales | Cárgalo también allí |
 | Un contenedor no ve una variable que sí tengo en el shell | Estaba definida pero sin exportar | El ayudante exporta; si lo hiciste a mano, usa `set -a` (§ 3.2) |
