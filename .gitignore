@@ -51,3 +51,6 @@ inventario/
 # Salidas de herramientas
 .lycheecache
 report/
+
+# Configuración generada/local de Cloudflared
+config/cloudflared/
