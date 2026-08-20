@@ -623,7 +623,7 @@ Criterio de aceptación: `OK: http://:8080/ping`.
 
 ```bash
 # [servidor] — el intermediario del socket permite consultar contenedores
-docker exec traefik wget -qO- http://socket-proxy:2375/v1.24/containers/json | head -c 100
+docker exec traefik wget -qO- http://socket-proxy:2375/containers/json | head -c 100
 ```
 
 Criterio de aceptación: devuelve JSON.
@@ -631,7 +631,7 @@ Criterio de aceptación: devuelve JSON.
 ```bash
 # [servidor] — pero NO permite crear contenedores
 docker exec traefik wget -qO- --post-data='{}' \
-    http://socket-proxy:2375/v1.24/containers/create 2>&1 | head -2
+    http://socket-proxy:2375/containers/create 2>&1 | head -2
 ```
 
 Criterio de aceptación: responde `403 Forbidden`. **Esta es la comprobación que demuestra que el
@@ -709,7 +709,7 @@ docker compose restart traefik
 |---|---|---|---|
 | El panel devuelve 404 | Falta la barra final en `/dashboard/` | Usa `http://…/dashboard/` con barra | [Traefik — Dashboard](https://doc.traefik.io/traefik/operations/dashboard/) |
 | Traefik no arranca: «cannot assign requested address» | `TRAEFIK_BIND_INTERNA` apunta a una IP que no existe en el host | Comprueba con `ip -br addr`. Si es la de Tailscale, la VPN debe estar levantada antes | Capítulo [08](08_tailscale.md) |
-| Traefik no ve ningún contenedor | El intermediario del socket no responde, o falta `traefik.enable=true` | `docker logs socket-proxy` y `docker exec traefik wget -qO- http://socket-proxy:2375/v1.24/containers/json` | § 3.2 |
+| Traefik no ve ningún contenedor | El intermediario del socket no responde, o falta `traefik.enable=true` | `docker logs socket-proxy` y `docker exec traefik wget -qO- http://socket-proxy:2375/containers/json` | § 3.2 |
 | «Gateway Timeout» al llegar a un proyecto | El contenedor no está en la red `${DOCKER_RED_PROXY}`, o el puerto de la etiqueta es incorrecto | `docker network inspect ${DOCKER_RED_PROXY}` y revisa `loadbalancer.server.port` | [Traefik — Docker](https://doc.traefik.io/traefik/providers/docker/) |
 | Un contenedor aparece publicado sin querer | `exposedByDefault` no está en `false` | Revisa la configuración estática (§ 3.2, paso 2) | [Traefik — Docker](https://doc.traefik.io/traefik/providers/docker/) |
 | Los registros muestran la IP del túnel, no la del visitante | Falta `forwardedHeaders.trustedIPs` | Añade `${DOCKER_RED_PROXY_SUBRED}` en el punto de entrada `web` | [Traefik — EntryPoints](https://doc.traefik.io/traefik/routing/entrypoints/) |

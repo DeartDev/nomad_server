@@ -343,7 +343,7 @@ intermediario del socket:
 ```bash
 # [servidor]
 docker logs dozzle | tail -20
-docker exec dozzle wget -qO- http://socket-proxy:2375/v1.24/containers/json | head -c 200
+docker exec dozzle wget -qO- http://socket-proxy:2375/containers/json | head -c 200
 ```
 
 ### Paso 6 — Configura Uptime Kuma
@@ -645,7 +645,7 @@ Criterio de aceptación: `dozzle` y `uptime-kuma` en `running (healthy)`.
 
 ```bash
 # [servidor] — Dozzle alcanza el intermediario del socket
-docker exec dozzle wget -qO- http://socket-proxy:2375/v1.24/containers/json | head -c 50
+docker exec dozzle wget -qO- http://socket-proxy:2375/containers/json | head -c 50
 ```
 
 Criterio de aceptación: devuelve JSON.

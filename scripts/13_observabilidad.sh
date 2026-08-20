@@ -150,8 +150,11 @@ else
     # SIGPIPE y, con 'set -o pipefail', la comprobación fallaría aunque la
     # respuesta fuera correcta. Es el mismo motivo por el que aquí no se usa
     # 'grep -q' (ver contiene() en lib/common.sh).
+    # La ruta no lleva prefijo de versión: fijar '/v1.24/' hace que el demonio
+    # responda 400 en cuanto su versión mínima admitida sea mayor, y la
+    # comprobación acusaría a Dozzle de un fallo que no es suyo.
     RESPUESTA_SOCKET="$(docker exec dozzle wget -qO- --timeout=5 \
-        http://socket-proxy:2375/v1.24/containers/json 2>/dev/null || true)"
+        http://socket-proxy:2375/containers/json 2>/dev/null || true)"
     if [[ "${RESPUESTA_SOCKET:0:1}" == "[" ]]; then
         log_ok "Dozzle alcanza el intermediario del socket."
     else

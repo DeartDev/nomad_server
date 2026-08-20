@@ -84,10 +84,14 @@ services:
       # necesita poder hacer: así la comprobación valida el permiso
       # 'CONTAINERS: 1' y no solo que el intermediario esté vivo.
       #
-      # NO se usa '--spider': eso envía una petición HEAD, y el único punto de
-      # la API de Docker que acepta HEAD es /_ping. Contra cualquier otro
-      # devuelve 400 y la comprobación falla sin que pase nada malo.
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:2375/v1.24/containers/json"]
+      # La ruta NO lleva prefijo de versión. Un '/v1.24/' delante hace que el
+      # demonio responda 400 Bad Request en cuanto su versión mínima admitida
+      # sea superior, cosa que pasa al actualizar Docker: la comprobación
+      # empezaría a fallar sola, sin que nada esté roto. Sin prefijo, el
+      # demonio usa su versión actual.
+      #
+      # Tampoco se usa '--spider', que envía HEAD en vez de GET.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:2375/containers/json"]
       interval: 30s
       timeout: 5s
       retries: 3
