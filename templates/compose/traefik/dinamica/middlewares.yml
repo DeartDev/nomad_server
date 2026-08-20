@@ -100,6 +100,10 @@ http:
       ipAllowList:
         sourceRange:
           - "127.0.0.1/32"
+          # El anfitrión publica el punto de entrada interno en la loopback. Si
+          # alguna vez lo hace por IPv6, el origen que ve Traefik es ::1 y sin
+          # esta línea quedaría fuera.
+          - "::1/128"
           - "${LAN_CIDR}"
           - "${TS_CIDR}"
           - "${DOCKER_RED_PROXY_SUBRED}"
