@@ -203,9 +203,14 @@ echo
 # Cómo se llega depende de dónde escuche el punto de entrada interno, y darlo
 # por supuesto manda al lector a crear registros DNS hacia una dirección en la
 # que no hay nada escuchando.
+# El acceso por tailnet no depende de TRAEFIK_BIND_INTERNA sino del archivo de
+# superposición que instala el capítulo 10, así que hay que mirar los dos.
+ACCESO_TAILNET=0
+[[ -f "${DATOS_RAIZ}/traefik/docker-compose.override.yml" ]] && ACCESO_TAILNET=1
+
 case "${TRAEFIK_BIND_INTERNA}" in
     127.0.0.1|localhost|::1)
-        log_info "El punto de entrada interno solo escucha en la loopback del servidor."
+        log_info "El punto de entrada interno escucha en la loopback del servidor."
         log_info "Se llega por un túnel SSH desde tu equipo:"
         log_info "    ssh -L ${TRAEFIK_PUERTO_INTERNA}:127.0.0.1:${TRAEFIK_PUERTO_INTERNA} ${SERVIDOR_HOSTNAME}"
         log_info "y con estos nombres apuntando a 127.0.0.1 en el /etc/hosts de tu equipo:"
@@ -215,6 +220,9 @@ case "${TRAEFIK_BIND_INTERNA}" in
         log_info "Accede desde cualquier dispositivo que alcance esa dirección:"
         ;;
 esac
+if (( ACCESO_TAILNET == 1 )); then
+    log_info "    (y también en ${TS_IP:-la IP de Tailscale}, sin túnel, desde tu tailnet)"
+fi
 log_info "    Registros:  http://${DOZZLE_HOST}:${TRAEFIK_PUERTO_INTERNA}"
 log_info "    Monitor:    http://${UPTIME_KUMA_HOST}:${TRAEFIK_PUERTO_INTERNA}"
 log_info ""
