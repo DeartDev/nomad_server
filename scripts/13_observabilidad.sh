@@ -50,7 +50,8 @@ log_paso "Comprobaciones previas"
 requerir_no_root
 cargar_entorno
 requerir_variables DATOS_RAIZ DOCKER_RED_PROXY DOCKER_RED_SOCKET \
-                   DOZZLE_HOST UPTIME_KUMA_HOST TRAEFIK_PUERTO_INTERNA
+                   DOZZLE_HOST UPTIME_KUMA_HOST TRAEFIK_PUERTO_INTERNA \
+                   TRAEFIK_BIND_INTERNA SERVIDOR_HOSTNAME
 requerir_comandos docker
 
 docker ps >/dev/null 2>&1 \
@@ -199,7 +200,21 @@ fi
 resumen_final "13_observabilidad"
 
 echo
-log_info "Accede desde un dispositivo de tu tailnet:"
+# Cómo se llega depende de dónde escuche el punto de entrada interno, y darlo
+# por supuesto manda al lector a crear registros DNS hacia una dirección en la
+# que no hay nada escuchando.
+case "${TRAEFIK_BIND_INTERNA}" in
+    127.0.0.1|localhost|::1)
+        log_info "El punto de entrada interno solo escucha en la loopback del servidor."
+        log_info "Se llega por un túnel SSH desde tu equipo:"
+        log_info "    ssh -L ${TRAEFIK_PUERTO_INTERNA}:127.0.0.1:${TRAEFIK_PUERTO_INTERNA} ${SERVIDOR_HOSTNAME}"
+        log_info "y con estos nombres apuntando a 127.0.0.1 en el /etc/hosts de tu equipo:"
+        ;;
+    *)
+        log_info "El punto de entrada interno escucha en ${TRAEFIK_BIND_INTERNA}."
+        log_info "Accede desde cualquier dispositivo que alcance esa dirección:"
+        ;;
+esac
 log_info "    Registros:  http://${DOZZLE_HOST}:${TRAEFIK_PUERTO_INTERNA}"
 log_info "    Monitor:    http://${UPTIME_KUMA_HOST}:${TRAEFIK_PUERTO_INTERNA}"
 log_info ""

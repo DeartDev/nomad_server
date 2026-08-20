@@ -291,7 +291,34 @@ Criterio de aceptación: ambos `running` y, tras el período de arranque, `healt
 
 ### Paso 4 — Configura el acceso por nombre
 
-**Opción recomendada — registro DNS a la IP de Tailscale:**
+**Antes de nada, mira dónde escucha el punto de entrada interno.** De eso depende todo lo demás, y
+darlo por supuesto lleva a crear registros DNS hacia una dirección en la que no hay nada
+escuchando:
+
+```bash
+# [servidor]
+./scripts/variables.sh --ver TRAEFIK_BIND_INTERNA
+ss -tlnp | grep ":${TRAEFIK_PUERTO_INTERNA}"
+```
+
+- Si dice **`127.0.0.1`**, el panel y estas herramientas solo se alcanzan **por un túnel SSH**. Los
+  registros DNS a la IP de Tailscale no servirían de nada: nadie escucha ahí. Ve a la opción C.
+- Si dice la **IP de Tailscale** (`100.x.y.z`), cualquier dispositivo de tu tailnet llega. Opciones
+  A o B.
+- Si dice **`0.0.0.0`**, para: eso publica las herramientas de operación en toda la red y
+  contradice el diseño (capítulo [09](09_docker.md) § 3.2).
+
+Cambiar dónde escucha es cosa del capítulo [10](10_traefik.md): se fija `TRAEFIK_BIND_INTERNA` y se
+vuelve a aplicar.
+
+```bash
+# [servidor] — pasar a escuchar en la tailnet, si es lo que quieres
+./scripts/variables.sh --fijar TRAEFIK_BIND_INTERNA='${TS_IP}'
+source scripts/lib/entorno.sh
+./scripts/10_traefik.sh
+```
+
+**Opción A — registro DNS a la IP de Tailscale:**
 
 ```bash
 # [servidor]
@@ -312,7 +339,7 @@ En el panel de Cloudflare → **DNS → Records**, añade dos registros:
 > La nube **debe** estar gris. Si estuviera naranja, Cloudflare intentaría alcanzar una dirección
 > privada desde internet y devolvería un error.
 
-**Opción sin DNS — archivo `hosts` del cliente:**
+**Opción B — sin DNS, archivo `hosts` del cliente:**
 
 ```bash
 # [cliente] — con el entorno cargado en tu equipo
@@ -320,6 +347,28 @@ cd ~/nomad_server && source scripts/lib/entorno.sh
 echo "${TS_IP}  ${DOZZLE_HOST} ${UPTIME_KUMA_HOST}" | sudo tee -a /etc/hosts
 getent hosts ${DOZZLE_HOST}
 ```
+
+**Opción C — túnel SSH, cuando el punto de entrada escucha solo en la loopback:**
+
+Es la configuración más cerrada de las tres: no hay nada escuchando fuera del propio servidor, y el
+acceso viaja dentro de la sesión SSH que ya usas para administrarlo.
+
+```bash
+# [cliente] — los nombres, hacia tu propia máquina
+cd ~/nomad_server && source scripts/lib/entorno.sh
+echo "127.0.0.1  ${DOZZLE_HOST} ${UPTIME_KUMA_HOST}" | sudo tee -a /etc/hosts
+
+# [cliente] — y el túnel, que hay que mantener abierto mientras las uses
+ssh -L ${TRAEFIK_PUERTO_INTERNA}:127.0.0.1:${TRAEFIK_PUERTO_INTERNA} ${SERVIDOR_HOSTNAME}
+```
+
+Con el túnel abierto, `http://${DOZZLE_HOST}:${TRAEFIK_PUERTO_INTERNA}` funciona desde el navegador
+de tu equipo. El nombre importa: Traefik decide a qué contenedor enruta según el nombre de host, así
+que entrar por `http://127.0.0.1:8080` a secas no te lleva a Dozzle sino al panel de Traefik.
+
+> **Una advertencia sobre Uptime Kuma y el túnel SSH.** El monitor tiene que estar corriendo
+> siempre, no solo cuando tú abres el túnel — y lo está: el túnel es solo para *verlo*. Sus
+> comprobaciones y sus avisos salen del contenedor por su cuenta.
 
 Criterio de aceptación: la última línea devuelve la IP de Tailscale. Hay que repetirlo en cada
 dispositivo desde el que quieras entrar, que es la pega de esta opción.
