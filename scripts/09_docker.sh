@@ -215,44 +215,69 @@ fi
 # ===========================================================================
 log_paso "6/7 · Red compartida y directorio de proyectos"
 
-if (( MODO_CHECK == 1 )); then
-    log_check "crearía la red ${DOCKER_RED_PROXY} (${DOCKER_RED_PROXY_SUBRED})"
-    log_check "crearía el directorio ${DATOS_RAIZ}"
-elif docker network inspect "${DOCKER_RED_PROXY}" >/dev/null 2>&1; then
-    SUBRED_ACTUAL="$(docker network inspect "${DOCKER_RED_PROXY}" \
-        --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}')"
-    log_sinca "La red '${DOCKER_RED_PROXY}' ya existe (${SUBRED_ACTUAL})."
-    if [[ "${SUBRED_ACTUAL}" != "${DOCKER_RED_PROXY_SUBRED}" ]]; then
-        log_aviso "Su subred no coincide con DOCKER_RED_PROXY_SUBRED."
-        log_aviso "Para cambiarla habría que parar los contenedores conectados,"
-        log_aviso "borrar la red y volver a crearla."
-    fi
+# Las redes y el directorio se contrastan con el estado real, también en modo
+# simulación. La única excepción es que Docker todavía no responda: en un
+# --check sobre una máquina limpia no hay a quién preguntar.
+if docker network ls >/dev/null 2>&1; then
+    DOCKER_RESPONDE=1
+elif (( MODO_CHECK == 1 )); then
+    DOCKER_RESPONDE=0
+    log_check "Docker todavía no responde: no puedo comprobar el estado de las redes."
 else
-    docker network create --driver bridge \
-        --subnet "${DOCKER_RED_PROXY_SUBRED}" "${DOCKER_RED_PROXY}"
-    marcar_cambio
-    log_ok "Red '${DOCKER_RED_PROXY}' creada."
+    die "Docker no responde: no se pueden crear las redes."
 fi
+
+# Crea una red de Docker si no existe. Los argumentos extra van a 'network
+# create' (por ejemplo --internal).
+crear_red() {
+    local nombre="$1" subred="$2"
+    shift 2
+
+    if (( DOCKER_RESPONDE == 0 )); then
+        log_check "crearía la red ${nombre} (${subred})"
+        marcar_cambio
+        return 0
+    fi
+
+    if docker network inspect "${nombre}" >/dev/null 2>&1; then
+        local actual
+        actual="$(docker network inspect "${nombre}" \
+            --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}')"
+        log_sinca "La red '${nombre}' ya existe (${actual})."
+        if [[ "${actual}" != "${subred}" ]]; then
+            log_aviso "Su subred no coincide con la configurada (${subred})."
+            log_aviso "Para cambiarla habría que parar los contenedores conectados,"
+            log_aviso "borrar la red y volver a crearla."
+        fi
+        return 0
+    fi
+
+    ejecutar docker network create --driver bridge "$@" \
+        --subnet "${subred}" "${nombre}"
+}
+
+crear_red "${DOCKER_RED_PROXY}" "${DOCKER_RED_PROXY_SUBRED}"
 
 # Red aislada del intermediario del socket. La usan Traefik (capítulo 10) y
 # Dozzle (capítulo 13); por eso se crea aquí y no dentro de un compose.
-if (( MODO_CHECK == 1 )); then
-    log_check "crearía la red interna ${DOCKER_RED_SOCKET} (${DOCKER_RED_SOCKET_SUBRED})"
-elif docker network inspect "${DOCKER_RED_SOCKET}" >/dev/null 2>&1; then
-    log_sinca "La red '${DOCKER_RED_SOCKET}' ya existe."
-else
-    docker network create --driver bridge --internal \
-        --subnet "${DOCKER_RED_SOCKET_SUBRED}" "${DOCKER_RED_SOCKET}"
-    marcar_cambio
-    log_ok "Red interna '${DOCKER_RED_SOCKET}' creada (sin salida a internet)."
-fi
+crear_red "${DOCKER_RED_SOCKET}" "${DOCKER_RED_SOCKET_SUBRED}" --internal
 
 if [[ -d "${DATOS_RAIZ}" ]]; then
     log_sinca "${DATOS_RAIZ} ya existe."
 else
     ejecutar mkdir -p "${DATOS_RAIZ}"
 fi
-ejecutar chown "${ADMIN_USUARIO}:${ADMIN_USUARIO}" "${DATOS_RAIZ}"
+
+# El chown, solo si hace falta. Repetirlo a ciegas hacía que cada pasada contara
+# como un cambio y que el capítulo no cerrara nunca en cero.
+DUENO_DESEADO="${ADMIN_USUARIO}:${ADMIN_USUARIO}"
+DUENO_ACTUAL=""
+[[ -d "${DATOS_RAIZ}" ]] && DUENO_ACTUAL="$(stat -c '%U:%G' "${DATOS_RAIZ}")"
+if [[ "${DUENO_ACTUAL}" == "${DUENO_DESEADO}" ]]; then
+    log_sinca "${DATOS_RAIZ} ya pertenece a ${DUENO_DESEADO}."
+else
+    ejecutar chown "${DUENO_DESEADO}" "${DATOS_RAIZ}"
+fi
 
 # ===========================================================================
 #  7. PRUEBA DE HUMO

@@ -89,6 +89,10 @@ else
 fi
 
 PROPIETARIO="$(id -un):$(id -gn)"
+# Se anota el contador para saber después si la configuración ha cambiado: es
+# lo que decide si hay que volver a levantar los contenedores.
+CAMBIOS_ANTES_COMPOSE="$(cambios)"
+
 instalar_plantilla compose/observabilidad/docker-compose.yml \
     "${DIR_OBS}/docker-compose.yml" 644 "${PROPIETARIO}"
 
@@ -108,10 +112,9 @@ fi
 log_paso "3/5 · Despliegue"
 
 if (( MODO_CHECK == 1 )); then
-    log_check "ejecutaría: docker compose up -d en ${DIR_OBS}"
+    compose_arriba "${DIR_OBS}" "${CAMBIOS_ANTES_COMPOSE}"
 else
-    ( cd "${DIR_OBS}" && docker compose up -d )
-    marcar_cambio
+    compose_arriba "${DIR_OBS}"
 
     log_info "Esperando a que los servicios estén sanos…"
     for _ in $(seq 1 40); do

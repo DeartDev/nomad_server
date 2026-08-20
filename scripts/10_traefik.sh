@@ -117,14 +117,23 @@ esac
 # ===========================================================================
 log_paso "2/5 · Configuración"
 
-if (( MODO_CHECK == 0 )); then
-    mkdir -p "${DIR_TRAEFIK}/config/dinamica"
-else
+if [[ -d "${DIR_TRAEFIK}/config/dinamica" ]]; then
+    log_sinca "${DIR_TRAEFIK}/config/dinamica ya existe."
+elif (( MODO_CHECK == 1 )); then
     log_check "crearía ${DIR_TRAEFIK}/config/dinamica"
+    marcar_cambio
+else
+    mkdir -p "${DIR_TRAEFIK}/config/dinamica"
+    marcar_cambio
+    log_ok "Creado ${DIR_TRAEFIK}/config/dinamica"
 fi
 
 # Estos archivos pertenecen al usuario, no a root: el script no usa sudo.
 PROPIETARIO="$(id -un):$(id -gn)"
+
+# Se anota el contador para saber después si alguno de los tres archivos ha
+# cambiado: es lo que decide si hay que volver a levantar los contenedores.
+CAMBIOS_ANTES_COMPOSE="$(cambios)"
 
 instalar_plantilla compose/traefik/traefik.yml \
     "${DIR_TRAEFIK}/config/traefik.yml" 644 "${PROPIETARIO}"
@@ -149,10 +158,9 @@ fi
 log_paso "3/5 · Despliegue"
 
 if (( MODO_CHECK == 1 )); then
-    log_check "ejecutaría: docker compose up -d en ${DIR_TRAEFIK}"
+    compose_arriba "${DIR_TRAEFIK}" "${CAMBIOS_ANTES_COMPOSE}"
 else
-    ( cd "${DIR_TRAEFIK}" && docker compose up -d )
-    marcar_cambio
+    compose_arriba "${DIR_TRAEFIK}"
 
     log_info "Esperando a que los contenedores estén sanos…"
     for _ in $(seq 1 30); do

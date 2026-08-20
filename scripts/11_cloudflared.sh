@@ -160,6 +160,10 @@ fi
 log_paso "2/5 · Configuración"
 
 PROPIETARIO="$(id -un):$(id -gn)"
+# Se anota el contador para saber después si la configuración del túnel ha
+# cambiado: es lo que decide si hay que volver a levantar el contenedor.
+CAMBIOS_ANTES_COMPOSE="$(cambios)"
+
 instalar_plantilla compose/cloudflared/config.yml \
     "${CF_CONFIG_DIR}/config.yml" 644 "${PROPIETARIO}"
 instalar_plantilla compose/cloudflared/docker-compose.yml \
@@ -194,10 +198,9 @@ fi
 log_paso "4/5 · Despliegue del túnel"
 
 if (( MODO_CHECK == 1 )); then
-    log_check "ejecutaría: docker compose up -d en ${CF_CONFIG_DIR}"
+    compose_arriba "${CF_CONFIG_DIR}" "${CAMBIOS_ANTES_COMPOSE}"
 else
-    ( cd "${CF_CONFIG_DIR}" && docker compose up -d )
-    marcar_cambio
+    compose_arriba "${CF_CONFIG_DIR}"
 
     log_info "Esperando a que el túnel registre conexiones con el borde de Cloudflare…"
     CONEXIONES=0

@@ -415,6 +415,61 @@ instalar_plantilla() {
         | instalar_archivo "${destino}" "${modo}" "${propietario}"
 }
 
+# ===========================================================================
+#  PROYECTOS DOCKER COMPOSE
+# ===========================================================================
+
+# Identificadores de los contenedores en marcha de un proyecto compose,
+# ordenados para poder compararlos. Cadena vacía si no hay ninguno.
+compose_en_marcha() {
+    ( cd "$1" && docker compose ps -q --status running 2>/dev/null | sort ) || true
+}
+
+# Levanta un proyecto compose contando como cambio SOLO si algo se ha movido.
+#   compose_arriba /ruta/al/proyecto ["${CONTADOR_PREVIO}"]
+#
+# 'docker compose up -d' es idempotente: si los contenedores ya corren con esta
+# misma configuración, no toca nada. Pero contarlo siempre como un cambio haría
+# que el capítulo no cerrara nunca en cero, y ese es justamente el criterio para
+# darlo por terminado.
+#
+# Al aplicar se compara el conjunto de contenedores en marcha antes y después:
+# si compose recrea alguno, su identificador cambia; si levanta uno que estaba
+# parado, aparece uno nuevo. En simulación no se puede saber si compose
+# recrearía algo, así que se deduce de dos señales: si las plantillas del
+# capítulo han cambiado (de ahí el contador previo) o si falta algún servicio
+# por levantar.
+compose_arriba() {
+    local dir="$1"
+    local contador_previo="${2:-}"
+
+    if (( MODO_CHECK == 1 )); then
+        local servicios vivos
+        servicios="$( ( cd "${dir}" && docker compose config --services 2>/dev/null ) \
+                      | grep -c . || true )"
+        vivos="$(compose_en_marcha "${dir}" | grep -c . || true)"
+        if [[ -n "${contador_previo}" ]] && hubo_cambios_desde "${contador_previo}"; then
+            log_check "ejecutaría: docker compose up -d en ${dir} (la configuración ha cambiado)"
+            marcar_cambio
+        elif (( servicios > 0 && vivos == servicios )); then
+            log_sinca "Los ${servicios} servicios de ${dir} ya están en marcha."
+        else
+            log_check "ejecutaría: docker compose up -d en ${dir} (${vivos}/${servicios} en marcha)"
+            marcar_cambio
+        fi
+        return 0
+    fi
+
+    local antes
+    antes="$(compose_en_marcha "${dir}")"
+    ( cd "${dir}" && docker compose up -d )
+    if [[ "$(compose_en_marcha "${dir}")" == "${antes}" ]]; then
+        log_sinca "Los contenedores de ${dir} ya estaban en marcha con esta configuración."
+    else
+        marcar_cambio
+    fi
+}
+
 # Instala paquetes APT solo si faltan.
 instalar_paquetes() {
     local pendientes=()
