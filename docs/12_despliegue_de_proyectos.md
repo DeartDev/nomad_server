@@ -686,7 +686,7 @@ servicio que ya no existe.
 | Un proyecto «pisa» a otro | Dos proyectos usan el mismo nombre de router o de servicio | Prefija con el nombre del proyecto | § 5 paso 2 |
 | «Permission denied» al escribir en `./datos` | El contenedor corre con un UID distinto al dueño del directorio | Averigua el UID con `docker exec <c> id` y ajusta: `sudo chown -R <uid>:<gid> datos/` | § 3.3 |
 | El contenedor arranca y se para en bucle | Falta una variable en `.env`, o un error de configuración | `docker compose logs --tail 100 <servicio>` | [Docker Compose](https://docs.docker.com/compose/) |
-| El healthcheck nunca pasa a `healthy` | El comando de comprobación no existe en la imagen (p. ej. `curl` en Alpine) | Usa `wget -q --spider` en Alpine, o instálalo en la imagen | § 3.6 |
+| El healthcheck nunca pasa a `healthy` | El comando de comprobación no existe en la imagen (p. ej. `curl` en Alpine) | Usa `wget -q --spider` en Alpine, o instálalo en la imagen. Ojo: `--spider` envía `HEAD`, que algunas APIs rechazan con 400; en ese caso, `wget -q -O /dev/null` | § 3.6 |
 | `docker compose up` avisa de variables no definidas | Falta `.env`, o una variable sin valor | `cp .env.example .env` y rellénalo | § 5 paso 3 |
 | Tras `docker compose pull` la base de datos no arranca | Se usaba `latest` y llegó una versión mayor con otro formato de datos | Fija la versión mayor. Restaura desde el respaldo si hace falta | § 3.5 |
 | El subdominio no resuelve | Falta el registro DNS | `./scripts/11_cloudflared.sh --ruta <proyecto>` | Capítulo [11](11_cloudflared_y_dominio.md) |
