@@ -596,11 +596,24 @@ Comportamiento destacable:
 ./scripts/11_cloudflared.sh --ruta @
 ```
 
-Publicar el ápice tiene una particularidad que conviene conocer: el DNS no permite un `CNAME` en
-la raíz de un dominio. Cloudflare lo resuelve con un registro `CNAME` aplanado, que resuelve a
-direcciones IP en la respuesta. Se crea igual y no hay nada especial que hacer, pero explica por
-qué `dig ${DOMINIO_PUBLICO} +short` devuelve direcciones IP y no el nombre del túnel, mientras que
-un subdominio sí devuelve `<uuid>.cfargotunnel.com`.
+En ambos casos, `dig` devolverá **direcciones IP de Cloudflare**, no el nombre del túnel:
+
+```console
+$ dig ejemplo.${DOMINIO_PUBLICO} +short
+172.67.209.70
+104.21.85.188
+```
+
+Eso es lo correcto y conviene entender por qué, porque a primera vista parece que el registro no
+se ha creado bien. `tunnel route dns` crea un `CNAME` hacia `<uuid>.cfargotunnel.com`, pero lo crea
+**proxificado** —la nube naranja del panel—, que es obligatorio para que un túnel funcione: el
+tráfico tiene que pasar por el borde de Cloudflare para entrar en él. Y un registro proxificado
+nunca expone su destino real en las respuestas públicas de DNS; Cloudflare contesta con sus propias
+direcciones anycast. El `CNAME` verdadero se ve en el panel de Cloudflare, no con `dig`.
+
+Por eso mismo la respuesta es idéntica para el ápice y para un subdominio. (En el ápice hay además
+una segunda razón: el DNS no admite un `CNAME` en la raíz de un dominio, y Cloudflare lo resuelve
+con un `CNAME` aplanado. Pero no es lo que estás viendo aquí — lo que ves es el proxy.)
 
 En modo `--check` muestra las diferencias de `config.yml` y del compose, y valida que las
 credenciales existan, sin levantar nada.
