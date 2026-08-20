@@ -63,7 +63,8 @@ cargar_entorno
 requerir_variables DATOS_RAIZ DOCKER_RED_PROXY DOCKER_RED_PROXY_SUBRED \
                    DOCKER_RED_SOCKET TRAEFIK_BIND_INTERNA \
                    TRAEFIK_PUERTO_INTERNA TRAEFIK_DASHBOARD_HOST \
-                   TRAEFIK_ACCESO_TAILNET LAN_CIDR TS_CIDR
+                   TRAEFIK_ACCESO_TAILNET LAN_CIDR TS_CIDR \
+                   SERVIDOR_HOSTNAME
 requerir_comandos docker
 
 docker ps >/dev/null 2>&1 \
@@ -295,10 +296,14 @@ resumen_final "10_traefik"
 echo
 if [[ "${TRAEFIK_BIND_INTERNA}" == "127.0.0.1" ]]; then
     log_info "Para abrir el panel, desde tu equipo:"
-    log_info "    ssh -L ${TRAEFIK_PUERTO_INTERNA}:127.0.0.1:${TRAEFIK_PUERTO_INTERNA} nomad"
+    log_info "    ssh -L ${TRAEFIK_PUERTO_INTERNA}:127.0.0.1:${TRAEFIK_PUERTO_INTERNA} ${SERVIDOR_HOSTNAME}"
     log_info "    y luego http://localhost:${TRAEFIK_PUERTO_INTERNA}/dashboard/"
 else
     log_info "Panel: http://${TRAEFIK_BIND_INTERNA}:${TRAEFIK_PUERTO_INTERNA}/dashboard/"
+fi
+if [[ -f "${OVERRIDE_TAILNET}" ]]; then
+    log_info "Y desde cualquier dispositivo de tu tailnet, sin túnel:"
+    log_info "    http://${TS_IP}:${TRAEFIK_PUERTO_INTERNA}/dashboard/"
 fi
 log_info "(la barra final de /dashboard/ es obligatoria)"
 log_info "Siguiente paso: docs/11_cloudflared_y_dominio.md"
