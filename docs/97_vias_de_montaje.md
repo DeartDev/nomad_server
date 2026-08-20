@@ -273,6 +273,7 @@ fallan meses después.
 |---|---|
 | **Idempotencia** | Ejecutarlo dos veces deja el sistema igual que ejecutarlo una. La segunda vez informa con `[=]` de lo que ya estaba en su sitio, y termina con **`Cambios aplicados: 0`** |
 | **Reinicios condicionados** | Un servicio solo se reinicia o se recarga si su configuración ha cambiado. `apt-get update` solo se ejecuta si cambió la definición de repositorios o falta por instalar algo |
+| **`--check` evalúa el estado real** | La simulación consulta las mismas condiciones que la ejecución real. Anunciar una acción que después no se haría convertiría `--check` en una suposición, y haría imposible el criterio de los cero cambios |
 | **Copia previa** | Todo archivo del sistema que se modifique se copia antes a `<archivo>.bak-<fecha-hora>` |
 | **Validación antes de aplicar** | `sshd -t`, `nft -c`, `docker compose config` y `unattended-upgrade --dry-run` se ejecutan **antes** de reiniciar nada |
 | **Carga del entorno** | Cada script lee `config/servidor.env` por su cuenta y aborta si falta una variable obligatoria |

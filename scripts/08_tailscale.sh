@@ -160,11 +160,19 @@ habilitar_servicio tailscaled
 # ===========================================================================
 log_paso "4/6 · Conexión a la tailnet"
 
-if (( MODO_CHECK == 1 )); then
-    log_check "ejecutaría: tailscale up --hostname=${TS_HOSTNAME}"
-elif tailscale status >/dev/null 2>&1 && ! tailscale status 2>&1 | contiene 'Logged out'; then
+# El estado se evalúa SIEMPRE, también en simulación. Anunciar un
+# 'tailscale up' que la ejecución real no haría convierte --check en una
+# suposición, y además impide que el capítulo llegue nunca a cero cambios.
+#
+# Importa más de lo que parece: 'tailscale up' sobre un nodo ya conectado
+# REINICIA las opciones que no se le pasen explícitamente. No es una operación
+# inocua que se pueda proponer a la ligera.
+if tailscale status >/dev/null 2>&1 && ! tailscale status 2>&1 | contiene 'Logged out'; then
     log_sinca "El nodo ya está conectado a la tailnet."
     tailscale status | head -5 | sed 's/^/          /'
+elif (( MODO_CHECK == 1 )); then
+    log_check "ejecutaría: tailscale up --hostname=${TS_HOSTNAME}"
+    marcar_cambio
 else
     OPCIONES=(--hostname="${TS_HOSTNAME}")
     [[ -n "${ETIQUETA}" ]] && OPCIONES+=(--advertise-tags="${ETIQUETA}")
@@ -191,12 +199,24 @@ fi
 # ===========================================================================
 log_paso "5/6 · Actualizaciones automáticas del cliente"
 
-if (( MODO_CHECK == 1 )); then
+# Ídem: se consulta la preferencia actual antes de proponer nada.
+AUTO_ACTUAL="$(tailscale debug prefs 2>/dev/null \
+               | jq -r '.AutoUpdate.Apply // "desconocido"' 2>/dev/null || echo desconocido)"
+
+if [[ "${AUTO_ACTUAL}" == "true" ]]; then
+    log_sinca "Las actualizaciones automáticas del cliente ya están activadas."
+elif (( MODO_CHECK == 1 )); then
     log_check "ejecutaría: tailscale set --auto-update"
+    [[ "${AUTO_ACTUAL}" == "desconocido" ]] \
+        && log_check "  (no se ha podido consultar la preferencia actual)"
+    marcar_cambio
 else
-    tailscale set --auto-update 2>/dev/null \
-        && log_ok "Actualizaciones automáticas activadas." \
-        || log_aviso "No se han podido activar las actualizaciones automáticas."
+    if tailscale set --auto-update 2>/dev/null; then
+        log_ok "Actualizaciones automáticas activadas."
+        marcar_cambio
+    else
+        log_aviso "No se han podido activar las actualizaciones automáticas."
+    fi
 fi
 
 # ===========================================================================
