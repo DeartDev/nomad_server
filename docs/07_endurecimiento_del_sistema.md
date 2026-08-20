@@ -441,16 +441,21 @@ grep -r 'ip_forward' /etc/sysctl.d/ /etc/sysctl.conf 2>/dev/null || echo "Nadie 
 
 ```bash
 # [servidor]
-sudo aa-status --summary
+sudo aa-status
 ```
 
-Salida esperada:
+Salida esperada, en sus primeras líneas:
 
 ```
 apparmor module is loaded.
 XX profiles are loaded.
 XX profiles are in enforce mode.
 ```
+
+> **`aa-status` sin opciones ya imprime ese resumen.** La opción `--summary` **no existe** en el
+> `apparmor` de Debian 13 y responde `unrecognized option`. Para usarlo dentro de un script, lo
+> cómodo es `aa-status --enforced`, que imprime solo el número de perfiles en modo `enforce`, o
+> `aa-status --enabled`, que no imprime nada y devuelve 0 si el módulo está cargado.
 
 Si dice `apparmor module is not loaded`, actívalo:
 
@@ -651,17 +656,37 @@ Criterio de aceptación: `CORRECTO`.
 
 ```bash
 # [servidor]
-sudo aa-status --summary
+sudo aa-status
 ```
 
 Criterio de aceptación: el módulo está cargado y hay perfiles en modo `enforce`.
 
 ```bash
 # [servidor]
-sudo ss -tulpn | grep LISTEN | grep -vc ':22'
+sudo ss -tulpn | grep LISTEN | grep -vc ":${SSH_PUERTO}\b"
 ```
 
-Criterio de aceptación: `0`.
+Criterio de aceptación: `0` **en este punto del montaje**, cuando todavía no hay ni VPN ni
+contenedores.
+
+> **Ese `0` deja de ser el criterio en cuanto avanzas**, y conviene saberlo antes de alarmarse al
+> revalidar el capítulo más adelante. A partir del capítulo 08 aparecen escuchas legítimas:
+>
+> | Proceso | Dirección | Desde el capítulo | ¿Es correcto? |
+> |---|---|---|---|
+> | `sshd` | `0.0.0.0:${SSH_PUERTO}` y `[::]:${SSH_PUERTO}` | 03 | Sí |
+> | `tailscaled` | `${TS_IP}:<puerto alto>` y su equivalente IPv6 | 08 | Sí: es la API entre pares de la tailnet, solo alcanzable desde tu red privada |
+> | `docker-proxy` | `${TRAEFIK_BIND_INTERNA}:${TRAEFIK_PUERTO_INTERNA}` | 10 | Sí, **si y solo si** la dirección es privada |
+>
+> Lo que nunca debe aparecer es una escucha en `0.0.0.0` que no sea SSH. Ese es el criterio que se
+> mantiene durante todo el montaje:
+>
+> ```bash
+> # [servidor]
+> sudo ss -tulpn | grep LISTEN | grep '0\.0\.0\.0' | grep -vc ":${SSH_PUERTO}\b"
+> ```
+>
+> Criterio de aceptación: `0`, siempre y en cualquier capítulo.
 
 ```bash
 # [servidor]
@@ -736,6 +761,9 @@ dentro de un año.
 | `journalctl` no muestra nada de antes del reinicio | `Storage` no es `persistent` | Revisa el paso 3 y comprueba que existe `/var/log/journal` | [`journald.conf(5)`](https://manpages.debian.org/trixie/systemd/journald.conf.5.en.html) |
 | Un contenedor falla con «max virtual memory areas too low» | `vm.max_map_count` insuficiente | Ya está en la plantilla. Comprueba con `sysctl vm.max_map_count` | § 3.3 |
 | `aa-status` dice que el módulo no está cargado | AppArmor desactivado en la línea de arranque del kernel | Revisa `/etc/default/grub`: no debe haber `apparmor=0`. Tras cambiarlo, `sudo update-grub` y reiniciar | [Debian Wiki — AppArmor](https://wiki.debian.org/AppArmor) |
+| `aa-status: unrecognized option '--summary'` | Esa opción no existe en el `apparmor` de Debian 13 | `sudo aa-status` a secas ya imprime el resumen | § 5 paso 5 |
+| `sysctl: command not found` sin `sudo` | `/usr/sbin` no está en el `PATH` de un usuario normal en Debian | `sudo sysctl …`, o la ruta completa `/usr/sbin/sysctl` | — |
+| `ss -tulpn` muestra `tailscaled` y `docker-proxy` escuchando | Es lo esperado a partir de los capítulos 08 y 10 | Comprueba que **ninguno** escucha en `0.0.0.0`, que es el criterio que sí se mantiene | § 7 |
 | Un contenedor falla con denegaciones de AppArmor | El perfil `docker-default` bloquea una operación privilegiada | Diagnostica con `sudo dmesg \| grep -i apparmor`. Ajusta el contenedor antes que desactivar AppArmor | [Docker — AppArmor](https://docs.docker.com/engine/security/apparmor/) |
 | Lynis sugiere decenas de cosas | Es normal: asume un servidor con servicios en el host | Revísalas una a una. No apliques nada que no entiendas | [Lynis — Controles](https://cisofy.com/lynis/controls/) |
 | El sistema no arranca tras un cambio de `sysctl` | Un parámetro incompatible con el hardware | Arranca en modo rescate y elimina `/etc/sysctl.d/60-nomad-endurecimiento.conf` | § 8 |

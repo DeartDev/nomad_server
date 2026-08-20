@@ -180,7 +180,11 @@ if (( MODO_CHECK == 0 )) || true; then
     log_info "Puertos en escucha:"
     ss -tulpn 2>/dev/null | grep LISTEN | sed 's/^/          /' || true
 
-    INESPERADOS="$(ss -tulpn 2>/dev/null | grep LISTEN | grep -vc ":${SSH_PUERTO}\b" || true)"
+    # Lo que importa no es "solo SSH" —a partir del capítulo 08 hay escuchas
+    # legítimas de tailscaled y del punto de entrada interno de Traefik— sino
+    # que nada distinto de SSH escuche en 0.0.0.0.
+    INESPERADOS="$(ss -tulpn 2>/dev/null | grep LISTEN | grep '0\.0\.0\.0' \
+                   | grep -vc ":${SSH_PUERTO}\b" || true)"
     if (( INESPERADOS == 0 )); then
         log_ok "Solo SSH está escuchando. Es lo esperado."
     else
