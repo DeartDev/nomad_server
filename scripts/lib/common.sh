@@ -422,6 +422,9 @@ instalar_plantilla() {
 # Identificadores de los contenedores en marcha de un proyecto compose,
 # ordenados para poder compararlos. Cadena vacía si no hay ninguno.
 compose_en_marcha() {
+    # En modo simulación el directorio puede no existir todavía: sin esta
+    # guarda, el 'cd' escupe su error en mitad de la salida del --check.
+    [[ -d "$1" ]] || return 0
     ( cd "$1" && docker compose ps -q --status running 2>/dev/null | sort ) || true
 }
 
@@ -444,10 +447,12 @@ compose_arriba() {
     local contador_previo="${2:-}"
 
     if (( MODO_CHECK == 1 )); then
-        local servicios vivos
-        servicios="$( ( cd "${dir}" && docker compose config --services 2>/dev/null ) \
-                      | grep -c . || true )"
-        vivos="$(compose_en_marcha "${dir}" | grep -c . || true)"
+        local servicios=0 vivos=0
+        if [[ -d "${dir}" ]]; then
+            servicios="$( ( cd "${dir}" && docker compose config --services 2>/dev/null ) \
+                          | grep -c . || true )"
+            vivos="$(compose_en_marcha "${dir}" | grep -c . || true)"
+        fi
         if [[ -n "${contador_previo}" ]] && hubo_cambios_desde "${contador_previo}"; then
             log_check "ejecutaría: docker compose up -d en ${dir} (la configuración ha cambiado)"
             marcar_cambio

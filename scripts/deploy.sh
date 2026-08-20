@@ -268,7 +268,7 @@ if (( MODO_CHECK == 1 )); then
     # 'Cambios que se aplicarían: 0' significaría aquí algo distinto que en el
     # resto de capítulos, y el número dejaría de servir para nada.
     SERVICIOS="$( ( cd "${DIR}" && docker compose config --services 2>/dev/null ) \
-                  | grep -c . || true )"
+                  | grep -c . || true )"   # DIR ya está comprobado en el paso 1
     VIVOS="$(compose_en_marcha "${DIR}" | grep -c . || true)"
 
     log_check "ejecutaría: docker compose up -d --remove-orphans"
