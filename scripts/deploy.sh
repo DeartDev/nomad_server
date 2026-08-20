@@ -263,8 +263,25 @@ fi
 log_paso "5/7 · Despliegue"
 
 if (( MODO_CHECK == 1 )); then
+    # 'up -d' no toca nada si el proyecto ya corre con esta configuración, así
+    # que solo se cuenta como cambio si falta algún servicio por levantar. Si no,
+    # 'Cambios que se aplicarían: 0' significaría aquí algo distinto que en el
+    # resto de capítulos, y el número dejaría de servir para nada.
+    SERVICIOS="$( ( cd "${DIR}" && docker compose config --services 2>/dev/null ) \
+                  | grep -c . || true )"
+    VIVOS="$(compose_en_marcha "${DIR}" | grep -c . || true)"
+
     log_check "ejecutaría: docker compose up -d --remove-orphans"
     log_check "y esperaría hasta ${ESPERA}s a que los servicios estén sanos"
+    if (( SERVICIOS > 0 && VIVOS == SERVICIOS )); then
+        log_sinca "Los ${SERVICIOS} servicios ya están en marcha."
+        log_aviso "Desde la simulación no se puede saber si hay una imagen nueva"
+        log_aviso "esperando: eso solo se averigua descargándola."
+    else
+        log_check "faltan servicios por levantar (${VIVOS}/${SERVICIOS} en marcha)"
+        marcar_cambio
+    fi
+
     resumen_final "deploy(${PROYECTO})"
     exit 0
 fi
