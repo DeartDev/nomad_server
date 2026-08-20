@@ -575,7 +575,7 @@ persistido `CF_TUNEL_ID`. El script aborta con el comando exacto si está vacío
 
 | Opción | Para qué |
 |---|---|
-| `--ruta <subdominio>` | Crea el registro DNS de un subdominio y termina. Se indica solo la parte izquierda: `--ruta blog` crea `blog.${DOMINIO_PUBLICO}` |
+| `--ruta <nombre>` | Crea el registro DNS de un nombre y termina. Basta la parte izquierda: `--ruta blog` crea `blog.${DOMINIO_PUBLICO}`. Para el dominio a secas —el ápice— se usa la arroba, que es la convención de DNS: `--ruta @` crea `${DOMINIO_PUBLICO}`. También se admite el nombre completo. |
 | `-n, --check` | Muestra las diferencias y valida las credenciales, sin levantar nada |
 | `-y, --si` | No pide confirmación |
 
@@ -591,7 +591,16 @@ Comportamiento destacable:
 ```bash
 # [servidor] — crear un registro DNS para un subdominio
 ./scripts/11_cloudflared.sh --ruta mi-proyecto
+
+# [servidor] — y para el dominio a secas, sin subdominio delante
+./scripts/11_cloudflared.sh --ruta @
 ```
+
+Publicar el ápice tiene una particularidad que conviene conocer: el DNS no permite un `CNAME` en
+la raíz de un dominio. Cloudflare lo resuelve con un registro `CNAME` aplanado, que resuelve a
+direcciones IP en la respuesta. Se crea igual y no hay nada especial que hacer, pero explica por
+qué `dig ${DOMINIO_PUBLICO} +short` devuelve direcciones IP y no el nombre del túnel, mientras que
+un subdominio sí devuelve `<uuid>.cfargotunnel.com`.
 
 En modo `--check` muestra las diferencias de `config.yml` y del compose, y valida que las
 credenciales existan, sin levantar nada.

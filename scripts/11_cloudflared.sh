@@ -32,9 +32,14 @@ Despliega el túnel de Cloudflare que entrega el tráfico a Traefik:
   5. Comprueba que no se ha publicado ningún puerto
 
 Opciones:
-  --ruta <subdominio>  Crea el registro DNS de un subdominio y termina.
-                       Se indica solo la parte izquierda: --ruta blog
-                       creará blog.${DOMINIO_PUBLICO}
+  --ruta <nombre>      Crea el registro DNS de un nombre y termina.
+                       Basta la parte izquierda:  --ruta blog
+                           crea blog.${DOMINIO_PUBLICO}
+                       Para el dominio a secas (el ápice), usa la arroba, que
+                       es la convención de DNS:   --ruta @
+                           crea ${DOMINIO_PUBLICO}
+                       También se admite el nombre completo, por si lo tienes
+                       a mano:                    --ruta blog.${DOMINIO_PUBLICO}
   -n, --check          Muestra qué cambiaría, sin levantar nada.
   -y, --si             No pide confirmación.
   -h, --help           Muestra esta ayuda.
@@ -78,23 +83,45 @@ docker ps >/dev/null 2>&1 \
 #  MODO --ruta: crear un registro DNS y salir
 # ===========================================================================
 if [[ -n "${RUTA_NUEVA}" ]]; then
-    log_paso "Registro DNS para ${RUTA_NUEVA}.${DOMINIO_PUBLICO}"
+    # Se admiten tres formas de nombrar el destino. La arroba es la convención
+    # de DNS para el ápice —el dominio a secas—, y aceptar el nombre completo
+    # evita el error clásico de acabar con 'blog.ejemplo.com.ejemplo.com'.
+    case "${RUTA_NUEVA}" in
+        @|"${DOMINIO_PUBLICO}") HOST_NUEVO="${DOMINIO_PUBLICO}" ;;
+        *".${DOMINIO_PUBLICO}") HOST_NUEVO="${RUTA_NUEVA}" ;;
+        *".") die "El nombre no puede terminar en punto: ${RUTA_NUEVA}" ;;
+        *"."*) die "'${RUTA_NUEVA}' no pertenece a ${DOMINIO_PUBLICO}. Usa solo la parte izquierda, o el nombre completo." ;;
+        *) HOST_NUEVO="${RUTA_NUEVA}.${DOMINIO_PUBLICO}" ;;
+    esac
 
-    [[ -f "${HOME}/.cloudflared/cert.pem" ]] \
-        || die "Falta ~/.cloudflared/cert.pem. Ejecuta primero 'tunnel login' (ver --help)."
+    log_paso "Registro DNS para ${HOST_NUEVO}"
+
+    # El certificado lo usa el CONTENEDOR, no tú. Si el túnel se creó con
+    # 'docker run', ~/.cloudflared pertenece al usuario no privilegiado de la
+    # imagen (65532) y tu usuario no puede ni atravesar el directorio: un
+    # '[[ -f ]]' desde aquí daría un falso negativo y abortaría diciendo que
+    # falta un certificado que sí está.
+    if [[ -r "${HOME}/.cloudflared/cert.pem" ]]; then
+        log_ok "Certificado de gestión encontrado."
+    elif [[ ! -x "${HOME}/.cloudflared" ]]; then
+        log_aviso "No puedo leer ${HOME}/.cloudflared: pertenece a otro usuario."
+        log_aviso "Continúo, porque quien necesita el certificado es el contenedor."
+    else
+        die "Falta ${HOME}/.cloudflared/cert.pem. Ejecuta primero 'tunnel login' (ver --help)."
+    fi
 
     if (( MODO_CHECK == 1 )); then
-        log_check "crearía el CNAME ${RUTA_NUEVA}.${DOMINIO_PUBLICO} → ${CF_TUNEL_NOMBRE}"
+        log_check "crearía el CNAME ${HOST_NUEVO} → ${CF_TUNEL_NOMBRE}"
         exit 0
     fi
 
     docker run --rm \
         -v "${HOME}/.cloudflared:/home/nonroot/.cloudflared" \
         "${IMAGEN_CF}" tunnel route dns \
-        "${CF_TUNEL_NOMBRE}" "${RUTA_NUEVA}.${DOMINIO_PUBLICO}"
+        "${CF_TUNEL_NOMBRE}" "${HOST_NUEVO}"
 
     log_ok "Registro creado. Compruébalo con:"
-    log_ok "    dig ${RUTA_NUEVA}.${DOMINIO_PUBLICO} +short"
+    log_ok "    dig ${HOST_NUEVO} +short"
     exit 0
 fi
 
@@ -253,7 +280,7 @@ resumen_final "11_cloudflared"
 
 echo
 log_info "Para publicar un subdominio nuevo:"
-log_info "    ./scripts/11_cloudflared.sh --ruta <subdominio>"
+log_info "    ./scripts/11_cloudflared.sh --ruta <subdominio>   (o --ruta @ para el dominio a secas)"
 log_info "y añade las etiquetas de Traefik al compose del proyecto."
 log_info ""
 log_info "Comprueba en el panel de Cloudflare que el modo SSL/TLS es 'Full'."
