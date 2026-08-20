@@ -308,6 +308,11 @@ ss -tlnp | grep ":${TRAEFIK_PUERTO_INTERNA}"
 - Si dice **`0.0.0.0`**, para: eso publica las herramientas de operación en toda la red y
   contradice el diseño (capítulo [09](09_docker.md) § 3.2).
 
+También puedes tener **las dos vías a la vez** — el túnel SSH y el acceso desde la tailnet — con
+`TRAEFIK_ACCESO_TAILNET=si` (capítulo [10](10_traefik.md) § 3.3). En ese caso valen tanto la opción
+A o B como la C, y conviene apuntar los nombres a la IP de Tailscale: así funcionan sin túnel
+cuando estás en la tailnet, y por el túnel no los necesitarás porque entrarás por `localhost`.
+
 Cambiar dónde escucha es cosa del capítulo [10](10_traefik.md): se fija `TRAEFIK_BIND_INTERNA` y se
 vuelve a aplicar.
 

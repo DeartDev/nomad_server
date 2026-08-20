@@ -63,7 +63,7 @@ cargar_entorno
 requerir_variables DATOS_RAIZ DOCKER_RED_PROXY DOCKER_RED_PROXY_SUBRED \
                    DOCKER_RED_SOCKET TRAEFIK_BIND_INTERNA \
                    TRAEFIK_PUERTO_INTERNA TRAEFIK_DASHBOARD_HOST \
-                   LAN_CIDR TS_CIDR
+                   TRAEFIK_ACCESO_TAILNET LAN_CIDR TS_CIDR
 requerir_comandos docker
 
 docker ps >/dev/null 2>&1 \
@@ -141,6 +141,42 @@ instalar_plantilla compose/traefik/dinamica/middlewares.yml \
     "${DIR_TRAEFIK}/config/dinamica/middlewares.yml" 644 "${PROPIETARIO}"
 instalar_plantilla compose/traefik/docker-compose.yml \
     "${DIR_TRAEFIK}/docker-compose.yml" 644 "${PROPIETARIO}"
+
+# --- Acceso adicional desde la tailnet -------------------------------------
+# Una entrada de 'ports' publica en UNA dirección, así que escuchar a la vez en
+# la loopback y en la tailnet exige dos. La segunda vive en un
+# docker-compose.override.yml, que Docker Compose carga solo por estar ahí:
+# activar o desactivar este acceso es crear o borrar ese archivo.
+OVERRIDE_TAILNET="${DIR_TRAEFIK}/docker-compose.override.yml"
+
+case "${TRAEFIK_ACCESO_TAILNET,,}" in
+    si|sí|s|1|true|yes)
+        [[ -n "${TS_IP:-}" ]] \
+            || die "TRAEFIK_ACCESO_TAILNET=si exige TS_IP. Termina el capítulo 08 y fíjala."
+        [[ "${TS_IP}" != "0.0.0.0" ]] \
+            || die "TS_IP no puede ser 0.0.0.0: eso publicaría el panel en toda la red."
+        [[ "${TS_IP}" != "${TRAEFIK_BIND_INTERNA}" ]] \
+            || die "TS_IP y TRAEFIK_BIND_INTERNA son la misma dirección (${TS_IP}). Docker no puede publicar dos veces el mismo puerto en ella: pon TRAEFIK_ACCESO_TAILNET=no."
+        instalar_plantilla compose/traefik/docker-compose.override.yml \
+            "${OVERRIDE_TAILNET}" 644 "${PROPIETARIO}"
+        log_info "El punto de entrada interno escuchará también en ${TS_IP}."
+        ;;
+    *)
+        if [[ -f "${OVERRIDE_TAILNET}" ]]; then
+            if (( MODO_CHECK == 1 )); then
+                log_check "retiraría ${OVERRIDE_TAILNET} (TRAEFIK_ACCESO_TAILNET=${TRAEFIK_ACCESO_TAILNET})"
+                marcar_cambio
+            else
+                respaldar_archivo "${OVERRIDE_TAILNET}"
+                rm -f "${OVERRIDE_TAILNET}"
+                marcar_cambio
+                log_ok "Retirado ${OVERRIDE_TAILNET}: el acceso desde la tailnet queda desactivado."
+            fi
+        else
+            log_sinca "Sin acceso desde la tailnet (TRAEFIK_ACCESO_TAILNET=${TRAEFIK_ACCESO_TAILNET})."
+        fi
+        ;;
+esac
 
 if (( MODO_CHECK == 0 )); then
     if docker compose -f "${DIR_TRAEFIK}/docker-compose.yml" config >/dev/null 2>&1; then

@@ -137,6 +137,27 @@ El único puerto publicado es el **interno**, y va atado a `${TRAEFIK_BIND_INTER
 Empieza con `127.0.0.1` y cámbialo a la IP de Tailscale cuando quieras la comodidad. Ambas opciones
 son privadas; la segunda además es cómoda.
 
+**Y se pueden tener las dos a la vez**, que suele ser lo que uno acaba queriendo: el túnel SSH
+cuando administras desde el portátil de trabajo, y el acceso directo cuando miras algo desde el
+móvil. Se activa con:
+
+```bash
+# [servidor]
+./scripts/variables.sh --fijar TRAEFIK_ACCESO_TAILNET=si
+source scripts/lib/entorno.sh
+./scripts/10_traefik.sh
+```
+
+Hace falta un archivo aparte porque **una entrada de `ports` publica en una sola dirección**. La
+segunda vive en `${DATOS_RAIZ}/traefik/docker-compose.override.yml`, un nombre que Docker Compose
+carga por su cuenta al encontrarlo junto al compose principal, fusionando las dos listas de
+`ports`. No hay que pasarle `-f` a nada, y desactivar el acceso es borrar el archivo — que es
+justo lo que hace el script si vuelves a poner `TRAEFIK_ACCESO_TAILNET=no`.
+
+El script se niega a crearlo si `TS_IP` está vacía, si vale `0.0.0.0` o si coincide con
+`TRAEFIK_BIND_INTERNA`: Docker no puede publicar dos veces el mismo puerto en la misma dirección, y
+el error que da en ese caso no ayuda nada a entender qué pasó.
+
 ### 3.4 Middlewares definidos una vez, aplicados en todas partes
 
 **Decisión: definir los middlewares en un archivo y referenciarlos con `@file`.**

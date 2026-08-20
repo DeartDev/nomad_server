@@ -1,0 +1,47 @@
+# ===========================================================================
+#  nomad_server — acceso adicional desde la tailnet
+#  Destino  : ${DATOS_RAIZ}/traefik/docker-compose.override.yml
+#  Generado por scripts/10_traefik.sh cuando TRAEFIK_ACCESO_TAILNET=si
+#  Capítulo : docs/10_traefik.md § 3.7
+#
+#  POR QUÉ UN ARCHIVO APARTE Y NO UNA LÍNEA MÁS EN EL COMPOSE
+#
+#  Una entrada de 'ports' publica en UNA dirección. Para escuchar a la vez en
+#  la loopback y en la tailnet hacen falta dos, y la segunda tiene que poder
+#  quitarse sin editar el archivo principal. Docker Compose carga por su cuenta
+#  todo 'docker-compose.override.yml' que encuentre junto al compose y fusiona
+#  las listas de 'ports', así que activar o desactivar este acceso es crear o
+#  borrar este archivo. No hay que pasarle '-f' a nada.
+#
+#  Si TRAEFIK_ACCESO_TAILNET no es 'si', el script BORRA este archivo, después
+#  de respaldarlo.
+#
+#  CÓMO APLICARLA A MANO (equivalente a lo que hace el script)
+#
+#      cd ~/nomad_server
+#      source scripts/lib/entorno.sh
+#      nomad_plantilla compose/traefik/docker-compose.override.yml \
+#          > ${DATOS_RAIZ}/traefik/docker-compose.override.yml
+#
+#  Y después, para que tenga efecto:
+#      cd ${DATOS_RAIZ}/traefik && docker compose config && docker compose up -d
+#
+#  Comprueba antes de levantar nada que no ha quedado ninguna variable sin
+#  sustituir. El patrón descarta los comentarios: si no, esta misma línea
+#  saldría como coincidencia.
+#      grep -n '^[^#]*\${' ${DATOS_RAIZ}/traefik/docker-compose.override.yml && echo REVISAR || echo CORRECTO
+#
+#  Detalle: templates/README.md y docs/98_variables_y_entorno.md § 4.3
+# ===========================================================================
+
+services:
+
+  traefik:
+    ports:
+      # Segunda dirección de escucha, la de Tailscale. Se suma a la del
+      # compose principal; no la sustituye.
+      #
+      # Sigue sin ser 0.0.0.0: una IP de Tailscale solo es alcanzable desde
+      # dentro de tu tailnet, y el cortafuegos del capítulo 06 no abre este
+      # puerto a la LAN.
+      - "${TS_IP}:${TRAEFIK_PUERTO_INTERNA}:8080"
