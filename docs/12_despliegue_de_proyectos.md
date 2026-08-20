@@ -333,9 +333,22 @@ vim .env
 Genera las contraseñas al azar, no las inventes:
 
 ```bash
-# [servidor]
+# [servidor] — para una clave suelta
 openssl rand -base64 32
+
+# [servidor] — para una contraseña que vaya DENTRO de una URL
+openssl rand -hex 32
 ```
+
+La distinción no es cosmética. `DATABASE_URL` tiene la forma
+`postgresql://usuario:contraseña@db:5432/base`, y base64 produce `+`, `/` y `=`, que dentro de una
+URL significan otra cosa y la parten por la mitad. El fallo resultante engaña: la aplicación no
+conecta y el error habla de credenciales incorrectas, no de formato. En hexadecimal solo salen
+`0-9` y `a-f`, que son seguros en cualquier posición.
+
+Y la contraseña de `DATABASE_URL` debe ser **la misma** que `POSTGRES_PASSWORD`: son dos formas de
+decir lo mismo, y PostgreSQL solo lee la segunda. Si difieren, la base de datos arranca bien y es
+la aplicación la que no entra.
 
 ```bash
 # [servidor] — comprobación
