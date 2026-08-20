@@ -689,7 +689,7 @@ Criterio de aceptación: `active` y `success`.
 
 ```bash
 # [servidor] — el compose no quedó con variables sin sustituir
-grep -n '\${' ${DATOS_RAIZ}/observabilidad/docker-compose.yml && echo "REVISAR" || echo "CORRECTO"
+grep -n '^[^#]*\${' ${DATOS_RAIZ}/observabilidad/docker-compose.yml && echo "REVISAR" || echo "CORRECTO"
 ```
 
 Criterio de aceptación: `CORRECTO`.

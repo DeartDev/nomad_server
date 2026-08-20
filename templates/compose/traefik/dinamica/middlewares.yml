@@ -23,8 +23,9 @@
 #      nada: Traefik recarga este archivo solo al guardarlo
 #
 #  Comprueba antes de levantar nada que no ha quedado ninguna variable sin
-#  sustituir:
-#      grep -n '\${' ${DATOS_RAIZ}/traefik/config/dinamica/middlewares.yml && echo REVISAR || echo CORRECTO
+#  sustituir. El patrón descarta los comentarios: si no, esta misma línea
+#  saldría como coincidencia.
+#      grep -n '^[^#]*\${' ${DATOS_RAIZ}/traefik/config/dinamica/middlewares.yml && echo REVISAR || echo CORRECTO
 #
 #  Detalle: templates/README.md y docs/98_variables_y_entorno.md § 4.3
 # ===========================================================================
