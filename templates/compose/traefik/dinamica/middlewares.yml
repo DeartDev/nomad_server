@@ -53,10 +53,21 @@ http:
         permissionsPolicy: "camera=(), microphone=(), geolocation=(), payment=()"
 
         # HSTS: obliga al navegador a usar HTTPS durante un año.
-        # OJO: es difícil de revertir. Si un subdominio tuviera que servirse
-        # por HTTP, el navegador se negaría durante todo ese año.
-        # includeSubDomains queda desactivado a propósito para no arrastrar a
-        # subdominios que aún no existen.
+        #
+        # OJO, ESTA LÍNEA NO TIENE EFECTO EN ESTE SERVIDOR. Traefik solo emite
+        # Strict-Transport-Security cuando la petición le llegó por TLS, y aquí
+        # el TLS termina en el borde de Cloudflare: a Traefik le llega HTTP en
+        # claro por el túnel. Ni siquiera un X-Forwarded-Proto: https lo cambia
+        # (comprobado). Se deja porque es correcta si algún día este punto de
+        # entrada sirviera TLS directamente, pero el HSTS real de los dominios
+        # publicados hay que activarlo en el panel de Cloudflare:
+        #     SSL/TLS → Edge Certificates → HSTS
+        # Ver docs/10_traefik.md § 3.4.
+        #
+        # Es difícil de revertir: si un subdominio tuviera que servirse por
+        # HTTP, el navegador se negaría durante todo ese año. includeSubDomains
+        # queda desactivado a propósito para no arrastrar a subdominios que aún
+        # no existen.
         stsSeconds: 31536000
         stsIncludeSubdomains: false
         stsPreload: false

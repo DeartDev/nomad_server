@@ -147,17 +147,42 @@ acabara con una versión distinta.
 
 | Middleware | Qué hace | Dónde se aplica |
 |---|---|---|
-| `seguridad` | Cabeceras: `nosniff`, `frameDeny`, `Referrer-Policy`, `Permissions-Policy`, HSTS | Automático en todo el tráfico público |
+| `seguridad` | Cabeceras: `nosniff`, `frameDeny`, `Referrer-Policy`, `Permissions-Policy` (HSTS no, ver abajo) | Automático en todo el tráfico público |
 | `compresion` | Comprime respuestas, saltando lo ya comprimido | Automático en todo el tráfico público |
 | `limite-peticiones` | 100 peticiones por minuto | Por proyecto, cuando tenga sentido |
 | `limite-estricto` | 10 por minuto, para formularios de acceso | Por proyecto |
 | `solo-privada` | Solo desde LAN, Tailscale o la red de contenedores | Panel y herramientas de operación |
 | `publico` / `interno` | Cadenas que combinan las anteriores | Atajos |
 
-**Sobre HSTS**, que merece un aviso: `stsSeconds: 31536000` obliga al navegador a usar HTTPS durante
-un año, y **es difícil de revertir**. Si un subdominio tuviera que servirse por HTTP, el navegador
-se negaría durante todo ese tiempo. Por eso `includeSubDomains` queda desactivado: no arrastra a
-subdominios que aún no existen.
+**Sobre HSTS hay que decir algo incómodo: la configuración está puesta y no hace nada.**
+
+El middleware lleva `stsSeconds: 31536000`, pero Traefik solo emite `Strict-Transport-Security`
+cuando considera que la petición le llegó por TLS. En este servidor no es el caso: el TLS termina
+en el borde de Cloudflare y a Traefik le llega HTTP en claro por el túnel (§ 3.5). Comprobado
+midiendo, no deduciendo:
+
+```console
+$ docker run --rm --network ${DOCKER_RED_PROXY} curlimages/curl:8.11.1 -sSI \
+      -H "Host: miproyecto.${DOMINIO_PUBLICO}" -H "X-Forwarded-Proto: https" \
+      http://traefik:80/ | grep -iE 'x-frame|permissions-policy|strict-transport'
+Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
+X-Frame-Options: DENY
+```
+
+Las demás cabeceras del middleware sí salen; la de HSTS no, ni con `X-Forwarded-Proto: https`.
+
+**Dónde se activa entonces.** En el panel de Cloudflare, que es quien habla TLS con el navegador:
+*SSL/TLS → Edge Certificates → HSTS*. Ahí sí llega al visitante.
+
+La línea se conserva en la plantilla porque sería correcta si este punto de entrada llegara a
+servir TLS directamente, pero con un comentario que avisa de que hoy es inerte. Vale la pena
+saberlo: una cabecera de seguridad que se da por puesta y no está es peor que no haberla
+configurado, porque nadie vuelve a mirarla.
+
+**Y el aviso que sigue vigente, actives HSTS donde lo actives:** un año de HSTS **es difícil de
+revertir**. Si un subdominio tuviera que servirse por HTTP, el navegador se negaría durante todo
+ese tiempo. Por eso `includeSubDomains` queda desactivado: no arrastra a subdominios que aún no
+existen.
 
 ### 3.5 TLS lo hace Cloudflare
 
