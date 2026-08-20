@@ -182,8 +182,10 @@ case "${ACCION}" in
         log_info "Un respaldo que no se ha restaurado nunca no es un respaldo."
 
         DESTINO="$(mktemp -d /tmp/nomad-prueba-restauracion.XXXXXX)"
+        # Se encadena 'nomad_limpiar_contador' porque un 'trap ... EXIT' sustituye
+        # al anterior, y common.sh había instalado ahí el borrado del contador.
         # shellcheck disable=SC2064  # se quiere expandir DESTINO ahora
-        trap "rm -rf '${DESTINO}'" EXIT
+        trap "rm -rf '${DESTINO}'; nomad_limpiar_contador" EXIT
 
         log_info "Restaurando la última instantánea de ${DATOS_RAIZ}…"
         r restore latest --target "${DESTINO}" --include "${DATOS_RAIZ}" >/dev/null

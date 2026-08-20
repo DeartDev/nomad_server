@@ -232,6 +232,32 @@ comprobar_scripts() {
         log_aviso "tuberías con 'head -c': el productor puede recibir SIGPIPE."
         printf '%s\n' "${cabeceras}" | sed 's/^/          /'
     fi
+
+    # El contador de cambios vive en un archivo justo porque 'instalar_archivo'
+    # corre en el subshell de una tubería. Volver a tratarlo como una variable
+    # rompería en silencio todos los «reinicia solo si ha cambiado».
+    local contador
+    contador="$(grep -rn 'NOMAD_CAMBIOS\b' scripts/ \
+                | grep -v 'NOMAD_CAMBIOS_ARCHIVO' \
+                | grep -v '^scripts/verificar_repositorio.sh:' || true)"
+    if [[ -z "${contador}" ]]; then
+        log_ok "el contador de cambios se consulta con cambios()/hubo_cambios_desde()"
+    else
+        fallo "NOMAD_CAMBIOS se usa como variable; usa cambios() o hubo_cambios_desde():"
+        printf '%s\n' "${contador}" | sed 's/^/          /'
+    fi
+
+    # Un 'trap ... EXIT' sustituye al anterior, y common.sh instala ahí el
+    # borrado del archivo del contador.
+    local trampas
+    trampas="$(grep -rn 'trap .*EXIT' scripts/ \
+               | grep -v 'lib/common.sh' \
+               | grep -v 'nomad_limpiar_contador' \
+               | grep -v '^scripts/verificar_repositorio.sh:' || true)"
+    if [[ -n "${trampas}" ]]; then
+        log_aviso "estos 'trap ... EXIT' pisan el de common.sh; encadena nomad_limpiar_contador:"
+        printf '%s\n' "${trampas}" | sed 's/^/          /'
+    fi
 }
 
 # ===========================================================================

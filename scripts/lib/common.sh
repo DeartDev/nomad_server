@@ -37,8 +37,12 @@ NOMAD_TEMPLATES="${NOMAD_RAIZ}/templates"
 : "${MODO_CHECK:=0}"
 # MODO_SI=1     → responder "sí" automáticamente a las confirmaciones.
 : "${MODO_SI:=0}"
-# Contador de cambios efectivamente aplicados (para el resumen final).
-NOMAD_CAMBIOS=0
+# El contador de cambios vive en un archivo, no en una variable. Ver el bloque
+# 'marcar_cambio' más abajo para el porqué.
+NOMAD_CAMBIOS_ARCHIVO="$(mktemp -t nomad-cambios.XXXXXX)"
+printf '0\n' > "${NOMAD_CAMBIOS_ARCHIVO}"
+nomad_limpiar_contador() { rm -f "${NOMAD_CAMBIOS_ARCHIVO}"; }
+trap nomad_limpiar_contador EXIT
 
 # --- Colores (solo si la salida es un terminal) ------------------------------
 if [[ -t 1 ]] && [[ "${TERM:-dumb}" != "dumb" ]]; then
@@ -76,7 +80,39 @@ die() {
 }
 
 # Marca que se ha aplicado un cambio real en el sistema.
-marcar_cambio() { NOMAD_CAMBIOS=$((NOMAD_CAMBIOS + 1)); }
+#
+# POR QUÉ EL CONTADOR ESTÁ EN UN ARCHIVO Y NO EN UNA VARIABLE
+# ----------------------------------------------------------
+# 'instalar_archivo' recibe el contenido por la entrada estándar, así que se
+# invoca siempre al final de una tubería:
+#
+#     envsubst ... < plantilla | instalar_archivo /etc/algo.conf
+#
+# Bash ejecuta cada tramo de una tubería en un subshell propio. Una variable que
+# se incremente ahí muere con el subshell y no llega nunca al script. El síntoma
+# era doble: el resumen final no contaba los archivos escritos y —mucho peor—
+# las comprobaciones del tipo «reinicia el servicio solo si su configuración ha
+# cambiado» concluían siempre que no había cambiado. Se escribía la
+# configuración nueva y el servicio se quedaba con la vieja, en silencio.
+#
+# Un archivo sí es visible desde cualquier subshell, así que el contador
+# sobrevive a la tubería.
+marcar_cambio() {
+    local n
+    n="$(cat "${NOMAD_CAMBIOS_ARCHIVO}" 2>/dev/null)" || n=0
+    printf '%s\n' "$(( n + 1 ))" > "${NOMAD_CAMBIOS_ARCHIVO}"
+}
+
+# Número de cambios aplicados hasta este punto.
+cambios() { cat "${NOMAD_CAMBIOS_ARCHIVO}" 2>/dev/null || printf '0\n'; }
+
+# ¿Se ha aplicado algún cambio desde que se anotó el contador? Es la forma de
+# condicionar un reinicio a que la configuración haya cambiado de verdad:
+#
+#     antes="$(cambios)"
+#     instalar_plantilla etc/algo.conf /etc/algo.conf
+#     if hubo_cambios_desde "${antes}"; then ejecutar systemctl restart algo; fi
+hubo_cambios_desde() { (( $(cambios) > ${1:-0} )); }
 
 # ¿Aparece el patrón en la entrada estándar?
 #
@@ -109,11 +145,11 @@ resumen_final() {
     echo
     if (( MODO_CHECK == 1 )); then
         log_check "Simulación de '${nombre}' terminada. No se ha modificado nada."
-        log_check "Cambios que se aplicarían: ${NOMAD_CAMBIOS}"
-    elif (( NOMAD_CAMBIOS == 0 )); then
+        log_check "Cambios que se aplicarían: $(cambios)"
+    elif (( $(cambios) == 0 )); then
         log_ok "'${nombre}' completado. El sistema ya estaba en el estado deseado."
     else
-        log_ok "'${nombre}' completado. Cambios aplicados: ${NOMAD_CAMBIOS}"
+        log_ok "'${nombre}' completado. Cambios aplicados: $(cambios)"
     fi
 }
 

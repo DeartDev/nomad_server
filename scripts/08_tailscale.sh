@@ -126,7 +126,7 @@ else
     fi
 fi
 
-CAMBIOS_ANTES_REPO="${NOMAD_CAMBIOS}"
+CAMBIOS_ANTES_REPO="$(cambios)"
 instalar_plantilla etc/tailscale.sources \
     /etc/apt/sources.list.d/tailscale.sources 644 root:root
 
@@ -140,7 +140,7 @@ fi
 # 'apt-get update' solo tiene sentido si la definición de repositorios ha
 # cambiado, o si aún falta por instalar lo que este capítulo necesita. Hacerlo
 # siempre convertiría cada pasada en un cambio.
-if (( NOMAD_CAMBIOS > CAMBIOS_ANTES_REPO )) \
+if hubo_cambios_desde "${CAMBIOS_ANTES_REPO}" \
    || ! dpkg-query -W -f='${Status}' tailscale 2>/dev/null | contiene "ok installed"; then
     ejecutar apt-get update
 else

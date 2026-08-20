@@ -126,7 +126,7 @@ else
     fi
 fi
 
-CAMBIOS_ANTES_REPO="${NOMAD_CAMBIOS}"
+CAMBIOS_ANTES_REPO="$(cambios)"
 instalar_plantilla etc/docker.sources /etc/apt/sources.list.d/docker.sources 644 root:root
 
 if [[ -f /etc/apt/sources.list.d/docker.list ]]; then
@@ -138,7 +138,7 @@ fi
 # 'apt-get update' solo tiene sentido si la definición de repositorios ha
 # cambiado, o si aún falta por instalar lo que este capítulo necesita. Hacerlo
 # siempre convertiría cada pasada en un cambio.
-if (( NOMAD_CAMBIOS > CAMBIOS_ANTES_REPO )) \
+if hubo_cambios_desde "${CAMBIOS_ANTES_REPO}" \
    || ! dpkg-query -W -f='${Status}' docker-ce 2>/dev/null | contiene "ok installed"; then
     ejecutar apt-get update
 else
@@ -172,7 +172,7 @@ if [[ -f /etc/docker/daemon.json ]] && grep -q '"iptables"[[:space:]]*:[[:space:
     log_aviso "Se va a sobrescribir con la configuración de este proyecto."
 fi
 
-CAMBIOS_ANTES_DAEMON="${NOMAD_CAMBIOS}"
+CAMBIOS_ANTES_DAEMON="$(cambios)"
 instalar_plantilla etc/docker-daemon.json /etc/docker/daemon.json 644 root:root
 
 if (( MODO_CHECK == 0 )); then
@@ -184,7 +184,7 @@ if (( MODO_CHECK == 0 )); then
     fi
     # Reiniciar Docker sin motivo interrumpe la construcción de imágenes en
     # curso y, sin live-restore, tumbaría los contenedores.
-    if (( NOMAD_CAMBIOS > CAMBIOS_ANTES_DAEMON )); then
+    if hubo_cambios_desde "${CAMBIOS_ANTES_DAEMON}"; then
         ejecutar systemctl restart docker
     else
         log_sinca "daemon.json no ha cambiado: no se reinicia Docker."

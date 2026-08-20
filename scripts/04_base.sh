@@ -104,7 +104,7 @@ fi
 # ===========================================================================
 log_paso "2/7 · Repositorios APT"
 
-CAMBIOS_ANTES_REPO="${NOMAD_CAMBIOS}"
+CAMBIOS_ANTES_REPO="$(cambios)"
 instalar_plantilla etc/debian.sources /etc/apt/sources.list.d/debian.sources 644 root:root
 
 # El formato antiguo, si sigue presente, duplicaría las definiciones.
@@ -119,7 +119,7 @@ fi
 # 'apt-get update' solo tiene sentido si la definición de repositorios ha
 # cambiado, o si aún falta por instalar lo que este capítulo necesita. Hacerlo
 # siempre convertiría cada pasada en un cambio.
-if (( NOMAD_CAMBIOS > CAMBIOS_ANTES_REPO )); then
+if hubo_cambios_desde "${CAMBIOS_ANTES_REPO}"; then
     ejecutar apt-get update
 else
     log_sinca "Los repositorios no han cambiado: no se actualiza el índice."
@@ -234,11 +234,11 @@ fi
 # Se recarga logind solo si el archivo ha cambiado. Hacerlo siempre contaría
 # como un cambio en cada ejecución y rompería la promesa de la idempotencia:
 # que una segunda pasada informe de que no había nada que hacer.
-CAMBIOS_ANTES="${NOMAD_CAMBIOS}"
+CAMBIOS_ANTES="$(cambios)"
 printf '[Login]\nHandlePowerKey=ignore\nHandleLidSwitch=ignore\nHandleSuspendKey=ignore\nHandleHibernateKey=ignore\n' \
     | instalar_archivo /etc/systemd/logind.conf.d/50-nomad-servidor.conf 644 root:root
 
-if (( NOMAD_CAMBIOS > CAMBIOS_ANTES )); then
+if hubo_cambios_desde "${CAMBIOS_ANTES}"; then
     recargar_servicio systemd-logind
 else
     log_sinca "logind no necesita recargarse."

@@ -144,12 +144,13 @@ fi
 log_paso "3/6 · Configuración de sshd"
 
 DESTINO_SSHD="/etc/ssh/sshd_config.d/50-nomad.conf"
-CAMBIOS_ANTES_SSHD="${NOMAD_CAMBIOS}"
+CAMBIOS_ANTES_SSHD="$(cambios)"
 instalar_plantilla etc/sshd_50-nomad.conf "${DESTINO_SSHD}" 644 root:root
 # Si el archivo no ha cambiado no hay nada que aplicar, y reiniciar el servicio
 # por costumbre convertiría cada pasada en un cambio. Reiniciar sshd sin motivo
 # es además una operación que conviene no normalizar.
-SSHD_CAMBIO=$(( NOMAD_CAMBIOS > CAMBIOS_ANTES_SSHD ? 1 : 0 ))
+SSHD_CAMBIO=0
+hubo_cambios_desde "${CAMBIOS_ANTES_SSHD}" && SSHD_CAMBIO=1
 
 # ===========================================================================
 #  4. Validación antes de aplicar
@@ -218,10 +219,10 @@ if (( SIN_FAIL2BAN == 1 )); then
     log_sinca "Omitido por --sin-fail2ban."
 else
     instalar_paquetes fail2ban
-    CAMBIOS_ANTES_F2B="${NOMAD_CAMBIOS}"
+    CAMBIOS_ANTES_F2B="$(cambios)"
     instalar_plantilla etc/fail2ban_nomad.local /etc/fail2ban/jail.d/nomad.local 644 root:root
     habilitar_servicio fail2ban
-    if (( NOMAD_CAMBIOS > CAMBIOS_ANTES_F2B )); then
+    if hubo_cambios_desde "${CAMBIOS_ANTES_F2B}"; then
         recargar_servicio fail2ban
     else
         log_sinca "La configuración de fail2ban no ha cambiado: no se recarga."
