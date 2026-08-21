@@ -41,7 +41,22 @@ NOMAD_TEMPLATES="${NOMAD_RAIZ}/templates"
 # 'marcar_cambio' más abajo para el porqué.
 NOMAD_CAMBIOS_ARCHIVO="$(mktemp -t nomad-cambios.XXXXXX)"
 printf '0\n' > "${NOMAD_CAMBIOS_ARCHIVO}"
-nomad_limpiar_contador() { rm -f "${NOMAD_CAMBIOS_ARCHIVO}"; }
+# Marca de que se ha registrado algún [ERROR]. Ver log_error y resumen_final.
+NOMAD_ERRORES_ARCHIVO="${NOMAD_CAMBIOS_ARCHIVO}.errores"
+
+# Se ejecuta al salir. Además de limpiar, fuerza un código de salida distinto de
+# cero si hubo errores: un script que informa de [ERROR] y termina con 0 hace
+# que cualquier encadenamiento con '&&' —o cualquier automatización— lo dé por
+# bueno. El código se cambia solo si el script iba a salir con 0; si ya venía
+# fallando, se respeta su código.
+nomad_limpiar_contador() {
+    local estado=$?
+    rm -f "${NOMAD_CAMBIOS_ARCHIVO}"
+    if [[ -e "${NOMAD_ERRORES_ARCHIVO}" ]]; then
+        rm -f "${NOMAD_ERRORES_ARCHIVO}"
+        (( estado == 0 )) && exit 1
+    fi
+}
 trap nomad_limpiar_contador EXIT
 
 # --- Colores (solo si la salida es un terminal) ------------------------------
@@ -65,7 +80,10 @@ log_paso()  { printf '\n%s==> %s%s\n' "${C_NEGRITA}${C_AZUL}" "$*" "${C_FIN}"; }
 log_info()  { printf '%s[INFO]%s  %s\n'  "${C_AZUL}"     "${C_FIN}" "$*"; }
 log_ok()    { printf '%s[OK]%s    %s\n'  "${C_VERDE}"    "${C_FIN}" "$*"; }
 log_aviso() { printf '%s[AVISO]%s %s\n'  "${C_AMARILLO}" "${C_FIN}" "$*" >&2; }
-log_error() { printf '%s[ERROR]%s %s\n'  "${C_ROJO}"     "${C_FIN}" "$*" >&2; }
+log_error() {
+    printf '%s[ERROR]%s %s\n' "${C_ROJO}" "${C_FIN}" "$*" >&2
+    : > "${NOMAD_ERRORES_ARCHIVO}"
+}
 log_sinca() { printf '%s[=]%s     %s\n'  "${C_GRIS}"     "${C_FIN}" "$*"; }
 log_check() { printf '%s[CHECK]%s %s\n'  "${C_AMARILLO}" "${C_FIN}" "$*"; }
 
@@ -143,6 +161,19 @@ contiene() { grep "$@" >/dev/null; }
 resumen_final() {
     local nombre="${1:-script}"
     echo
+    # Con errores no se da ningún mensaje de completado: sería tranquilizador y
+    # falso. El código de salida también será distinto de cero (ver el trap).
+    if [[ -e "${NOMAD_ERRORES_ARCHIVO}" ]]; then
+        log_error "'${nombre}' NO ha terminado bien. Revisa lo marcado como [ERROR]"
+        log_error "más arriba: el capítulo no está completo aunque el resto haya salido."
+        if (( MODO_CHECK == 1 )); then
+            log_check "Cambios que se aplicarían: $(cambios)"
+        else
+            log_info "Cambios aplicados antes de fallar: $(cambios)"
+        fi
+        return 0
+    fi
+
     if (( MODO_CHECK == 1 )); then
         log_check "Simulación de '${nombre}' terminada. No se ha modificado nada."
         log_check "Cambios que se aplicarían: $(cambios)"

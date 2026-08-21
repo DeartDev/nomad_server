@@ -77,12 +77,37 @@ instalar_plantilla etc/apt-periodic.conf \
 
 if (( MODO_CHECK == 0 )); then
     log_info "Comprobando la configuración con una ejecución en seco…"
-    if unattended-upgrade --dry-run 2>&1 | contiene "${DEBIAN_SUITE}-security"; then
+
+    # Hace falta '--debug'. Sin él, 'unattended-upgrade --dry-run' no imprime la
+    # línea 'Allowed origins are:', que es la única que dice qué orígenes acepta
+    # de verdad —con ${distro_codename} ya expandido—. Buscar el nombre de la
+    # versión en la salida sin '--debug' no encuentra nada NUNCA, esté el
+    # servidor bien o mal configurado: la comprobación acusaba a todo el mundo
+    # de no recibir parches de seguridad.
+    ORIGENES_PERMITIDOS="$(unattended-upgrade --dry-run --debug 2>&1 \
+        | grep '^Allowed origins are:' || true)"
+
+    # Que unattended-upgrades ACEPTE un origen y que APT lo TENGA son dos cosas
+    # distintas: sin el repositorio en las fuentes, el patrón no casa con nada y
+    # no hay ningún aviso al respecto.
+    if apt-cache policy | contiene "n=${DEBIAN_SUITE}-security"; then
+        log_ok "APT conoce el repositorio ${DEBIAN_SUITE}-security."
+    else
+        log_error "APT no conoce ${DEBIAN_SUITE}-security: falta en las fuentes."
+        log_error "Revisa /etc/apt/sources.list.d/debian.sources (capítulo 04)."
+    fi
+
+    if [[ -z "${ORIGENES_PERMITIDOS}" ]]; then
+        log_error "No se ha podido leer los orígenes permitidos por unattended-upgrades."
+        log_error "Diagnostica con: sudo unattended-upgrade --dry-run --debug"
+    elif printf '%s\n' "${ORIGENES_PERMITIDOS}" \
+            | contiene "codename=${DEBIAN_SUITE}-security"; then
         log_ok "Los parches de seguridad de ${DEBIAN_SUITE} están cubiertos."
     else
         log_error "unattended-upgrades NO cubre ${DEBIAN_SUITE}-security."
         log_error "El servidor no recibiría parches. Revisa Origins-Pattern."
-        log_error "Diagnostica con: sudo unattended-upgrade --dry-run --debug"
+        log_error "Orígenes que sí acepta:"
+        printf '%s\n' "${ORIGENES_PERMITIDOS}" | sed 's/^/          /' >&2
     fi
 
     for temporizador in apt-daily.timer apt-daily-upgrade.timer; do
