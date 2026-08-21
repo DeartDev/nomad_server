@@ -708,6 +708,20 @@ contenedores.
 > `udp 41641` de Tailscale. Lo que escuche en todas las interfaces pero no tenga regla que lo abra
 > no está expuesto; conviene saber que está ahí, pero no es un fallo.
 >
+> **Con una excepción que invierte el razonamiento: `docker-proxy`.** Docker inserta sus propias
+> reglas de reenvío y **no pasa por la cadena de entrada**, así que un puerto publicado por Docker
+> en `0.0.0.0` está expuesto aunque nftables no lo abra — el cortafuegos del capítulo
+> [06](06_red_y_firewall.md) no lo protege. Es el único caso de esta lista que es un error, y es
+> justo el que se le escapa a quien razona mirando solo las reglas:
+>
+> ```bash
+> # [servidor] — nada de esto debe aparecer
+> sudo ss -tulpnH | awk '$5 ~ /^(0\.0\.0\.0|\*|\[::\]):/ && /docker-proxy/'
+> ```
+>
+> Criterio de aceptación: no imprime nada. Cada publicación de Docker va atada a una dirección
+> privada (capítulo [09](09_docker.md) § 3.2).
+>
 > **Por qué la quinta columna y no un `grep` sobre la línea.** `ss` imprime `0.0.0.0:*` en la
 > columna del **par remoto** de todo socket en escucha —significa «acepto de cualquiera»—, así que
 > filtrar la línea entera por `0.0.0.0` casa con absolutamente todas y el criterio deja de decir

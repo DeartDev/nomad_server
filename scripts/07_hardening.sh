@@ -221,42 +221,69 @@ ss -tulpn 2>/dev/null | grep -E 'LISTEN|UNCONN' | sed 's/^/          /' || true
 log_info "Puertos en escucha:"
 ss -tulpn 2>/dev/null | grep -E 'LISTEN|UNCONN' | sed 's/^/          /' || true
 
+# Los tres casos, y solo uno es un problema:
+#
+#   · atado a todas las interfaces CON regla en nftables → deliberado. Es el
+#     caso de tailscaled en udp 41641, que el capítulo 06 abre a propósito. Se
+#     inventaría, no se avisa: un aviso permanente enseña a ignorar los avisos.
+#
+#   · atado a todas las interfaces SIN regla → no es alcanzable desde fuera.
+#     Conviene saber que está, pero no es un fallo.
+#
+#   · publicado por Docker en todas las interfaces → EXPUESTO, tenga o no
+#     regla. Docker inserta sus propias reglas de reenvío y NO pasa por la
+#     cadena de entrada, así que el cortafuegos del capítulo 06 no lo protege.
+#     Este es el único que es un error, y es el que se le escapa a quien mira
+#     solo nftables.
 REGLAS_ENTRADA="$(nft list chain inet nomad_filter entrada 2>/dev/null || true)"
-ABIERTOS=()
-CERRADOS=()
+DELIBERADOS=()
+INALCANZABLES=()
+EXPUESTOS=()
 
-while read -r proto local; do
+while read -r proto local proceso; do
     [[ -z "${proto}" ]] && continue
     puerto="${local##*:}"
     [[ "${puerto}" == "${SSH_PUERTO}" ]] && continue
-    if [[ -z "${REGLAS_ENTRADA}" ]]; then
-        ABIERTOS+=("${proto} ${local} — no se ha podido leer el cortafuegos")
+
+    # El nombre del proceso viene como users:(("nombre",pid=…,fd=…))
+    nombre="${proceso#*\"}"
+    nombre="${nombre%%\"*}"
+    [[ "${proceso}" == *'users:'* ]] || nombre="(desconocido)"
+
+    if [[ "${nombre}" == docker-proxy ]]; then
+        EXPUESTOS+=("${proto} ${local} — ${nombre}")
     # El límite de palabra es imprescindible por partida doble: sin él, el
     # puerto 22 casaría con una regla del 2222, y un '[^0-9]' delante tampoco
     # sirve —el espacio que separa 'dport' del número ya está consumido por el
     # propio literal, así que exigir otro separador hace que no case nunca.
     elif printf '%s\n' "${REGLAS_ENTRADA}" | contiene -E "${proto} dport .*\b${puerto}\b"; then
-        ABIERTOS+=("${proto} ${local}")
+        DELIBERADOS+=("${proto} ${local} — ${nombre}")
     else
-        CERRADOS+=("${proto} ${local}")
+        INALCANZABLES+=("${proto} ${local} — ${nombre}")
     fi
-done < <(ss -tulnH 2>/dev/null | awk '$5 ~ /^(0\.0\.0\.0|\*|\[::\]):/ {print $1, $5}')
+done < <(ss -tulpnH 2>/dev/null | awk '$5 ~ /^(0\.0\.0\.0|\*|\[::\]):/ {print $1, $5, $NF}')
 
-if (( ${#CERRADOS[@]} > 0 )); then
-    log_sinca "Escuchan en todas las interfaces, pero el cortafuegos no abre su puerto:"
-    printf '          %s\n' "${CERRADOS[@]}"
+if (( ${#INALCANZABLES[@]} > 0 )); then
+    log_sinca "Escuchan en todas las interfaces, pero nada abre su puerto:"
+    printf '          %s\n' "${INALCANZABLES[@]}"
+fi
+
+if (( ${#DELIBERADOS[@]} > 0 )); then
+    log_ok "Alcanzables desde la red por decisión del capítulo 06, además de SSH:"
+    printf '          %s\n' "${DELIBERADOS[@]}"
 fi
 
 if [[ -z "${REGLAS_ENTRADA}" ]]; then
     log_aviso "No se ha podido leer 'inet nomad_filter entrada': sin cortafuegos que"
     log_aviso "consultar, esta comprobación no puede decidir nada. ¿Falta el capítulo 06?"
-elif (( ${#ABIERTOS[@]} == 0 )); then
+elif (( ${#EXPUESTOS[@]} > 0 )); then
+    log_error "Hay puertos publicados por Docker en TODAS las interfaces:"
+    printf '          %s\n' "${EXPUESTOS[@]}" >&2
+    log_error "Docker inserta sus propias reglas y NO pasa por la cadena de entrada:"
+    log_error "el cortafuegos del capítulo 06 no protege esto. Ata cada publicación"
+    log_error "a una dirección privada (capítulo 09 § 3.2)."
+elif (( ${#DELIBERADOS[@]} == 0 )); then
     log_ok "Solo SSH es alcanzable desde la red. Es lo esperado."
-else
-    log_aviso "Además de SSH, el cortafuegos deja alcanzar esto:"
-    printf '          %s\n' "${ABIERTOS[@]}" >&2
-    log_aviso "Comprueba que cada uno esté ahí a propósito. En este montaje lo"
-    log_aviso "normal es que sea 'udp 41641' de Tailscale (capítulo 06 § 3.4)."
 fi
 
 # ===========================================================================
