@@ -702,9 +702,18 @@ Criterio de aceptación: emitido por Cloudflare y en vigor.
 ss -tulnH | awk '{print $5}' | grep -E '^(0\.0\.0\.0|\*|\[::\]):' | grep -v ':22$'
 ```
 
-Criterio de aceptación: no imprime nada. Escuchar en `127.0.0.1` o en la IP de Tailscale sí es
-normal a partir de los capítulos 08 y 10; lo que no debe haber es nada en todas las interfaces
-salvo SSH.
+Criterio de aceptación: aparte de SSH, lo único que debe salir es `0.0.0.0:41641` y `[::]:41641`
+—`tailscaled`, que necesita escuchar ahí para las conexiones directas y tiene su regla en el
+cortafuegos desde el capítulo [06](06_red_y_firewall.md)—. Escuchar en `127.0.0.1` o en la IP de
+Tailscale es normal y ni siquiera aparece en esta lista.
+
+Y lo que de verdad determina si algo está expuesto no es dónde escucha, sino qué abre el
+cortafuegos (capítulo [07](07_endurecimiento_del_sistema.md) § 7):
+
+```bash
+# [servidor]
+sudo nft list chain inet nomad_filter entrada | grep -E 'dport|policy'
+```
 
 ```bash
 # [servidor] — el secreto no está en git

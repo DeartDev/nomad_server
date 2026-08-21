@@ -678,8 +678,20 @@ contenedores.
 > | `tailscaled` | `${TS_IP}:<puerto alto>` y su equivalente IPv6 | 08 | Sí: es la API entre pares de la tailnet, solo alcanzable desde tu red privada |
 > | `docker-proxy` | `${TRAEFIK_BIND_INTERNA}:${TRAEFIK_PUERTO_INTERNA}` | 10 | Sí, **si y solo si** la dirección es privada |
 >
-> Lo que nunca debe aparecer es una escucha en `0.0.0.0` que no sea SSH. Ese es el criterio que se
-> mantiene durante todo el montaje:
+> **El criterio no es dónde escucha un proceso, sino qué deja pasar el cortafuegos.** Un servicio
+> atado a `0.0.0.0` cuyo puerto nftables no acepta no es alcanzable por nadie. Y al revés: lo que el
+> cortafuegos abre sí lo es, escuche donde escuche.
+>
+> La diferencia no es teórica. `tailscaled` escucha en `0.0.0.0:41641` **a propósito** —lo necesita
+> para las conexiones directas entre pares, y el capítulo [06](06_red_y_firewall.md) le abre ese
+> puerto—, así que un criterio de «nada en `0.0.0.0` salvo SSH» marca como problema algo que el
+> propio montaje configuró. Ese es el criterio que se mantiene durante todo el montaje:
+>
+> ```text
+> escuchas en todas las interfaces  ∩  puertos que abre nftables  =  { SSH, udp 41641 }
+> ```
+>
+> Para verlo a mano, primero las escuchas y después las reglas:
 >
 > ```bash
 > # [servidor] — se mira la columna de la dirección LOCAL, la quinta
@@ -687,7 +699,14 @@ contenedores.
 >     | grep -E '^(0\.0\.0\.0|\*|\[::\]):' | grep -v ":${SSH_PUERTO}$"
 > ```
 >
-> Criterio de aceptación: no imprime nada, siempre y en cualquier capítulo.
+> ```bash
+> # [servidor] — y qué abre el cortafuegos
+> sudo nft list chain inet nomad_filter entrada | grep -E 'dport|policy'
+> ```
+>
+> Criterio de aceptación: lo único que aparece en ambas listas es SSH y, tras el capítulo 08, el
+> `udp 41641` de Tailscale. Lo que escuche en todas las interfaces pero no tenga regla que lo abra
+> no está expuesto; conviene saber que está ahí, pero no es un fallo.
 >
 > **Por qué la quinta columna y no un `grep` sobre la línea.** `ss` imprime `0.0.0.0:*` en la
 > columna del **par remoto** de todo socket en escucha —significa «acepto de cualquiera»—, así que

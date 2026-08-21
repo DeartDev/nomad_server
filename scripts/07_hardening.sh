@@ -205,28 +205,51 @@ log_paso "5/6 · Servicios en escucha"
 log_info "Puertos en escucha:"
 ss -tulpn 2>/dev/null | grep -E 'LISTEN|UNCONN' | sed 's/^/          /' || true
 
-# Lo que importa no es "solo SSH" —desde el capítulo 08 hay escuchas legítimas
-# de tailscaled, y desde el 10 el punto de entrada interno de Traefik— sino que
-# nada distinto de SSH escuche en TODAS las interfaces.
+# QUÉ SIGNIFICA "EXPUESTO", QUE NO ES LO QUE PARECE
 #
-# Y para saber eso hay que mirar la columna de la dirección LOCAL, la quinta.
-# 'ss' imprime '0.0.0.0:*' en la columna del PAR REMOTO de todo socket en
-# escucha, así que buscar esa cadena en la línea entera casa con absolutamente
-# todas: el aviso saltaba siempre, y un aviso que siempre salta enseña a
-# ignorar los avisos.
-ESCUCHAS_ABIERTAS="$(ss -tulnH 2>/dev/null \
-    | awk '{print $5}' \
-    | grep -E '^(0\.0\.0\.0|\*|\[::\]):' \
-    | grep -vE ":${SSH_PUERTO}$" || true)"
-NUM_ABIERTAS="$(printf '%s\n' "${ESCUCHAS_ABIERTAS}" | grep -c . || true)"
+# El criterio no es dónde escucha un proceso, sino qué deja pasar el
+# cortafuegos. Un servicio atado a 0.0.0.0 cuyo puerto nftables no acepta no es
+# alcanzable por nadie; y al revés, lo que el cortafuegos abre sí lo es. Medir
+# solo la dirección de enlace da falsos positivos permanentes: tailscaled
+# escucha en 0.0.0.0:41641 a propósito —lo necesita para las conexiones
+# directas, y el capítulo 06 le abre ese puerto—, así que el aviso saltaba en
+# cada ejecución. Un aviso que salta siempre enseña a ignorar los avisos.
+#
+# Además, 'ss' imprime '0.0.0.0:*' en la columna del PAR REMOTO de todo socket
+# en escucha, así que hay que mirar la quinta columna, la dirección local, y no
+# filtrar la línea entera.
+log_info "Puertos en escucha:"
+ss -tulpn 2>/dev/null | grep -E 'LISTEN|UNCONN' | sed 's/^/          /' || true
 
-if (( NUM_ABIERTAS == 0 )); then
-    log_ok "Nada escucha en todas las interfaces salvo SSH. Es lo esperado."
+REGLAS_ENTRADA="$(nft list chain inet nomad_filter entrada 2>/dev/null || true)"
+ABIERTOS=()
+CERRADOS=()
+
+while read -r proto local; do
+    [[ -z "${proto}" ]] && continue
+    puerto="${local##*:}"
+    [[ "${puerto}" == "${SSH_PUERTO}" ]] && continue
+    if [[ -z "${REGLAS_ENTRADA}" ]]; then
+        ABIERTOS+=("${proto} ${local} — no se ha podido leer el cortafuegos")
+    elif printf '%s\n' "${REGLAS_ENTRADA}" | contiene -E "${proto} dport .*[^0-9]${puerto}([^0-9]|$)"; then
+        ABIERTOS+=("${proto} ${local}")
+    else
+        CERRADOS+=("${proto} ${local}")
+    fi
+done < <(ss -tulnH 2>/dev/null | awk '$5 ~ /^(0\.0\.0\.0|\*|\[::\]):/ {print $1, $5}')
+
+if (( ${#CERRADOS[@]} > 0 )); then
+    log_sinca "Escuchan en todas las interfaces, pero el cortafuegos no abre su puerto:"
+    printf '          %s\n' "${CERRADOS[@]}"
+fi
+
+if (( ${#ABIERTOS[@]} == 0 )); then
+    log_ok "Solo SSH es alcanzable desde la red. Es lo esperado."
 else
-    log_aviso "Hay ${NUM_ABIERTAS} servicios escuchando en TODAS las interfaces:"
-    printf '%s\n' "${ESCUCHAS_ABIERTAS}" | sed 's/^/          /' >&2
-    log_aviso "Revisa cada uno: en este montaje solo SSH debería estar así."
-    log_aviso "Escuchar en 127.0.0.1 o en la IP de Tailscale sí es normal."
+    log_aviso "Además de SSH, el cortafuegos deja alcanzar esto:"
+    printf '          %s\n' "${ABIERTOS[@]}" >&2
+    log_aviso "Comprueba que cada uno esté ahí a propósito. En este montaje lo"
+    log_aviso "normal es que sea 'udp 41641' de Tailscale (capítulo 06 § 3.4)."
 fi
 
 # ===========================================================================
