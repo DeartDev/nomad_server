@@ -231,7 +231,11 @@ while read -r proto local; do
     [[ "${puerto}" == "${SSH_PUERTO}" ]] && continue
     if [[ -z "${REGLAS_ENTRADA}" ]]; then
         ABIERTOS+=("${proto} ${local} — no se ha podido leer el cortafuegos")
-    elif printf '%s\n' "${REGLAS_ENTRADA}" | contiene -E "${proto} dport .*[^0-9]${puerto}([^0-9]|$)"; then
+    # El límite de palabra es imprescindible por partida doble: sin él, el
+    # puerto 22 casaría con una regla del 2222, y un '[^0-9]' delante tampoco
+    # sirve —el espacio que separa 'dport' del número ya está consumido por el
+    # propio literal, así que exigir otro separador hace que no case nunca.
+    elif printf '%s\n' "${REGLAS_ENTRADA}" | contiene -E "${proto} dport .*\b${puerto}\b"; then
         ABIERTOS+=("${proto} ${local}")
     else
         CERRADOS+=("${proto} ${local}")
@@ -243,7 +247,10 @@ if (( ${#CERRADOS[@]} > 0 )); then
     printf '          %s\n' "${CERRADOS[@]}"
 fi
 
-if (( ${#ABIERTOS[@]} == 0 )); then
+if [[ -z "${REGLAS_ENTRADA}" ]]; then
+    log_aviso "No se ha podido leer 'inet nomad_filter entrada': sin cortafuegos que"
+    log_aviso "consultar, esta comprobación no puede decidir nada. ¿Falta el capítulo 06?"
+elif (( ${#ABIERTOS[@]} == 0 )); then
     log_ok "Solo SSH es alcanzable desde la red. Es lo esperado."
 else
     log_aviso "Además de SSH, el cortafuegos deja alcanzar esto:"
