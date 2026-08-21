@@ -237,6 +237,53 @@ acabara con una versión distinta.
 | `solo-privada` | Solo desde LAN, Tailscale o la red de contenedores | Panel y herramientas de operación |
 | `publico` / `interno` | Cadenas que combinan las anteriores | Atajos |
 
+#### El panel le robaba `/api` a todo lo demás
+
+La regla del router del panel permite llegar por nombre o por ruta:
+
+```
+Host(`${TRAEFIK_DASHBOARD_HOST}`) || PathPrefix(`/dashboard`) || PathPrefix(`/api`)
+```
+
+La segunda mitad es cómoda la primera vez, cuando aún no hay DNS interno configurado. Pero esos
+`PathPrefix` **no están atados a ningún host**: casan con `/dashboard` y `/api` de *cualquier*
+nombre que llegue al punto de entrada interno. Y Traefik, cuando no se le dice otra cosa, ordena
+los routers por **longitud de la regla**: esta es larga y le gana a un `Host(`logs.ejemplo.lan`)`
+cualquiera.
+
+El resultado se ve así, y engaña porque la interfaz sí carga:
+
+```console
+$ curl -sSi -H "Host: logs.nomadservernw.lan" http://127.0.0.1:8080/api/events/stream | head -3
+HTTP/1.1 404 Not Found
+Content-Type: text/plain; charset=utf-8
+X-Content-Type-Options: nosniff
+```
+
+Fíjate en lo que **no** hay en esa respuesta: ni `X-Frame-Options` ni `Permissions-Policy`, que sí
+salen en cualquier respuesta que pase por `interno@file`. Esa petición no llegó a Dozzle; la
+atendió la API de Traefik. Dozzle sirve su interfaz desde `/`, así que carga, y luego todas sus
+llamadas a `/api/…` mueren en un 404: la pantalla se queda en *«se agotó el tiempo de espera al
+conectarse a la API»*.
+
+Lo mismo le pasa a Uptime Kuma, que recibe sus avisos por `/api/push/<id>` — y ahí el fallo es peor,
+porque un aviso que no llega no se nota hasta el día que hacía falta.
+
+**La solución es una prioridad explícita**, en las etiquetas del compose:
+
+```yaml
+- "traefik.http.routers.panel.priority=1"
+```
+
+Con prioridad 1 el panel pasa a ser el último recurso: cualquier router que case por nombre de host
+gana, y el acceso por ruta sigue funcionando para los nombres que no tienen router propio. Es una
+línea, pero sin ella el punto de entrada interno solo sirve bien un servicio: el panel.
+
+**Y una consecuencia que hay que tener presente:** llamar a un servicio interno **por IP** no casa
+con ningún `Host(…)`, así que acaba en el panel igualmente. Las direcciones internas se usan
+siempre por nombre, con la entrada correspondiente en `/etc/hosts` (capítulo
+[13](13_observabilidad.md) § 5 paso 4).
+
 **Sobre HSTS hay que decir algo incómodo: la configuración está puesta y no hace nada.**
 
 El middleware lleva `stsSeconds: 31536000`, pero Traefik solo emite `Strict-Transport-Security`
@@ -832,6 +879,8 @@ docker compose restart traefik
 | Se creó un directorio `/traefik` en la raíz | `${DATOS_RAIZ}` estaba vacía al ejecutar el paso 1 | Bórralo, carga el entorno y repite | § 5 paso 1 |
 | Los archivos de `${DATOS_RAIZ}/traefik` pertenecen a root y no puedo editarlos | Se ejecutó el script con `sudo` | `sudo chown -R ${ADMIN_USUARIO}: ${DATOS_RAIZ}/traefik` | § 6.1 |
 | Cambié `TRAEFIK_BIND_INTERNA` y el panel sigue donde estaba | El contenedor no se recreó | `docker compose up -d --force-recreate traefik` | § 4.2 |
+| Un servicio interno carga la página pero sus llamadas a `/api/…` dan 404 | El router del panel incluye `PathPrefix(/api)` sin atar a un host y gana por longitud de regla | Añade `traefik.http.routers.panel.priority=1` y vuelve a aplicar el capítulo 10 | § 3.4 |
+| Llamo a un servicio interno por IP y responde el panel de Traefik | Sin nombre de host no casa ningún `Host(…)`, y el panel recoge `/api` y `/dashboard` | Llámalo por su nombre, con su entrada en `/etc/hosts` | § 3.4 |
 | «cannot assign requested address» tras reiniciar | Traefik arrancó antes que Tailscale y la IP aún no existía | `docker compose up -d` de nuevo, o usa `127.0.0.1` | Capítulo [08](08_tailscale.md) |
 
 ---

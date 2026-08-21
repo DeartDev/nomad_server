@@ -529,10 +529,16 @@ contenedor, porque el script de respaldo corre fuera de Docker):
 # [servidor]
 PUSH_ID=f7G8h9J0k1        # ← el identificador que te ha dado Uptime Kuma
 ./scripts/variables.sh --fijar \
-    RESTIC_PUSH_URL="http://${TRAEFIK_BIND_INTERNA}:${TRAEFIK_PUERTO_INTERNA}/api/push/${PUSH_ID}"
+    RESTIC_PUSH_URL="http://${UPTIME_KUMA_HOST}:${TRAEFIK_PUERTO_INTERNA}/api/push/${PUSH_ID}"
 source scripts/lib/entorno.sh
 echo "${RESTIC_PUSH_URL}"
 ```
+
+> **Tiene que ser el NOMBRE de Kuma, no una IP.** Una petición sin nombre de host no casa con
+> ningún router por `Host(…)`, y se la queda el router del panel de Traefik, cuya regla incluye
+> `PathPrefix(/api)`: el aviso muere en un 404 y el monitor se queda esperando para siempre. Para
+> que el servidor resuelva ese nombre hace falta la entrada en `/etc/hosts` del capítulo
+> [13](13_observabilidad.md) § 5 paso 8.
 
 Y **pruébala antes de darla por buena**. El monitor debe pasar a verde en segundos:
 
@@ -969,7 +975,8 @@ sudo systemctl daemon-reload
 | El repositorio se creó en `/restic/` o en una ruta rara | `RESTIC_USB_MOUNT` o `SERVIDOR_HOSTNAME` vacías al ejecutar `restic init` | Borra esa ruta, carga el entorno y repite el paso 4 | § 5 paso 0 |
 | El script de respaldo falla con rutas vacías | Se instaló sin el entorno cargado | `nomad_plantilla etc/nomad-respaldo.sh \| sudo tee …` y comprueba | § 5 paso 6 |
 | El respaldo funciona pero el monitor sigue rojo | `RESTIC_PUSH_URL` se fijó **después** de instalar el script | Vuelve a instalar el script tras fijar la variable | § 5 paso 8 |
-| `curl` a la URL de push no responde desde el servidor | La URL usa un nombre de contenedor que el host no resuelve | Usa `${TRAEFIK_BIND_INTERNA}:${TRAEFIK_PUERTO_INTERNA}` | § 5 paso 8 |
+| `curl` a la URL de push no responde desde el servidor | La URL usa un nombre de contenedor que el host no resuelve | Usa `${UPTIME_KUMA_HOST}:${TRAEFIK_PUERTO_INTERNA}` con la entrada en `/etc/hosts` | § 5 paso 8 |
+| La URL de push devuelve `404 page not found` | La llamas por IP: sin nombre de host se la queda el router del panel de Traefik, que incluye `PathPrefix(/api)` | Llámala por `${UPTIME_KUMA_HOST}`, nunca por IP | Capítulo [10](10_traefik.md) § 3.4 |
 | Formateé el disco equivocado | La variable `DISCO` apuntaba a otro dispositivo | No hay recuperación por software. La comprobación del paso 1 existe para esto | § 4.3 |
 
 ---

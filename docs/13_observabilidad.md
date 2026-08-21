@@ -550,11 +550,28 @@ sudo bash -n /usr/local/bin/nomad-espacio.sh && echo "SINTAXIS CORRECTA"
 
 Criterio de aceptación: la URL contiene tu identificador real y la sintaxis es válida.
 
-> **Sobre la dirección del monitor.** Se usa `http://uptime-kuma:3001` —el nombre del contenedor—
-> en lugar de `localhost:8080`, y no es un detalle: el script corre en el **host**, no dentro de un
-> contenedor, así que ese nombre no resolvería. Usa la dirección que sí funcione en tu caso:
-> `http://${TRAEFIK_BIND_INTERNA}:${TRAEFIK_PUERTO_INTERNA}/api/push/…` si el punto de entrada
-> interno está publicado, que es lo habitual. Compruébalo con el `curl` del final del paso.
+> **Sobre la dirección del monitor, que tiene dos trampas encadenadas.**
+>
+> La primera: `http://uptime-kuma:3001` es el nombre del contenedor, y el script corre en el
+> **host**, fuera de Docker, donde ese nombre no resuelve.
+>
+> La segunda es menos evidente y da un fallo silencioso. Tampoco vale
+> `http://127.0.0.1:8080/api/push/…`: sin nombre de host, ningún router de Traefik casa por
+> `Host(…)`, y la petición se la queda el router del panel, cuya regla incluye `PathPrefix(/api)`.
+> El aviso acaba en la API de Traefik, que responde 404, y el monitor **nunca se pone en verde sin
+> decir por qué**.
+>
+> La dirección correcta lleva el nombre de Kuma, y para eso el servidor tiene que resolverlo:
+>
+> ```bash
+> # [servidor] — el nombre, hacia el propio punto de entrada interno
+> echo "127.0.0.1  ${UPTIME_KUMA_HOST} ${DOZZLE_HOST}" | sudo tee -a /etc/hosts
+> getent hosts ${UPTIME_KUMA_HOST}
+> ```
+>
+> Y entonces `http://${UPTIME_KUMA_HOST}:${TRAEFIK_PUERTO_INTERNA}/api/push/…` sí llega. Compruébalo
+> con el `curl` del final del paso: si responde `{"ok":true}` va bien; si responde
+> `404 page not found`, la petición se la llevó el panel.
 
 ```bash
 # [servidor] — el servicio y el temporizador de systemd
@@ -596,8 +613,11 @@ pocos minutos. Si el `curl` falla, prueba la URL a mano para ver qué responde:
 
 ```bash
 # [servidor]
-curl -v "http://${TRAEFIK_BIND_INTERNA}:${TRAEFIK_PUERTO_INTERNA}/api/push/${PUSH_ID}?status=up&msg=prueba"
+curl -v "http://${UPTIME_KUMA_HOST}:${TRAEFIK_PUERTO_INTERNA}/api/push/${PUSH_ID}?status=up&msg=prueba"
 ```
+
+Criterio de aceptación: `{"ok":true}`. Un `404 page not found` significa que la petición no llegó a
+Kuma sino al panel de Traefik: falta el nombre en `/etc/hosts`, o lo estás llamando por IP.
 
 ### Paso 9 — Herramientas de línea de comandos
 

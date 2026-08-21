@@ -145,6 +145,22 @@ services:
       #   · por ruta:    http://<ip-privada>:${TRAEFIK_PUERTO_INTERNA}/dashboard/
       # La segunda funciona sin configurar DNS, que es lo que hace falta la
       # primera vez.
+      #
+      # LA PRIORIDAD NO ES OPCIONAL. Los dos PathPrefix no están atados a
+      # ningún host, así que casan con /dashboard y /api de CUALQUIER nombre
+      # que llegue a este punto de entrada. Y Traefik ordena los routers por
+      # longitud de regla: esta es larga y ganaría a un simple Host(`…`).
+      #
+      # Sin esta línea, el panel le roba /api/* a todo lo demás: la interfaz de
+      # Dozzle se queda colgada porque sus llamadas acaban en la API de Traefik,
+      # y los avisos de Uptime Kuma —que llegan por /api/push/<id>— no llegan
+      # nunca, que es como quedarse sin el aviso de que los respaldos han dejado
+      # de ejecutarse.
+      #
+      # Con prioridad 1, este router es el último recurso: cualquier otro que
+      # case por nombre de host gana, y el acceso por ruta sigue funcionando
+      # para los nombres que no tienen router propio.
+      - "traefik.http.routers.panel.priority=1"
       - "traefik.http.routers.panel.rule=Host(`${TRAEFIK_DASHBOARD_HOST}`) || PathPrefix(`/dashboard`) || PathPrefix(`/api`)"
       - "traefik.http.routers.panel.entrypoints=interna"
       - "traefik.http.routers.panel.service=api@internal"
