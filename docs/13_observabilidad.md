@@ -396,9 +396,30 @@ intermediario del socket:
 
 ```bash
 # [servidor]
+docker inspect -f '{{.State.Health.Status}}' dozzle
 docker logs dozzle | tail -20
-docker exec dozzle wget -qO- http://socket-proxy:2375/containers/json | head -c 200
 ```
+
+> **No intentes `docker exec dozzle wget …`.** La imagen de Dozzle es mínima: no lleva shell, ni
+> `wget`, ni nada. Cualquier `docker exec` contra ella falla con *executable file not found*, y si
+> descartas la salida vacía como «no responde» acabarás persiguiendo un fallo que no existe.
+
+Para preguntarle al intermediario hay que hacerlo desde otro contenedor de su red:
+
+```bash
+# [servidor]
+docker run --rm --network ${DOCKER_RED_SOCKET} curlimages/curl:8.11.1 \
+    -sS -o /dev/null -w 'containers/json → HTTP %{http_code}\n' \
+    http://socket-proxy:2375/containers/json
+```
+
+Criterio de aceptación: `HTTP 200`.
+
+> **Un `403 Forbidden` de `/info` en el registro de Dozzle es normal**, y no significa que algo esté
+> roto. El intermediario tiene `INFO: 0` a propósito (§ 3.2): Dozzle pide ese punto al arrancar para
+> adornar la cabecera de su interfaz, se lo deniegan, lo anota como error y sigue funcionando. Los
+> registros los lee de `/containers/json`, que sí está concedido. La señal que importa es que el
+> contenedor esté en `healthy`.
 
 ### Paso 6 — Configura Uptime Kuma
 
@@ -699,10 +720,13 @@ Criterio de aceptación: `dozzle` y `uptime-kuma` en `running (healthy)`.
 
 ```bash
 # [servidor] — Dozzle alcanza el intermediario del socket
-docker exec dozzle wget -qO- http://socket-proxy:2375/containers/json | head -c 50
+docker inspect -f '{{.State.Health.Status}}' dozzle
+docker logs --tail 50 dozzle 2>&1 | grep '"level":"error"' \
+    | grep -v 'Failed to get docker info' || echo "sin errores relevantes"
 ```
 
-Criterio de aceptación: devuelve JSON.
+Criterio de aceptación: `healthy`, y ningún error aparte del `403` de `/info`, que es esperado
+(§ 5, paso 5).
 
 ```bash
 # [servidor] — ninguna herramienta está en el punto de entrada público

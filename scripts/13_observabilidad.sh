@@ -146,26 +146,41 @@ if (( MODO_CHECK == 1 )); then
 else
     # Es el fallo más probable y el más confuso: Dozzle carga bien pero sale
     # vacío, sin ningún mensaje de error visible en la interfaz.
-    # Se captura la respuesta en una variable en lugar de encadenar tuberías.
-    # 'head -c' cerraría la tubería en cuanto tuviera sus bytes, wget recibiría
-    # SIGPIPE y, con 'set -o pipefail', la comprobación fallaría aunque la
-    # respuesta fuera correcta. Es el mismo motivo por el que aquí no se usa
-    # 'grep -q' (ver contiene() en lib/common.sh).
-    # La ruta no lleva prefijo de versión: fijar '/v1.24/' hace que el demonio
-    # responda 400 en cuanto su versión mínima admitida sea mayor, y la
-    # comprobación acusaría a Dozzle de un fallo que no es suyo.
-    RESPUESTA_SOCKET="$(docker exec dozzle wget -qO- --timeout=5 \
-        http://socket-proxy:2375/containers/json 2>/dev/null || true)"
-    if [[ "${RESPUESTA_SOCKET:0:1}" == "[" ]]; then
+    #
+    # NO se comprueba con 'docker exec dozzle wget …'. La imagen de Dozzle es
+    # mínima: no lleva shell ni wget ni nada. Cualquier 'docker exec' contra
+    # ella falla siempre con "executable file not found", la respuesta queda
+    # vacía y la comprobación acusaba a Dozzle de un fallo que no existía. Se
+    # usan dos señales que sí están disponibles desde fuera del contenedor.
+    SALUD_DOZZLE="$(docker inspect -f '{{.State.Health.Status}}' dozzle 2>/dev/null || true)"
+    REGISTRO_DOZZLE="$(docker logs --tail 50 dozzle 2>&1 || true)"
+
+    # El 403 de /info es esperado y no rompe nada: el intermediario tiene
+    # INFO: 0 a propósito y Dozzle solo usa ese punto para la cabecera de la
+    # interfaz. Los registros los saca de /containers/json, que sí concede.
+    ERRORES_DOZZLE="$(printf '%s\n' "${REGISTRO_DOZZLE}" \
+        | grep -i '"level":"error"' \
+        | grep -v 'Failed to get docker info' || true)"
+
+    if [[ "${SALUD_DOZZLE}" == "healthy" && -z "${ERRORES_DOZZLE}" ]]; then
         log_ok "Dozzle alcanza el intermediario del socket."
+        if printf '%s\n' "${REGISTRO_DOZZLE}" | contiene 'Failed to get docker info'; then
+            log_sinca "El 403 de /info en su registro es esperado: el intermediario"
+            log_sinca "no concede INFO, y Dozzle solo lo usa para la cabecera."
+        fi
     else
-        log_error "Dozzle NO alcanza el intermediario del socket."
+        log_error "Dozzle NO alcanza el intermediario del socket (salud: ${SALUD_DOZZLE:-desconocida})."
         log_error "La interfaz cargará, pero aparecerá vacía y sin explicar por qué."
         log_error "Comprueba:"
         log_error "  · que dozzle está en la red ${DOCKER_RED_SOCKET}"
         log_error "  · que DOZZLE_REMOTE_HOST es tcp://socket-proxy:2375"
-        log_error "Registro:"
-        docker logs --tail 15 dozzle 2>&1 | sed 's/^/          /' >&2
+        log_error "  · que el intermediario concede CONTAINERS:"
+        log_error "        docker run --rm --network ${DOCKER_RED_SOCKET} curlimages/curl:8.11.1 \\"
+        log_error "            -sS -o /dev/null -w '%{http_code}\\n' http://socket-proxy:2375/containers/json"
+        [[ -n "${ERRORES_DOZZLE}" ]] && {
+            log_error "Errores en su registro:"
+            printf '%s\n' "${ERRORES_DOZZLE}" | sed 's/^/          /' >&2
+        }
     fi
 fi
 
