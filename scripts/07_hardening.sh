@@ -201,21 +201,32 @@ fi
 # ===========================================================================
 log_paso "5/6 · Servicios en escucha"
 
-if (( MODO_CHECK == 0 )) || true; then
-    log_info "Puertos en escucha:"
-    ss -tulpn 2>/dev/null | grep LISTEN | sed 's/^/          /' || true
+# Esta comprobación solo lee, así que se ejecuta también en modo simulación.
+log_info "Puertos en escucha:"
+ss -tulpn 2>/dev/null | grep -E 'LISTEN|UNCONN' | sed 's/^/          /' || true
 
-    # Lo que importa no es "solo SSH" —a partir del capítulo 08 hay escuchas
-    # legítimas de tailscaled y del punto de entrada interno de Traefik— sino
-    # que nada distinto de SSH escuche en 0.0.0.0.
-    INESPERADOS="$(ss -tulpn 2>/dev/null | grep LISTEN | grep '0\.0\.0\.0' \
-                   | grep -vc ":${SSH_PUERTO}\b" || true)"
-    if (( INESPERADOS == 0 )); then
-        log_ok "Solo SSH está escuchando. Es lo esperado."
-    else
-        log_aviso "Hay ${INESPERADOS} servicios escuchando además de SSH."
-        log_aviso "Revisa cada uno: en este montaje solo SSH debería estar en red."
-    fi
+# Lo que importa no es "solo SSH" —desde el capítulo 08 hay escuchas legítimas
+# de tailscaled, y desde el 10 el punto de entrada interno de Traefik— sino que
+# nada distinto de SSH escuche en TODAS las interfaces.
+#
+# Y para saber eso hay que mirar la columna de la dirección LOCAL, la quinta.
+# 'ss' imprime '0.0.0.0:*' en la columna del PAR REMOTO de todo socket en
+# escucha, así que buscar esa cadena en la línea entera casa con absolutamente
+# todas: el aviso saltaba siempre, y un aviso que siempre salta enseña a
+# ignorar los avisos.
+ESCUCHAS_ABIERTAS="$(ss -tulnH 2>/dev/null \
+    | awk '{print $5}' \
+    | grep -E '^(0\.0\.0\.0|\*|\[::\]):' \
+    | grep -vE ":${SSH_PUERTO}$" || true)"
+NUM_ABIERTAS="$(printf '%s\n' "${ESCUCHAS_ABIERTAS}" | grep -c . || true)"
+
+if (( NUM_ABIERTAS == 0 )); then
+    log_ok "Nada escucha en todas las interfaces salvo SSH. Es lo esperado."
+else
+    log_aviso "Hay ${NUM_ABIERTAS} servicios escuchando en TODAS las interfaces:"
+    printf '%s\n' "${ESCUCHAS_ABIERTAS}" | sed 's/^/          /' >&2
+    log_aviso "Revisa cada uno: en este montaje solo SSH debería estar así."
+    log_aviso "Escuchar en 127.0.0.1 o en la IP de Tailscale sí es normal."
 fi
 
 # ===========================================================================

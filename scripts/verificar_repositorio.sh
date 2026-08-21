@@ -233,6 +233,22 @@ comprobar_scripts() {
         printf '%s\n' "${cabeceras}" | sed 's/^/          /'
     fi
 
+    # 'ss' imprime '0.0.0.0:*' en la columna del PAR REMOTO de TODO socket en
+    # escucha, así que filtrar la línea entera por esa cadena casa con todas y
+    # el criterio deja de significar nada. Hay que mirar la columna de la
+    # dirección local.
+    local escuchas
+    escuchas="$(grep -rn 'ss -[a-zA-Z]*' scripts/ docs/ \
+                | grep "grep.*0[.\\]*\\.0[.\\]*\\.0[.\\]*\\.0" \
+                | grep -v 'awk' \
+                | grep -v '^scripts/verificar_repositorio.sh:' || true)"
+    if [[ -z "${escuchas}" ]]; then
+        log_ok "las comprobaciones de escucha miran la columna local, no la línea entera"
+    else
+        fallo "hay filtros de 'ss' por línea entera; casan con todo socket en escucha:"
+        printf '%s\n' "${escuchas}" | sed 's/^/          /'
+    fi
+
     # El contador de cambios vive en un archivo justo porque 'instalar_archivo'
     # corre en el subshell de una tubería. Volver a tratarlo como una variable
     # rompería en silencio todos los «reinicia solo si ha cambiado».

@@ -682,11 +682,18 @@ contenedores.
 > mantiene durante todo el montaje:
 >
 > ```bash
-> # [servidor]
-> sudo ss -tulpn | grep LISTEN | grep '0\.0\.0\.0' | grep -vc ":${SSH_PUERTO}\b"
+> # [servidor] — se mira la columna de la dirección LOCAL, la quinta
+> ss -tulnH | awk '{print $5}' \
+>     | grep -E '^(0\.0\.0\.0|\*|\[::\]):' | grep -v ":${SSH_PUERTO}$"
 > ```
 >
-> Criterio de aceptación: `0`, siempre y en cualquier capítulo.
+> Criterio de aceptación: no imprime nada, siempre y en cualquier capítulo.
+>
+> **Por qué la quinta columna y no un `grep` sobre la línea.** `ss` imprime `0.0.0.0:*` en la
+> columna del **par remoto** de todo socket en escucha —significa «acepto de cualquiera»—, así que
+> filtrar la línea entera por `0.0.0.0` casa con absolutamente todas y el criterio deja de decir
+> nada. Es un error fácil de cometer y difícil de ver: el comando parece funcionar, solo que la
+> cuenta que devuelve no es la que crees.
 
 ```bash
 # [servidor]

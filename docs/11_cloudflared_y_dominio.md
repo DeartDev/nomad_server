@@ -693,11 +693,18 @@ echo | openssl s_client -connect ${DOMINIO_PUBLICO}:443 -servername prueba.${DOM
 Criterio de aceptación: emitido por Cloudflare y en vigor.
 
 ```bash
-# [servidor] — nada expuesto
-sudo ss -tulpn | grep LISTEN | grep '0.0.0.0' | grep -vc ':22'
+# [servidor] — nada escuchando en TODAS las interfaces salvo SSH
+#
+# Se mira la columna de la dirección LOCAL (la quinta), no la línea entera:
+# 'ss' imprime '0.0.0.0:*' en la columna del PAR REMOTO de todo socket en
+# escucha, así que un grep sobre la línea casa siempre y el criterio nunca
+# se cumpliría.
+ss -tulnH | awk '{print $5}' | grep -E '^(0\.0\.0\.0|\*|\[::\]):' | grep -v ':22$'
 ```
 
-Criterio de aceptación: `0`.
+Criterio de aceptación: no imprime nada. Escuchar en `127.0.0.1` o en la IP de Tailscale sí es
+normal a partir de los capítulos 08 y 10; lo que no debe haber es nada en todas las interfaces
+salvo SSH.
 
 ```bash
 # [servidor] — el secreto no está en git
