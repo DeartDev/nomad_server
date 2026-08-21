@@ -150,6 +150,41 @@ instalar_plantilla compose/traefik/docker-compose.yml \
 # activar o desactivar este acceso es crear o borrar ese archivo.
 OVERRIDE_TAILNET="${DIR_TRAEFIK}/docker-compose.override.yml"
 
+# Enlazar una dirección que no pertenece al sistema —la de Tailscale la pone
+# tailscaled después del arranque— falla en cada reinicio, porque Docker gana la
+# carrera. Y el contenedor NO se reintenta: 'unless-stopped' cubre los que ya
+# arrancaron, no los que fallan montando su red. El resultado es el servidor sin
+# nada publicado, tampoco hacia internet, hasta que alguien entre a levantarlo.
+#
+# 'ip_nonlocal_bind' permite enlazar direcciones que todavía no existen, y es lo
+# que rompe esa dependencia. Sin él, esta configuración es una avería aplazada,
+# así que el script no la escribe. Detalle en docs/10_traefik.md § 3.3.
+exigir_enlace_diferido() {
+    local motivo="$1"
+    local valor
+    valor="$(sysctl -n net.ipv4.ip_nonlocal_bind 2>/dev/null || echo 0)"
+    (( valor == 1 )) && return 0
+
+    log_error "${motivo}"
+    log_error "Esa dirección la pone tailscaled DESPUÉS del arranque, y Docker intenta"
+    log_error "enlazar el puerto antes. Cuando pierde esa carrera, Traefik muere con"
+    log_error "'cannot assign requested address' y no se reintenta: el servidor se queda"
+    log_error "sin nada publicado, tampoco hacia internet."
+    log_error ""
+    log_error "Para permitirlo, como root:"
+    log_error "    printf 'net.ipv4.ip_nonlocal_bind = 1\\n' \\"
+    log_error "        | sudo tee /etc/sysctl.d/61-nomad-enlace-diferido.conf"
+    log_error "    sudo sysctl --system"
+    log_error ""
+    log_error "O quédate en 127.0.0.1 y usa el túnel SSH, que no es menos seguro."
+    die "Ver docs/10_traefik.md § 3.3."
+}
+
+case "${TRAEFIK_BIND_INTERNA}" in
+    127.0.0.1|localhost|::1) ;;
+    *) exigir_enlace_diferido "TRAEFIK_BIND_INTERNA=${TRAEFIK_BIND_INTERNA} no es la loopback." ;;
+esac
+
 case "${TRAEFIK_ACCESO_TAILNET,,}" in
     si|sí|s|1|true|yes)
         [[ -n "${TS_IP:-}" ]] \
@@ -158,6 +193,7 @@ case "${TRAEFIK_ACCESO_TAILNET,,}" in
             || die "TS_IP no puede ser 0.0.0.0: eso publicaría el panel en toda la red."
         [[ "${TS_IP}" != "${TRAEFIK_BIND_INTERNA}" ]] \
             || die "TS_IP y TRAEFIK_BIND_INTERNA son la misma dirección (${TS_IP}). Docker no puede publicar dos veces el mismo puerto en ella: pon TRAEFIK_ACCESO_TAILNET=no."
+        exigir_enlace_diferido "TRAEFIK_ACCESO_TAILNET=si publica el puerto en ${TS_IP}."
         instalar_plantilla compose/traefik/docker-compose.override.yml \
             "${OVERRIDE_TAILNET}" 644 "${PROPIETARIO}"
         log_info "El punto de entrada interno escuchará también en ${TS_IP}."

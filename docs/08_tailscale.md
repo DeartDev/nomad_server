@@ -448,14 +448,25 @@ levantada:
 
 | Opción | `TRAEFIK_BIND_INTERNA` | Cómo se accede |
 |---|---|---|
-| **Por túnel SSH** (lo más cerrado) | `127.0.0.1` | `ssh -L 8080:127.0.0.1:8080 nomad` y luego `http://localhost:8080/dashboard/` |
-| **Por la tailnet** (lo más cómodo) | `${TS_IP}` | `http://100.x.y.z:8080/dashboard/` desde cualquier dispositivo tuyo, incluido el móvil |
+| **Por túnel SSH** (lo más cerrado, y el que funciona sin más) | `127.0.0.1` | `ssh -L 8080:127.0.0.1:8080 nomad` y luego `http://localhost:8080/dashboard/` |
+| **Por la tailnet** (lo más cómodo, pero **lee antes el aviso**) | `${TS_IP}` | `http://100.x.y.z:8080/dashboard/` desde cualquier dispositivo tuyo, incluido el móvil |
 
-Las dos son privadas: `100.64.0.0/10` no se enruta por internet. La segunda es la que casi todo el
-mundo acaba usando.
+Las dos son privadas: `100.64.0.0/10` no se enruta por internet.
+
+> **La segunda opción tiene una trampa que tumba el servidor entero en el siguiente reinicio.**
+> La IP de Tailscale no pertenece al sistema sino a `tailscaled`, y aparece cuando la VPN se
+> autentica. En cada arranque, Docker intenta enlazar el puerto de Traefik antes de que exista, y
+> cuando pierde esa carrera —que es lo normal— Traefik muere con `cannot assign requested address`
+> y **no se reintenta**: la política `unless-stopped` solo cubre a los contenedores que llegaron a
+> arrancar, no a los que fallan montando su red. Con Traefik caído no hay nada publicado, tampoco
+> hacia internet.
+>
+> Se puede hacer bien, pero exige un ajuste del núcleo previo. Está explicado en el capítulo
+> [10](10_traefik.md) § 3.3, y el script del capítulo 10 se niega a seguir si no está puesto.
+> **Si no quieres leer eso ahora, deja `127.0.0.1`**: es la opción que funciona siempre.
 
 ```bash
-# [servidor] — si eliges la tailnet
+# [servidor] — si eliges la tailnet, y solo tras leer el capítulo 10 § 3.3
 ./scripts/variables.sh --fijar TRAEFIK_BIND_INTERNA="$(tailscale ip -4)"
 source scripts/lib/entorno.sh
 ```

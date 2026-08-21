@@ -137,9 +137,71 @@ El único puerto publicado es el **interno**, y va atado a `${TRAEFIK_BIND_INTER
 Empieza con `127.0.0.1` y cámbialo a la IP de Tailscale cuando quieras la comodidad. Ambas opciones
 son privadas; la segunda además es cómoda.
 
-**Y se pueden tener las dos a la vez**, que suele ser lo que uno acaba queriendo: el túnel SSH
-cuando administras desde el portátil de trabajo, y el acceso directo cuando miras algo desde el
-móvil. Se activa con:
+#### La trampa de enlazar la IP de Tailscale
+
+**Antes de elegir la segunda fila de esa tabla, o de activar las dos a la vez, hay que entender
+esto, porque cuesta el servidor entero en el siguiente reinicio.**
+
+La IP de Tailscale no pertenece al sistema: la pone `tailscaled` en `tailscale0` cuando la VPN se
+autentica, unos segundos después de arrancar. Docker, mientras tanto, levanta los contenedores con
+`restart: unless-stopped` en cuanto el demonio está listo. Las dos cosas pasan a la vez y no hay
+nada que las ordene, así que en cada arranque hay una carrera. Docker suele ganarla:
+
+```text
+dockerd: Failed to allocate port  error="failed to bind host port 100.75.40.17:8080/tcp:
+                                        cannot assign requested address"
+dockerd: failed to start container  container=cf50dd80 error="failed to set up container
+         networking: driver failed programming external connectivity on endpoint traefik"
+```
+
+Y aquí viene lo que lo convierte en un problema grave en lugar de una molestia:
+
+```console
+$ docker inspect traefik --format '{{.State.ExitCode}} {{.RestartCount}} {{.HostConfig.RestartPolicy.Name}}'
+255 0 unless-stopped
+```
+
+**`RestartCount: 0` con `unless-stopped`.** La política de reinicio de Docker cubre a los
+contenedores que llegaron a arrancar y luego se cayeron; **no** cubre los que fallan mientras Docker
+les monta la red. Traefik no se reintenta nunca. Y con Traefik caído no hay nada publicado —tampoco
+hacia internet, porque `cloudflared` entrega el tráfico a Traefik y sin él responde `502`—, así que
+un reinicio a las tres de la mañana deja el servidor fuera hasta que alguien entre por SSH y lo
+levante a mano.
+
+No sirve arreglarlo con una unidad de systemd que levante Traefik cuando la tailnet esté lista: eso
+repararía el acceso interno, pero dejaría el **sitio público** dependiendo de que Tailscale
+conecte, y si no conecta, no vuelve nunca. Lo que hay que romper es la dependencia, no compensarla.
+
+**La forma correcta es permitir enlazar direcciones que todavía no existen:**
+
+```bash
+# [servidor] — como root
+printf '# Traefik publica su punto de entrada interno en la IP de Tailscale, que
+# la pone tailscaled despues del arranque. Sin esto, Docker no puede
+# enlazar el puerto y Traefik no arranca. Ver docs/10_traefik.md § 3.3
+net.ipv4.ip_nonlocal_bind = 1
+'     | sudo tee /etc/sysctl.d/61-nomad-enlace-diferido.conf
+sudo sysctl --system >/dev/null
+sysctl -n net.ipv4.ip_nonlocal_bind
+```
+
+Criterio de aceptación: devuelve `1`.
+
+**Qué cuesta.** `ip_nonlocal_bind` permite a cualquier proceso local enlazar una dirección que no
+está en el equipo. Es un ajuste habitual en sistemas de alta disponibilidad y el riesgo práctico
+aquí es bajo —en este servidor solo hay `root`, tu usuario y Docker—, pero es un aflojamiento
+global y contradice el espíritu del capítulo [07](07_endurecimiento_del_sistema.md). Si no te
+convence, la respuesta correcta es quedarte en `127.0.0.1` y usar el túnel SSH: no es menos
+seguro, es menos cómodo.
+
+El script del capítulo 10 **se niega a continuar** si le pides enlazar una dirección que no es la
+loopback y este ajuste no está puesto. Es deliberado: la alternativa es que el servidor no vuelva
+después del siguiente reinicio, sin avisar.
+
+#### Las dos vías a la vez
+
+Con el ajuste anterior puesto, se pueden tener ambas: el túnel SSH cuando administras desde el
+portátil de trabajo, y el acceso directo cuando miras algo desde el móvil.
 
 ```bash
 # [servidor]
@@ -284,7 +346,7 @@ echo "${TRAEFIK_BIND_INTERNA}:${TRAEFIK_PUERTO_INTERNA} → ${DOCKER_RED_PROXY} 
 
 | Variable | Cuándo cambiarla | Cómo |
 |---|---|---|
-| `TRAEFIK_BIND_INTERNA` | Si empezaste con `127.0.0.1` y ahora quieres el panel accesible desde el móvil | `./scripts/variables.sh --fijar TRAEFIK_BIND_INTERNA="$(tailscale ip -4)"` |
+| `TRAEFIK_BIND_INTERNA` | Si empezaste con `127.0.0.1` y ahora quieres el panel accesible desde el móvil. **Exige `ip_nonlocal_bind` primero** (§ 3.3) | `./scripts/variables.sh --fijar TRAEFIK_BIND_INTERNA="$(tailscale ip -4)"` |
 | `TRAEFIK_PUERTO_INTERNA` | Si usas la IP de Tailscale, puedes poner `80` y quitar el puerto de las direcciones | `./scripts/variables.sh --fijar TRAEFIK_PUERTO_INTERNA=80` |
 
 Tras cambiar cualquiera de las dos:
@@ -754,7 +816,7 @@ docker compose restart traefik
 | Síntoma | Causa probable | Solución | Documentación |
 |---|---|---|---|
 | El panel devuelve 404 | Falta la barra final en `/dashboard/` | Usa `http://…/dashboard/` con barra | [Traefik — Dashboard](https://doc.traefik.io/traefik/operations/dashboard/) |
-| Traefik no arranca: «cannot assign requested address» | `TRAEFIK_BIND_INTERNA` apunta a una IP que no existe en el host | Comprueba con `ip -br addr`. Si es la de Tailscale, la VPN debe estar levantada antes | Capítulo [08](08_tailscale.md) |
+| Traefik no arranca: «cannot assign requested address» | `TRAEFIK_BIND_INTERNA` (o el acceso por tailnet) apunta a la IP de Tailscale, y en el arranque Docker gana la carrera a `tailscaled`. **No se reintenta**: `unless-stopped` no cubre los fallos al montar la red, así que el sitio público queda en `502` hasta que alguien lo levante | Pon `net.ipv4.ip_nonlocal_bind=1` o vuelve a `127.0.0.1` — § 3.3 |
 | Traefik no ve ningún contenedor | El intermediario del socket no responde, o falta `traefik.enable=true` | `docker logs socket-proxy` y `docker exec traefik wget -qO- http://socket-proxy:2375/containers/json` | § 3.2 |
 | «Gateway Timeout» al llegar a un proyecto | El contenedor no está en la red `${DOCKER_RED_PROXY}`, o el puerto de la etiqueta es incorrecto | `docker network inspect ${DOCKER_RED_PROXY}` y revisa `loadbalancer.server.port` | [Traefik — Docker](https://doc.traefik.io/traefik/providers/docker/) |
 | Un contenedor aparece publicado sin querer | `exposedByDefault` no está en `false` | Revisa la configuración estática (§ 3.2, paso 2) | [Traefik — Docker](https://doc.traefik.io/traefik/providers/docker/) |

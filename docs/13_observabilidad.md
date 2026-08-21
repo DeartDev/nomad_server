@@ -323,6 +323,13 @@ source scripts/lib/entorno.sh
 ./scripts/10_traefik.sh
 ```
 
+> **Esto exige un ajuste previo del núcleo**, y el script del capítulo 10 se niega a aplicarlo si no
+> está. No es un capricho: la IP de Tailscale aparece después del arranque, Docker intenta enlazar
+> el puerto antes, y el contenedor de Traefik muere sin reintentarse — dejando el servidor sin nada
+> publicado, tampoco hacia internet. Está explicado con el detalle que merece en el capítulo
+> [10](10_traefik.md) § 3.3. Si prefieres no tocar el núcleo, quédate en `127.0.0.1` y usa la
+> opción C: no es menos seguro, es menos cómodo.
+
 **Opción A — registro DNS a la IP de Tailscale:**
 
 ```bash
