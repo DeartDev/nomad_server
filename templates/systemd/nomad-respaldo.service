@@ -22,19 +22,33 @@
 # ===========================================================================
 
 [Unit]
-Description=Respaldo con restic al disco USB
+Description=Respaldo del sistema con restic
 Documentation=file:///home/${ADMIN_USUARIO}/nomad_server/docs/14_respaldos_restic.md
 
-# El respaldo necesita el disco montado y, para el manifiesto de imágenes,
-# que Docker responda. 'Wants' y no 'Requires': si Docker estuviera parado,
-# el respaldo de los archivos sigue mereciendo la pena.
-RequiresMountsFor=${RESTIC_USB_MOUNT}
+# Para el manifiesto de imágenes hace falta que Docker responda. 'Wants' y no
+# 'Requires': si Docker estuviera parado, el respaldo de los archivos sigue
+# mereciendo la pena.
 Wants=docker.service
 After=docker.service network-online.target
+
+# La dependencia del disco USB NO está aquí, sino en el añadido
+# nomad-respaldo.service.d/10-disco-usb.conf, que scripts/14_restic.sh instala
+# solo si hay disco. Ponerla en la unidad base dejaría el respaldo esperando
+# para siempre un montaje inexistente en las instalaciones que respaldan solo
+# a un destino remoto.
 
 [Service]
 Type=oneshot
 ExecStart=/usr/local/bin/nomad-respaldo.sh
+
+# Credenciales del repositorio remoto: B2_ACCOUNT_ID, AWS_ACCESS_KEY_ID y
+# compañía. El '-' inicial hace que la unidad arranque igual si el archivo no
+# existe, que es el caso cuando no hay destino remoto.
+#
+# Sin esta línea, 'restic copy' al remoto falla SIEMPRE bajo el temporizador
+# —funciona solo si lanzas el script a mano tras cargar el archivo—, y el fallo
+# queda enterrado en el registro mientras el respaldo local se da por bueno.
+EnvironmentFile=-/etc/nomad/restic-remoto.env
 
 # Prioridad baja: el respaldo no debe competir con los servicios.
 Nice=19
@@ -47,7 +61,8 @@ TimeoutStartSec=4h
 # El proceso necesita leer todo el sistema, pero no necesita escribir en casi
 # ningún sitio.
 ProtectSystem=strict
-ReadWritePaths=${RESTIC_USB_MOUNT} /var/backups/nomad /var/cache/restic
+# El disco USB, si lo hay, lo añade el fichero 10-disco-usb.conf.
+ReadWritePaths=/var/backups/nomad /var/cache/restic
 PrivateTmp=true
 NoNewPrivileges=true
 ProtectKernelTunables=true

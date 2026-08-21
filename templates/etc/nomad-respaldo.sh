@@ -21,17 +21,44 @@
 # ===========================================================================
 set -euo pipefail
 
+# --- Credenciales del repositorio remoto -----------------------------------
+# B2_ACCOUNT_ID, AWS_ACCESS_KEY_ID y compañía. El archivo puede no existir si
+# no hay repositorio remoto, de ahí el '-' de EnvironmentFile en la unidad de
+# systemd y el '|| true' de aquí.
+if [[ -r /etc/nomad/restic-remoto.env ]]; then
+    set -a
+    . /etc/nomad/restic-remoto.env
+    set +a
+fi
+
 # --- Valores sustituidos al instalar ---------------------------------------
-# Estas dos las lee restic directamente del entorno.
-RESTIC_REPOSITORY="${RESTIC_REPO_LOCAL}"
+repo_local="${RESTIC_REPO_LOCAL}"
+repo_remoto="${RESTIC_REPO_REMOTO}"
+punto_montaje="${RESTIC_USB_MOUNT}"
+usb_uuid="${RESTIC_USB_UUID}"
+
+# CUÁL ES EL REPOSITORIO PRINCIPAL
+#
+# Con disco USB, el principal es el local: el respaldo lee el sistema de
+# archivos una sola vez y después 'restic copy' replica al remoto las
+# instantáneas YA cifradas, sin volver a leerlo todo.
+#
+# Sin disco USB, el principal es el remoto y no hay copia que hacer. Es una
+# configuración legítima —y mejor que no tener respaldos— pero conviene saber
+# lo que implica: cada respaldo viaja por la red, y una restauración completa
+# depende de tu velocidad de bajada.
+if [[ -n "${usb_uuid}" ]]; then
+    modo="local"
+    RESTIC_REPOSITORY="${repo_local}"
+else
+    modo="remoto"
+    RESTIC_REPOSITORY="${repo_remoto}"
+fi
 RESTIC_PASSWORD_FILE="${RESTIC_PASSWORD_FILE}"
 export RESTIC_REPOSITORY RESTIC_PASSWORD_FILE
-
-punto_montaje="${RESTIC_USB_MOUNT}"
 datos_raiz="${DATOS_RAIZ}"
 admin_usuario="${ADMIN_USUARIO}"
 servidor="${SERVIDOR_HOSTNAME}"
-repo_remoto="${RESTIC_REPO_REMOTO}"
 push_url="${RESTIC_PUSH_URL}"
 ret_diarios="${RESTIC_RETENCION_DIARIOS}"
 ret_semanales="${RESTIC_RETENCION_SEMANALES}"
@@ -74,12 +101,19 @@ registrar "=== Respaldo de ${servidor} ==="
 [[ -r "${RESTIC_PASSWORD_FILE}" ]] \
     || fallar "No se puede leer el archivo de contraseña ${RESTIC_PASSWORD_FILE}"
 
-mountpoint -q "${punto_montaje}" \
-    || fallar "El disco de respaldo no está montado en ${punto_montaje}. ¿Está conectado?"
+[[ -n "${RESTIC_REPOSITORY}" ]] \
+    || fallar "No hay repositorio configurado: ni disco USB ni destino remoto."
 
-libre_gb="$(df -BG --output=avail "${punto_montaje}" | tail -1 | tr -dc '0-9')"
-registrar "Espacio libre en el disco de respaldo: ${libre_gb} GB"
-(( libre_gb < 5 )) && fallar "Quedan menos de 5 GB en el disco de respaldo."
+registrar "Repositorio principal (${modo}): ${RESTIC_REPOSITORY}"
+
+if [[ "${modo}" == "local" ]]; then
+    mountpoint -q "${punto_montaje}" \
+        || fallar "El disco de respaldo no está montado en ${punto_montaje}. ¿Está conectado?"
+
+    libre_gb="$(df -BG --output=avail "${punto_montaje}" | tail -1 | tr -dc '0-9')"
+    registrar "Espacio libre en el disco de respaldo: ${libre_gb} GB"
+    (( libre_gb < 5 )) && fallar "Quedan menos de 5 GB en el disco de respaldo."
+fi
 
 restic cat config >/dev/null 2>&1 \
     || fallar "No se puede abrir el repositorio ${RESTIC_REPOSITORY}"
@@ -161,16 +195,29 @@ restic forget \
 # ===========================================================================
 #  5. Copia remota (opcional)
 # ===========================================================================
-if [[ -n "${repo_remoto}" ]]; then
+# Solo tiene sentido en modo local: en modo remoto el respaldo YA se hizo
+# contra el remoto y no hay nada que copiar.
+copia_remota_fallida=0
+if [[ "${modo}" == "local" && -n "${repo_remoto}" ]]; then
     registrar "Copiando al repositorio remoto…"
     # 'copy' replica las instantáneas ya cifradas en lugar de volver a leer y
     # cifrar todo el sistema de archivos.
-    restic copy \
+    if restic copy \
         --from-repo "${RESTIC_REPOSITORY}" \
         --from-password-file "${RESTIC_PASSWORD_FILE}" \
         --repo "${repo_remoto}" \
-        --password-file "${RESTIC_PASSWORD_FILE}" \
-        2>&1 || registrar "AVISO: la copia remota ha fallado; la local sí se hizo."
+        --password-file "${RESTIC_PASSWORD_FILE}" 2>&1
+    then
+        registrar "Copia remota completada."
+    else
+        # No se llama a 'fallar': el respaldo local SÍ se hizo y perderlo por
+        # un problema de red sería peor. Pero tampoco se calla: se avisa al
+        # monitor en rojo. Un fallo de la copia remota que solo quede en el
+        # registro se convierte, en unos meses, en creer que hay copia fuera
+        # de casa cuando hace tiempo que no la hay.
+        registrar "AVISO: la copia remota ha fallado; la local sí se hizo."
+        copia_remota_fallida=1
+    fi
 fi
 
 # ===========================================================================
@@ -179,11 +226,26 @@ fi
 registrar "Instantáneas en el repositorio:"
 restic snapshots --compact 2>/dev/null | tail -8
 
-tamano="$(du -sh "${RESTIC_REPOSITORY}" 2>/dev/null | cut -f1)"
+# 'du' solo sirve para un repositorio en disco. Con uno remoto hay que
+# preguntárselo a restic, que además informa del tamaño real tras deduplicar.
+if [[ "${modo}" == "local" ]]; then
+    tamano="$(du -sh "${RESTIC_REPOSITORY}" 2>/dev/null | cut -f1)"
+else
+    tamano="$(restic stats --mode raw-data 2>/dev/null \
+              | grep -i 'total size' | cut -d: -f2 | tr -d ' ')"
+fi
 registrar "Tamaño del repositorio: ${tamano:-desconocido}"
 
+if (( copia_remota_fallida == 1 )); then
+    estado_aviso="down"
+    mensaje_aviso="respaldo+local+correcto+pero+la+copia+remota+fallo"
+else
+    estado_aviso="up"
+    mensaje_aviso="respaldo+correcto+${tamano:-}"
+fi
+
 if [[ -n "${push_url}" ]]; then
-    if curl -fsS -m 10 "${push_url}?status=up&msg=respaldo+correcto+${tamano:-}" >/dev/null 2>&1; then
+    if curl -fsS -m 10 "${push_url}?status=${estado_aviso}&msg=${mensaje_aviso}" >/dev/null 2>&1; then
         registrar "Aviso enviado al monitor."
     else
         registrar "AVISO: no se ha podido avisar al monitor."

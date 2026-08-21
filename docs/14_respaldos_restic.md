@@ -106,7 +106,37 @@ lista de paquetes instalados, las imágenes de contenedor en uso, los contenedor
 esquema de discos. Nada de eso vive en un archivo que se pueda respaldar directamente, y es
 justamente lo primero que se echa de menos al reconstruir el servidor desde cero (capítulo 16).
 
-### 3.3 El disco se monta por UUID
+### 3.3 Dos modos: con disco local, o solo remoto
+
+**Decisión: el repositorio principal es el disco USB si lo hay, y el remoto si no.**
+
+Lo determina `RESTIC_USB_UUID`: con valor, modo local; vacía, modo remoto. No hay una variable
+aparte que elegir, y por tanto no hay forma de que las dos se contradigan.
+
+| | Con disco USB | Solo remoto |
+|---|---|---|
+| Dónde se respalda | Disco local, y `restic copy` replica al remoto | Directamente al remoto |
+| Qué viaja por la red | Solo las instantáneas nuevas, ya cifradas | Todo, cada noche |
+| Restaurar | Desde el disco, a velocidad de USB | A velocidad de tu bajada |
+| Copias | Dos | Una |
+| Protege de | Fallo de disco, error humano, incendio y robo | Fallo de disco, error humano, incendio y robo |
+
+**El modo remoto es una configuración legítima**, y desde luego mejor que no tener respaldos. Pero
+conviene ser consciente de a qué se renuncia: con una sola copia, un problema con el proveedor —una
+cuenta suspendida, unas credenciales perdidas, un error de facturación— te deja sin nada. Y una
+restauración completa de 50 GB por una conexión doméstica no se mide en minutos.
+
+Si empiezas sin disco y añades uno después, basta con rellenar `RESTIC_USB_UUID` y volver a ejecutar
+`scripts/14_restic.sh`: el modo cambia solo, y a partir de ahí el remoto pasa a recibir copias en
+lugar de respaldos directos.
+
+**Las credenciales del remoto van en `/etc/nomad/restic-remoto.env`**, con permisos 600, y **no** en
+`config/servidor.env`. El servicio de systemd las carga con `EnvironmentFile`. Ese detalle no es
+cosmético: sin esa línea en la unidad, `restic copy` falla cada noche bajo el temporizador y
+funciona solo cuando lanzas el script a mano, porque a mano sí tienes las variables cargadas. Es un
+fallo que se descubre el día que hace falta el respaldo remoto.
+
+### 3.4 El disco se monta por UUID
 
 **Decisión: `/etc/fstab` con `UUID=` y `nofail`.**
 
@@ -118,7 +148,7 @@ termina de arrancar** y se queda esperando en una consola de emergencia a la que
 por SSH. Con `nofail`, el arranque continúa y el respaldo falla ruidosamente, que es exactamente el
 comportamiento correcto.
 
-### 3.4 Retención escalonada
+### 3.5 Retención escalonada
 
 **Decisión: 7 diarios, 4 semanales, 6 mensuales.**
 
@@ -138,7 +168,7 @@ Cubre los tres escenarios reales:
 
 Gracias a la deduplicación, guardar 17 instantáneas ocupa poco más que guardar una.
 
-### 3.5 El script vive fuera del repositorio
+### 3.6 El script vive fuera del repositorio
 
 **Decisión: `/usr/local/bin/nomad-respaldo.sh`, no `~/nomad_server/scripts/…`.**
 
@@ -149,7 +179,7 @@ desorden cuando más falta hace que la copia de esa noche se haga.
 El script se **genera** desde la plantilla con los valores de `config/servidor.env` ya sustituidos,
 de modo que sigue siendo reproducible sin depender del repositorio en tiempo de ejecución.
 
-### 3.6 El fallo se detecta por ausencia de aviso
+### 3.7 El fallo se detecta por ausencia de aviso
 
 **Decisión: avisar a Uptime Kuma solo cuando el respaldo termina bien.**
 
@@ -160,7 +190,7 @@ silencio es peor que no tener respaldo, porque crees que estás cubierto.
 Con un monitor de tipo *Push*, Uptime Kuma espera un aviso cada 24 horas. **Si no llega, salta.** Da
 igual el motivo: fallo del respaldo, servidor apagado, red caída o disco desconectado.
 
-### 3.7 La prueba de restauración es obligatoria
+### 3.8 La prueba de restauración es obligatoria
 
 **Decisión: no se da el capítulo por terminado sin haber restaurado.**
 
@@ -172,7 +202,7 @@ rutas.
 **Todos ellos se descubren en la primera restauración.** La cuestión es si esa primera restauración
 ocurre hoy, con calma, o el día que el disco se muera.
 
-### 3.8 La contraseña, en dos sitios
+### 3.9 La contraseña, en dos sitios
 
 **Decisión: `/root/.restic-password` en el servidor **y** en tu gestor de contraseñas.**
 
@@ -258,6 +288,10 @@ Y ten la contraseña del repositorio delante, en tu gestor de contraseñas. La n
 y sin ella no tiene sentido empezar.
 
 ### Paso 1 — Prepara el disco USB
+
+> **Si vas a respaldar solo a un destino remoto, sáltate los pasos 1 y 2** y ve directo al paso 3.
+> Deja `RESTIC_USB_UUID` vacía y asegúrate de haber hecho antes el paso 12, que en ese caso deja de
+> ser opcional: es tu repositorio principal (§ 3.3).
 
 Conecta el disco e identifícalo:
 
@@ -679,7 +713,10 @@ sudo restic check --read-data-subset=5% \
 además **lee y descifra** una muestra de los datos, que es lo único que detecta un disco que se está
 degradando en silencio. Se incluye en la rutina mensual del capítulo 15.
 
-### Paso 12 — Repositorio remoto (opcional)
+### Paso 12 — Repositorio remoto
+
+> **Opcional solo si tienes disco local.** Sin disco, este paso es obligatorio y va **antes** del
+> paso 4: el remoto es el repositorio principal y no hay nada que inicializar hasta tenerlo (§ 3.3).
 
 El disco local protege contra el fallo del disco del servidor. No protege contra un incendio, una
 inundación o un robo: ambos discos están en la misma habitación.
@@ -700,6 +737,18 @@ B2_ACCOUNT_KEY=xxxxx
 # [servidor]
 sudo chmod 600 /etc/nomad/restic-remoto.env
 ```
+
+Ese archivo lo carga el servicio de systemd con `EnvironmentFile=-/etc/nomad/restic-remoto.env`. El
+guion inicial hace que el servicio arranque igual si el archivo no existe, que es el caso cuando no
+hay remoto. **Comprueba que esa línea está en tu unidad**, porque sin ella el respaldo funciona a
+mano y falla cada noche:
+
+```bash
+# [servidor]
+grep -n EnvironmentFile /etc/systemd/system/nomad-respaldo.service
+```
+
+Criterio de aceptación: aparece la línea.
 
 Y en `config/servidor.env`:
 

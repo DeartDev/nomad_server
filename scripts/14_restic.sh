@@ -77,17 +77,47 @@ requerir_variables RESTIC_USB_MOUNT RESTIC_REPO_LOCAL RESTIC_PASSWORD_FILE \
                    RESTIC_RETENCION_MENSUALES RESTIC_HORA DATOS_RAIZ \
                    ADMIN_USUARIO SERVIDOR_HOSTNAME
 
+# CUÁL ES EL REPOSITORIO PRINCIPAL
+#
+# Con disco USB, el principal es el local y el remoto recibe una copia de las
+# instantáneas ya cifradas. Sin disco USB, el principal es el remoto: es una
+# configuración legítima, y desde luego mejor que no tener respaldos, pero cada
+# respaldo viaja por la red y una restauración completa depende de tu bajada.
+ARCHIVO_CRED_REMOTO="/etc/nomad/restic-remoto.env"
+
+if [[ -n "${RESTIC_USB_UUID:-}" ]]; then
+    MODO_RESPALDO="local"
+    REPO_PRINCIPAL="${RESTIC_REPO_LOCAL}"
+else
+    MODO_RESPALDO="remoto"
+    REPO_PRINCIPAL="${RESTIC_REPO_REMOTO:-}"
+fi
+
+# Credenciales del remoto (B2_ACCOUNT_ID, AWS_ACCESS_KEY_ID…). Se cargan aquí
+# para que este script pueda hablar con el remoto; la unidad de systemd las
+# carga por su cuenta con EnvironmentFile.
+if [[ -r "${ARCHIVO_CRED_REMOTO}" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "${ARCHIVO_CRED_REMOTO}"
+    set +a
+fi
+
 # Atajos para no repetir los dos parámetros en cada llamada.
-r() { restic --repo "${RESTIC_REPO_LOCAL}" --password-file "${RESTIC_PASSWORD_FILE}" "$@"; }
+r() { restic --repo "${REPO_PRINCIPAL}" --password-file "${RESTIC_PASSWORD_FILE}" "$@"; }
 
 comprobar_repositorio() {
     command -v restic >/dev/null 2>&1 || die "restic no está instalado. Ejecuta: sudo $0 --instalar"
-    mountpoint -q "${RESTIC_USB_MOUNT}" \
-        || die "El disco de respaldo no está montado en ${RESTIC_USB_MOUNT}. ¿Está conectado?"
+    [[ -n "${REPO_PRINCIPAL}" ]] \
+        || die "No hay repositorio configurado: ni RESTIC_USB_UUID ni RESTIC_REPO_REMOTO."
+    if [[ "${MODO_RESPALDO}" == "local" ]]; then
+        mountpoint -q "${RESTIC_USB_MOUNT}" \
+            || die "El disco de respaldo no está montado en ${RESTIC_USB_MOUNT}. ¿Está conectado?"
+    fi
     [[ -r "${RESTIC_PASSWORD_FILE}" ]] \
         || die "No se puede leer ${RESTIC_PASSWORD_FILE}"
     r cat config >/dev/null 2>&1 \
-        || die "No se puede abrir el repositorio ${RESTIC_REPO_LOCAL}"
+        || die "No se puede abrir el repositorio ${REPO_PRINCIPAL}"
 }
 
 # ===========================================================================
@@ -97,7 +127,7 @@ case "${ACCION}" in
 
     listar)
         comprobar_repositorio
-        log_paso "Instantáneas de ${RESTIC_REPO_LOCAL}"
+        log_paso "Instantáneas de ${REPO_PRINCIPAL}"
         r snapshots
         exit 0
         ;;
@@ -158,10 +188,23 @@ case "${ACCION}" in
         RESULTADO="$(systemctl show nomad-respaldo.service -p Result --value 2>/dev/null || echo '?')"
         log_info "Resultado de la última ejecución: ${RESULTADO}"
 
-        if command -v restic >/dev/null 2>&1 && mountpoint -q "${RESTIC_USB_MOUNT}"; then
+        REPO_ACCESIBLE=0
+        if command -v restic >/dev/null 2>&1; then
+            if [[ "${MODO_RESPALDO}" == "local" ]]; then
+                mountpoint -q "${RESTIC_USB_MOUNT}" && REPO_ACCESIBLE=1
+            else
+                REPO_ACCESIBLE=1
+            fi
+        fi
+
+        if (( REPO_ACCESIBLE == 1 )); then
             log_info "Últimas instantáneas:"
             r snapshots --compact 2>/dev/null | tail -6 | sed 's/^/          /' || true
-            log_info "Tamaño del repositorio: $(du -sh "${RESTIC_REPO_LOCAL}" 2>/dev/null | cut -f1)"
+            if [[ "${MODO_RESPALDO}" == "local" ]]; then
+                log_info "Tamaño del repositorio: $(du -sh "${RESTIC_REPO_LOCAL}" 2>/dev/null | cut -f1)"
+            else
+                log_info "Tamaño del repositorio: $(r stats --mode raw-data 2>/dev/null | grep -i 'total size' | cut -d: -f2 | tr -d ' ')"
+            fi
 
             ULTIMA="$(r snapshots --json 2>/dev/null | jq -r '.[-1].time // empty' 2>/dev/null || true)"
             if [[ -n "${ULTIMA}" ]]; then
@@ -258,17 +301,48 @@ esac
 # ---------------------------------------------------------------------------
 log_paso "1/6 · Disco de respaldo"
 
-if [[ -z "${RESTIC_USB_UUID:-}" ]]; then
-    log_error "RESTIC_USB_UUID está vacío en config/servidor.env."
-    log_error ""
-    log_error "Conecta el disco, identifícalo y formatéalo siguiendo el paso 1"
-    log_error "del capítulo 14. Después obtén su UUID con:"
-    log_error "    sudo blkid /dev/sdX1"
-    log_error ""
-    log_error "Discos disponibles:"
-    lsblk -o NAME,SIZE,MODEL,TRAN,FSTYPE,UUID,MOUNTPOINTS | sed 's/^/          /' >&2
-    exit 1
+# Sin disco USB se respalda directamente contra el remoto. Es una configuración
+# admitida, pero renuncia a la copia local: exige que el remoto esté bien
+# configurado, porque será el único sitio donde vivan tus respaldos.
+if [[ "${MODO_RESPALDO}" == "remoto" ]]; then
+    log_sinca "Sin disco USB (RESTIC_USB_UUID vacío): se respalda solo al remoto."
+
+    [[ -n "${REPO_PRINCIPAL}" ]] || {
+        log_error "Sin disco USB y sin RESTIC_REPO_REMOTO no hay dónde respaldar."
+        log_error "Rellena una de las dos en config/servidor.env:"
+        log_error "  · RESTIC_USB_UUID   — disco conectado al servidor"
+        log_error "  · RESTIC_REPO_REMOTO — destino remoto (b2:, s3:, sftp:, rclone:)"
+        log_error ""
+        log_error "Discos disponibles, por si prefieres el USB:"
+        lsblk -o NAME,SIZE,MODEL,TRAN,FSTYPE,UUID,MOUNTPOINTS | sed 's/^/          /' >&2
+        exit 1
+    }
+
+    log_ok "Repositorio remoto: ${REPO_PRINCIPAL}"
+
+    # Los destinos que no llevan credenciales en la propia URL las necesitan en
+    # el archivo de entorno. 'sftp:' con clave SSH es la excepción.
+    if [[ "${REPO_PRINCIPAL}" != sftp:* ]] && [[ ! -r "${ARCHIVO_CRED_REMOTO}" ]]; then
+        log_error "Falta ${ARCHIVO_CRED_REMOTO} con las credenciales del remoto."
+        log_error "Créalo con permisos 600. Para Backblaze B2, por ejemplo:"
+        log_error "    B2_ACCOUNT_ID=…"
+        log_error "    B2_ACCOUNT_KEY=…"
+        log_error "Ver docs/14_respaldos_restic.md § 5 paso 12."
+        exit 1
+    fi
+
+    if [[ -r "${ARCHIVO_CRED_REMOTO}" ]]; then
+        PERM_CRED="$(stat -c '%a' "${ARCHIVO_CRED_REMOTO}")"
+        if [[ "${PERM_CRED}" == "600" ]]; then
+            log_ok "Credenciales del remoto con permisos correctos (600)."
+        else
+            log_aviso "${ARCHIVO_CRED_REMOTO} tiene permisos ${PERM_CRED}; deben ser 600."
+            ejecutar chmod 600 "${ARCHIVO_CRED_REMOTO}"
+        fi
+    fi
 fi
+
+if [[ "${MODO_RESPALDO}" == "local" ]]; then
 
 if [[ -e "/dev/disk/by-uuid/${RESTIC_USB_UUID}" ]]; then
     log_ok "El disco con UUID ${RESTIC_USB_UUID} está presente."
@@ -318,6 +392,7 @@ if (( MODO_CHECK == 0 )); then
     fi
     df -h "${RESTIC_USB_MOUNT}" | tail -1 | sed 's/^/          /'
 fi
+fi   # fin del bloque del disco USB
 
 # ---------------------------------------------------------------------------
 #  2. restic y contraseña
@@ -358,14 +433,18 @@ fi
 log_paso "3/6 · Repositorio"
 
 if (( MODO_CHECK == 1 )); then
-    log_check "inicializaría el repositorio en ${RESTIC_REPO_LOCAL} si no existiera"
+    log_check "inicializaría el repositorio en ${REPO_PRINCIPAL} si no existiera"
 elif r cat config >/dev/null 2>&1; then
-    log_sinca "El repositorio ya existe en ${RESTIC_REPO_LOCAL}."
+    log_sinca "El repositorio ya existe en ${REPO_PRINCIPAL}."
 else
-    mkdir -p "${RESTIC_REPO_LOCAL}"
-    r init || die "No se ha podido inicializar el repositorio."
+    # 'mkdir' solo tiene sentido para un repositorio en disco: los remotos los
+    # crea restic contra el servicio.
+    [[ "${MODO_RESPALDO}" == "local" ]] && mkdir -p "${REPO_PRINCIPAL}"
+    r init || die "No se ha podido inicializar el repositorio ${REPO_PRINCIPAL}."
     marcar_cambio
-    log_ok "Repositorio creado."
+    log_ok "Repositorio creado en ${REPO_PRINCIPAL}."
+    log_aviso "APUNTA LA CONTRASEÑA EN TU GESTOR AHORA, fuera de este servidor."
+    log_aviso "Sin ella este repositorio es ruido cifrado y no hay forma de abrirlo."
 fi
 
 # ---------------------------------------------------------------------------
@@ -398,6 +477,30 @@ instalar_plantilla systemd/nomad-respaldo.service \
     /etc/systemd/system/nomad-respaldo.service 644 root:root
 instalar_plantilla systemd/nomad-respaldo.timer \
     /etc/systemd/system/nomad-respaldo.timer 644 root:root
+
+# 'RequiresMountsFor' va en un añadido y no en la unidad: con disco es lo
+# correcto, y sin disco dejaría el respaldo esperando para siempre un montaje
+# que nadie va a hacer.
+DIR_ANADIDO="/etc/systemd/system/nomad-respaldo.service.d"
+ANADIDO_USB="${DIR_ANADIDO}/10-disco-usb.conf"
+
+if [[ "${MODO_RESPALDO}" == "local" ]]; then
+    (( MODO_CHECK == 0 )) && mkdir -p "${DIR_ANADIDO}"
+    instalar_plantilla systemd/nomad-respaldo-disco-usb.conf \
+        "${ANADIDO_USB}" 644 root:root
+elif [[ -f "${ANADIDO_USB}" ]]; then
+    if (( MODO_CHECK == 1 )); then
+        log_check "retiraría ${ANADIDO_USB} (ya no hay disco USB)"
+        marcar_cambio
+    else
+        respaldar_archivo "${ANADIDO_USB}"
+        rm -f "${ANADIDO_USB}"
+        marcar_cambio
+        log_ok "Retirado ${ANADIDO_USB}: ya no se espera ningún disco."
+    fi
+else
+    log_sinca "Sin dependencia de disco en el servicio: se respalda al remoto."
+fi
 
 if (( MODO_CHECK == 0 )); then
     systemctl daemon-reload
