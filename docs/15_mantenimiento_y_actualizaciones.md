@@ -254,11 +254,41 @@ apt list --upgradable
 Las actualizaciones de seguridad ya se aplicaron solas. Aquí aparece lo que `unattended-upgrades` no
 toca: paquetes que requieren instalar o eliminar otros.
 
+> **Antes de lanzar esto, mira por dónde estás conectado.** Si administras por Tailscale —lo
+> normal en este montaje— y la actualización incluye el paquete `tailscale`, al instalarlo se
+> reinicia `tailscaled`, **cae la interfaz por la que viaja tu sesión SSH** y el terminal muere con
+> `apt` a medias. Reanudar de eso es reparar `dpkg` a mano, y hacerlo desde una sesión que también
+> se puede caer.
+>
+> Hay dos formas de no pasar por ahí, y basta con una:
+>
+> ```bash
+> # [servidor] — dentro de tmux, la sesión sobrevive a que se corte el SSH
+> tmux new -s mantenimiento
+> # …y si te desconecta:  ssh nomad  →  tmux attach -t mantenimiento
+> ```
+>
+> ```bash
+> # [cliente] — o conéctate por la LAN, que no depende de Tailscale
+> ssh ${ADMIN_USUARIO}@${LAN_IP}
+> ```
+>
+> Lo mismo vale para cualquier actualización larga: `tmux` cuesta cinco segundos y evita la única
+> forma habitual de romper un servidor durante el mantenimiento.
+
 ```bash
-# [servidor]
+# [servidor] — dentro de tmux
 sudo apt full-upgrade
 sudo apt autoremove --purge
 ```
+
+```bash
+# [servidor] — si actualizaste tailscale, comprueba que volvió
+tailscale status --peers=false
+```
+
+Criterio: aparece el servidor con su IP. Si no vuelve en un minuto,
+`sudo systemctl restart tailscaled`.
 
 ```bash
 # [servidor] — ¿queda algún reinicio pendiente?
