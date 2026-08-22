@@ -113,7 +113,9 @@ nomad_diff etc/nftables.conf /etc/nftables.conf
 
 ```bash
 # [servidor] — copia previa e instalación
-sudo cp -a /etc/nftables.conf /etc/nftables.conf.bak-$(date +%Y%m%d-%H%M%S)
+sudo mkdir -p /var/backups/nomad/config$(dirname /etc/nftables.conf)
+sudo cp -a /etc/nftables.conf \
+    /var/backups/nomad/config/etc/nftables.conf.bak-$(date +%Y%m%d-%H%M%S)
 nomad_plantilla etc/nftables.conf | sudo tee /etc/nftables.conf >/dev/null
 sudo chmod 640 /etc/nftables.conf
 ```

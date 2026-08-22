@@ -400,8 +400,9 @@ Primero, la copia de seguridad. Es lo que hacen los scripts por ti y lo que perm
 
 ```bash
 # [servidor]
+sudo mkdir -p /var/backups/nomad/config$(dirname /etc/apt/sources.list.d/debian.sources)
 sudo cp -a /etc/apt/sources.list.d/debian.sources \
-        /etc/apt/sources.list.d/debian.sources.bak-$(date +%Y%m%d-%H%M%S)
+/var/backups/nomad/config/etc/apt/sources.list.d/debian.sources.bak-$(date +%Y%m%d-%H%M%S)
 ```
 
 **Así queda el archivo** (con los valores de ejemplo, para poder leerlo):
@@ -520,7 +521,9 @@ ff02::2         ip6-allrouters
 
 ```bash
 # [servidor]
-sudo cp -a /etc/hosts /etc/hosts.bak-$(date +%Y%m%d-%H%M%S)
+sudo mkdir -p /var/backups/nomad/config$(dirname /etc/hosts)
+sudo cp -a /etc/hosts \
+    /var/backups/nomad/config/etc/hosts.bak-$(date +%Y%m%d-%H%M%S)
 sudo tee /etc/hosts >/dev/null <<EOF
 127.0.0.1       localhost
 127.0.1.1       ${SERVIDOR_HOSTNAME}.${SERVIDOR_DOMINIO_LOCAL} ${SERVIDOR_HOSTNAME}

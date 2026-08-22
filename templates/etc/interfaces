@@ -15,8 +15,9 @@
 #      cd ~/nomad_server
 #      source scripts/lib/entorno.sh
 #      nomad_diff etc/interfaces /etc/network/interfaces
+#      sudo mkdir -p /var/backups/nomad/config$(dirname /etc/network/interfaces)
 #      sudo cp -a /etc/network/interfaces \
-#          /etc/network/interfaces.bak-$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
+#          /var/backups/nomad/config/etc/network/interfaces.bak-$(date +%Y%m%d-%H%M%S)
 #      nomad_plantilla etc/interfaces \
 #          | sudo tee /etc/network/interfaces >/dev/null
 #      sudo chmod 644 /etc/network/interfaces

@@ -363,11 +363,33 @@ confirmar() {
 # veces en un bucle cae en el mismo segundo y cada copia pisaría a la anterior,
 # dejando una sola que ya no refleja el estado original. Por eso, si el nombre
 # está ocupado, se añade un contador.
+# Directorio donde van las copias de los archivos de /etc. Ver respaldar_archivo.
+NOMAD_RESPALDOS_CONFIG="/var/backups/nomad/config"
+
 respaldar_archivo() {
     local archivo="$1"
     [[ -e "${archivo}" ]] || return 0
+
+    # LAS COPIAS DE /etc NO SE DEJAN EN /etc
+    #
+    # Media docena de directorios de /etc los lee el sistema EN BLOQUE:
+    # apt.conf.d, sources.list.d, sysctl.d, sshd_config.d, systemd/system…
+    # Dejar ahí un 'archivo.bak-20260821-120000' hace que apt avise en cada
+    # ejecución, y basta con que una extensión coincida con la que ese
+    # directorio carga para que la copia se aplique como si fuera
+    # configuración. Se guardan aparte, replicando el árbol para poder
+    # encontrarlas: /etc/apt/apt.conf.d/20auto-upgrades acaba en
+    # /var/backups/nomad/config/etc/apt/apt.conf.d/20auto-upgrades.bak-<fecha>
+    #
+    # Lo que no está en /etc —los archivos de los proyectos, propiedad del
+    # usuario— se respalda al lado del original, que es donde resulta cómodo
+    # encontrarlo y no estorba a nadie.
     local base destino n=0
-    base="${archivo}.bak-$(date +%Y%m%d-%H%M%S)"
+    if [[ "${archivo}" == /etc/* ]]; then
+        base="${NOMAD_RESPALDOS_CONFIG}${archivo}.bak-$(date +%Y%m%d-%H%M%S)"
+    else
+        base="${archivo}.bak-$(date +%Y%m%d-%H%M%S)"
+    fi
     destino="${base}"
     while [[ -e "${destino}" ]]; do
         n=$((n + 1))
@@ -377,6 +399,7 @@ respaldar_archivo() {
         log_check "respaldaría ${archivo} → ${destino}"
         return 0
     fi
+    mkdir -p "$(dirname "${destino}")"
     cp -a "${archivo}" "${destino}"
     log_info "Copia de seguridad: ${destino}"
 }

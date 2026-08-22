@@ -12,8 +12,9 @@
 #      cd ~/nomad_server
 #      source scripts/lib/entorno.sh
 #      nomad_diff etc/restic-excluir.txt /etc/nomad/restic-excluir.txt
+#      sudo mkdir -p /var/backups/nomad/config$(dirname /etc/nomad/restic-excluir.txt)
 #      sudo cp -a /etc/nomad/restic-excluir.txt \
-#          /etc/nomad/restic-excluir.txt.bak-$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
+#          /var/backups/nomad/config/etc/nomad/restic-excluir.txt.bak-$(date +%Y%m%d-%H%M%S)
 #      nomad_plantilla etc/restic-excluir.txt \
 #          | sudo tee /etc/nomad/restic-excluir.txt >/dev/null
 #      sudo chmod 644 /etc/nomad/restic-excluir.txt

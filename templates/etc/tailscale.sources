@@ -14,8 +14,9 @@
 #      cd ~/nomad_server
 #      source scripts/lib/entorno.sh
 #      nomad_diff etc/tailscale.sources /etc/apt/sources.list.d/tailscale.sources
+#      sudo mkdir -p /var/backups/nomad/config$(dirname /etc/apt/sources.list.d/tailscale.sources)
 #      sudo cp -a /etc/apt/sources.list.d/tailscale.sources \
-#          /etc/apt/sources.list.d/tailscale.sources.bak-$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
+#          /var/backups/nomad/config/etc/apt/sources.list.d/tailscale.sources.bak-$(date +%Y%m%d-%H%M%S)
 #      nomad_plantilla etc/tailscale.sources \
 #          | sudo tee /etc/apt/sources.list.d/tailscale.sources >/dev/null
 #      sudo chmod 644 /etc/apt/sources.list.d/tailscale.sources

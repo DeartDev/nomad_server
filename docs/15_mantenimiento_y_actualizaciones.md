@@ -468,7 +468,9 @@ apt-mark showhold
 
 ```bash
 # [servidor] — 3. cambiar la suite en los repositorios
-sudo cp /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list.d/debian.sources.bak-$(date +%F)
+sudo mkdir -p /var/backups/nomad/config/etc/apt/sources.list.d
+sudo cp -a /etc/apt/sources.list.d/debian.sources \
+    /var/backups/nomad/config/etc/apt/sources.list.d/debian.sources.bak-$(date +%F)
 sudo sed -i 's/trixie/forky/g' /etc/apt/sources.list.d/debian.sources
 sudo apt update
 ```

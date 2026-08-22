@@ -9,8 +9,9 @@
 #      cd ~/nomad_server
 #      source scripts/lib/entorno.sh
 #      nomad_diff systemd/nomad-respaldo.service /etc/systemd/system/nomad-respaldo.service
+#      sudo mkdir -p /var/backups/nomad/config$(dirname /etc/systemd/system/nomad-respaldo.service)
 #      sudo cp -a /etc/systemd/system/nomad-respaldo.service \
-#          /etc/systemd/system/nomad-respaldo.service.bak-$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
+#          /var/backups/nomad/config/etc/systemd/system/nomad-respaldo.service.bak-$(date +%Y%m%d-%H%M%S)
 #      nomad_plantilla systemd/nomad-respaldo.service \
 #          | sudo tee /etc/systemd/system/nomad-respaldo.service >/dev/null
 #      sudo chmod 644 /etc/systemd/system/nomad-respaldo.service

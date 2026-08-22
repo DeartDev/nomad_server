@@ -442,7 +442,9 @@ Criterio de aceptación: imprime un UUID de cinco grupos separados por guiones. 
 ```bash
 # [servidor]
 sudo mkdir -p ${RESTIC_USB_MOUNT}
-sudo cp -a /etc/fstab /etc/fstab.bak-$(date +%Y%m%d-%H%M%S)
+sudo mkdir -p /var/backups/nomad/config$(dirname /etc/fstab)
+sudo cp -a /etc/fstab \
+    /var/backups/nomad/config/etc/fstab.bak-$(date +%Y%m%d-%H%M%S)
 ```
 
 **Así queda la línea** (con el UUID de ejemplo):

@@ -306,7 +306,9 @@ Copia previa, siempre:
 
 ```bash
 # [servidor]
-sudo cp -a /etc/nftables.conf /etc/nftables.conf.bak-$(date +%Y%m%d-%H%M%S)
+sudo mkdir -p /var/backups/nomad/config$(dirname /etc/nftables.conf)
+sudo cp -a /etc/nftables.conf \
+    /var/backups/nomad/config/etc/nftables.conf.bak-$(date +%Y%m%d-%H%M%S)
 ```
 
 **Antes de escribir, mira qué va a cambiar.** Esto renderiza la plantilla con tus valores y la
@@ -528,7 +530,9 @@ Esta parte **sí** corta tu sesión SSH: vas a cambiar la dirección a la que es
 
 ```bash
 # [servidor]
-sudo cp -a /etc/network/interfaces /etc/network/interfaces.bak-$(date +%Y%m%d-%H%M%S)
+sudo mkdir -p /var/backups/nomad/config$(dirname /etc/network/interfaces)
+sudo cp -a /etc/network/interfaces \
+    /var/backups/nomad/config/etc/network/interfaces.bak-$(date +%Y%m%d-%H%M%S)
 ```
 
 **Así queda el archivo** (con los valores de ejemplo):
@@ -604,7 +608,9 @@ separados por espacios, así que hay que convertir cada uno en una línea `names
 
 ```bash
 # [servidor]
-sudo cp -a /etc/resolv.conf /etc/resolv.conf.bak-$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
+sudo mkdir -p /var/backups/nomad/config$(dirname /etc/resolv.conf)
+sudo cp -a /etc/resolv.conf \
+    /var/backups/nomad/config/etc/resolv.conf.bak-$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
 {
     echo "# Generado siguiendo docs/06_red_y_firewall.md — $(date +%F)"
     for ns in ${LAN_DNS}; do echo "nameserver ${ns}"; done
