@@ -175,11 +175,16 @@ case "${ACCION}" in
     estado)
         log_paso "Estado del sistema de respaldos"
 
-        if mountpoint -q "${RESTIC_USB_MOUNT}"; then
-            log_ok "Disco montado en ${RESTIC_USB_MOUNT}"
-            df -h "${RESTIC_USB_MOUNT}" | tail -1 | sed 's/^/          /'
+        if [[ "${MODO_RESPALDO}" == "local" ]]; then
+            if mountpoint -q "${RESTIC_USB_MOUNT}"; then
+                log_ok "Disco montado en ${RESTIC_USB_MOUNT}"
+                df -h "${RESTIC_USB_MOUNT}" | tail -1 | sed 's/^/          /'
+            else
+                log_error "El disco NO está montado. Los respaldos están fallando."
+            fi
         else
-            log_error "El disco NO está montado. Los respaldos están fallando."
+            log_ok "Modo remoto: ${REPO_PRINCIPAL}"
+            log_sinca "Sin disco local. Restaurar depende de tu conexión."
         fi
 
         if systemctl is-enabled --quiet nomad-respaldo.timer 2>/dev/null; then
