@@ -183,9 +183,9 @@ cd ~/nomad_server
 # ---------------------------------------------------------------------------
 # Estos dos pasos necesitan navegador y NO tienen script:
 docker run --rm -it -v ~/.cloudflared:/home/nonroot/.cloudflared \
-    cloudflare/cloudflared:2026.7.3 tunnel login
+    cloudflare/cloudflared:2026.8.2 tunnel login
 docker run --rm -it -v ~/.cloudflared:/home/nonroot/.cloudflared \
-    cloudflare/cloudflared:2026.7.3 tunnel create nomad-tunnel
+    cloudflare/cloudflared:2026.8.2 tunnel create nomad-tunnel
 # → anota el UUID que imprime y persístelo:
 ./scripts/variables.sh --fijar CF_TUNEL_ID=<uuid-que-ha-impreso>
 

@@ -249,6 +249,22 @@ comprobar_scripts() {
         printf '%s\n' "${escuchas}" | sed 's/^/          /'
     fi
 
+    # La versión de cloudflared aparece en la plantilla, en el script y en tres
+    # capítulos, porque los comandos de creación del túnel se ejecutan a mano.
+    # Subirla significa tocar una docena de sitios, y basta con olvidar uno para
+    # que la documentación mande usar una versión distinta de la que corre.
+    local versiones
+    versiones="$(grep -rhoE 'cloudflared:[0-9]{4}\.[0-9]+\.[0-9]+' \
+                 templates/ scripts/ docs/ 2>/dev/null | sort -u || true)"
+    local cuantas
+    cuantas="$(printf '%s\n' "${versiones}" | grep -c . || true)"
+    if (( cuantas <= 1 )); then
+        log_ok "la versión de cloudflared es la misma en todo el repositorio"
+    else
+        fallo "hay ${cuantas} versiones distintas de cloudflared:"
+        printf '%s\n' "${versiones}" | sed 's/^/          /'
+    fi
+
     # Una lista 'condicion && accion' como ÚLTIMA orden de una función hace que
     # la función devuelva 1 cuando la condición es falsa, y con 'set -e' eso
     # aborta el script al llamarla. Lo perverso es que falla en el caso bueno:

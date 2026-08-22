@@ -16,7 +16,7 @@ set -euo pipefail
 # shellcheck source=lib/common.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
 
-IMAGEN_CF="cloudflare/cloudflared:2026.7.3"
+IMAGEN_CF="cloudflare/cloudflared:2026.8.2"
 RUTA_NUEVA=""
 
 mostrar_ayuda() {
@@ -47,10 +47,10 @@ Opciones:
 ANTES de ejecutarlo hay que crear el túnel a mano (necesita navegador):
 
     docker run --rm -it -v ~/.cloudflared:/home/nonroot/.cloudflared \
-        cloudflare/cloudflared:2026.7.3 tunnel login
+        cloudflare/cloudflared:2026.8.2 tunnel login
 
     docker run --rm -it -v ~/.cloudflared:/home/nonroot/.cloudflared \
-        cloudflare/cloudflared:2026.7.3 tunnel create <nombre>
+        cloudflare/cloudflared:2026.8.2 tunnel create <nombre>
 
 Y anotar el UUID resultante en CF_TUNEL_ID, dentro de config/servidor.env.
 AYUDA

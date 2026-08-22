@@ -276,7 +276,7 @@ puntualmente desde el propio servidor:
 mkdir -p ~/.cloudflared
 docker run --rm -it \
     -v ~/.cloudflared:/home/nonroot/.cloudflared \
-    cloudflare/cloudflared:2026.7.3 tunnel login
+    cloudflare/cloudflared:2026.8.2 tunnel login
 ```
 
 Imprime una URL. Ábrela en tu navegador, inicia sesión y **autoriza el dominio**.
@@ -291,7 +291,7 @@ el túnel.
 # [servidor]
 docker run --rm -it \
     -v ~/.cloudflared:/home/nonroot/.cloudflared \
-    cloudflare/cloudflared:2026.7.3 tunnel create ${CF_TUNEL_NOMBRE}
+    cloudflare/cloudflared:2026.8.2 tunnel create ${CF_TUNEL_NOMBRE}
 ```
 
 Salida esperada:
@@ -318,7 +318,7 @@ Criterio de aceptación: imprime el UUID completo, con sus cinco grupos separado
 ```bash
 # [servidor]
 docker run --rm -v ~/.cloudflared:/home/nonroot/.cloudflared \
-    cloudflare/cloudflared:2026.7.3 tunnel list
+    cloudflare/cloudflared:2026.8.2 tunnel list
 ```
 
 Salida de ejemplo:
@@ -416,7 +416,7 @@ Un registro por subdominio. Para empezar, uno de prueba:
 # [servidor]
 docker run --rm -it \
     -v ~/.cloudflared:/home/nonroot/.cloudflared \
-    cloudflare/cloudflared:2026.7.3 \
+    cloudflare/cloudflared:2026.8.2 \
     tunnel route dns ${CF_TUNEL_NOMBRE} prueba.${DOMINIO_PUBLICO}
 ```
 
@@ -533,7 +533,7 @@ Este es el procedimiento completo para cada proyecto nuevo:
 ```bash
 # [servidor] — 1. crear el registro DNS (una vez por subdominio)
 docker run --rm -v ~/.cloudflared:/home/nonroot/.cloudflared \
-    cloudflare/cloudflared:2026.7.3 \
+    cloudflare/cloudflared:2026.8.2 \
     tunnel route dns ${CF_TUNEL_NOMBRE} mi-proyecto.${DOMINIO_PUBLICO}
 ```
 
@@ -755,7 +755,7 @@ cd ${CF_CONFIG_DIR} && docker compose down
 ```bash
 # [servidor] — eliminar un registro DNS
 docker run --rm -v ~/.cloudflared:/home/nonroot/.cloudflared \
-    cloudflare/cloudflared:2026.7.3 \
+    cloudflare/cloudflared:2026.8.2 \
     tunnel route dns --overwrite-dns ${CF_TUNEL_NOMBRE} prueba.${DOMINIO_PUBLICO}
 ```
 
@@ -765,7 +765,7 @@ También se pueden borrar desde el panel, en **DNS → Records**.
 # [servidor] — eliminar el túnel por completo
 cd ${CF_CONFIG_DIR} && docker compose down
 docker run --rm -v ~/.cloudflared:/home/nonroot/.cloudflared \
-    cloudflare/cloudflared:2026.7.3 tunnel delete ${CF_TUNEL_NOMBRE}
+    cloudflare/cloudflared:2026.8.2 tunnel delete ${CF_TUNEL_NOMBRE}
 rm -rf ${CF_CONFIG_DIR}
 ```
 
