@@ -280,10 +280,14 @@ docker compose ps
 Y comprueba antes de seguir:
 
 ```bash
-# [servidor]
+# [servidor] — sustituye 'miproyecto' por uno tuyo que esté publicado
 docker exec traefik traefik healthcheck --ping
-curl -sI https://prueba.${DOMINIO_PUBLICO} | head -1
+curl -sI https://miproyecto.${DOMINIO_PUBLICO} | head -1
 ```
+
+Criterio: `OK` y `HTTP/2 200`. Si Traefik responde pero el proyecto da `404`, la versión nueva ha
+cambiado algo del descubrimiento de contenedores: vuelve a la etiqueta anterior en el
+`docker-compose.yml` y levanta otra vez antes de investigar. Con el sitio en pie se piensa mejor.
 
 ```bash
 # [servidor] — cloudflared
@@ -328,12 +332,35 @@ docker volume ls -f dangling=true
 Revísalos **antes** de borrarlos. Este montaje usa montajes de directorio, así que no debería haber
 volúmenes con datos.
 
-**Paso 6 — Verificar los respaldos.**
+**Paso 6 — Verificar los respaldos.** Son dos comprobaciones distintas y hacen falta las dos.
 
 ```bash
-# [servidor]
-sudo ./scripts/14_restic.sh --verificar
+# [servidor] — integridad de los DATOS, no solo de la estructura
+sudo ./scripts/14_restic.sh --verificar-datos
 ```
+
+`--verificar` a secas comprueba que la estructura del repositorio es coherente, y es rápido porque
+no lee el contenido. `--verificar-datos` **descarga y descifra una muestra del 5 %**, que es lo
+único que detecta un repositorio degradándose en silencio: un disco con sectores que empiezan a
+fallar, o un objeto que el proveedor perdió. Ese fallo no se nota nunca hasta que restauras, y
+entonces ya no hay nada que hacer.
+
+Con repositorio remoto, este comando además **mide tu velocidad real de descarga**. Si el 5 % tarda
+diez minutos, restaurar el 100 % te llevará más de tres horas: conviene saberlo antes de necesitarlo,
+no durante.
+
+```bash
+# [servidor] — y la prueba de restauración, que es otra cosa
+sudo ./scripts/14_restic.sh --probar
+```
+
+Verificar comprueba que los datos **están íntegros**; restaurar comprueba que **sirven**. Un
+repositorio puede pasar `--verificar-datos` sin un fallo y aun así no permitirte reconstruir el
+servidor, porque falte un archivo que nunca se respaldó o porque los permisos no se conserven. Son
+preguntas distintas y las dos importan.
+
+La prueba deja la fecha en `/var/backups/nomad/ultima-prueba-restauracion`, y la rutina semanal
+protesta si pasa de un mes. Si estás leyendo esto porque la semanal protestó, este es el paso.
 
 **Paso 7 — Revisar los registros.**
 
