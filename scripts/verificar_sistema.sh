@@ -374,17 +374,32 @@ verificar_respaldos() {
         return
     fi
 
-    if mountpoint -q "${RESTIC_USB_MOUNT:-/mnt/respaldo}" 2>/dev/null; then
-        log_ok "Disco de respaldo montado."
-        local libre
-        libre="$(df -BG --output=avail "${RESTIC_USB_MOUNT}" 2>/dev/null | tail -1 | tr -dc '0-9')"
-        if (( libre < 10 )); then
-            fallo "Solo quedan ${libre} GB en el disco de respaldo."
+    # Con RESTIC_USB_UUID vacía el respaldo va directo al remoto y no hay disco
+    # que montar: exigirlo informaba de un fallo inexistente (capítulo 14 § 3.3).
+    local repo_principal modo_respaldo
+    if [[ -n "${RESTIC_USB_UUID:-}" ]]; then
+        modo_respaldo="local"
+        repo_principal="${RESTIC_REPO_LOCAL}"
+        if mountpoint -q "${RESTIC_USB_MOUNT:-/mnt/respaldo}" 2>/dev/null; then
+            log_ok "Disco de respaldo montado."
+            local libre
+            libre="$(df -BG --output=avail "${RESTIC_USB_MOUNT}" 2>/dev/null | tail -1 | tr -dc '0-9')"
+            if (( libre < 10 )); then
+                fallo "Solo quedan ${libre} GB en el disco de respaldo."
+            else
+                log_ok "Espacio libre en el disco de respaldo: ${libre} GB."
+            fi
         else
-            log_ok "Espacio libre en el disco de respaldo: ${libre} GB."
+            fallo "El disco de respaldo NO está montado: los respaldos están fallando."
         fi
     else
-        fallo "El disco de respaldo NO está montado: los respaldos están fallando."
+        modo_respaldo="remoto"
+        repo_principal="${RESTIC_REPO_REMOTO:-}"
+        if [[ -n "${repo_principal}" ]]; then
+            log_ok "Respaldo remoto: ${repo_principal}"
+        else
+            fallo "Ni disco USB ni destino remoto: NO hay respaldos configurados."
+        fi
     fi
 
     if systemctl is-enabled --quiet nomad-respaldo.timer 2>/dev/null; then
@@ -401,11 +416,22 @@ verificar_respaldos() {
         *)       fallo "La última ejecución del respaldo terminó con: ${resultado}" ;;
     esac
 
-    if puede_sudo && mountpoint -q "${RESTIC_USB_MOUNT:-/mnt/respaldo}" 2>/dev/null; then
+    local repo_accesible=0
+    if puede_sudo && [[ -n "${repo_principal}" ]]; then
+        if [[ "${modo_respaldo}" == "local" ]]; then
+            mountpoint -q "${RESTIC_USB_MOUNT:-/mnt/respaldo}" 2>/dev/null && repo_accesible=1
+        else
+            repo_accesible=1
+        fi
+    fi
+
+    if (( repo_accesible == 1 )); then
         local ultima horas
-        ultima="$(sudo restic snapshots --json \
-                    --repo "${RESTIC_REPO_LOCAL}" \
-                    --password-file "${RESTIC_PASSWORD_FILE}" 2>/dev/null \
+        # '-E' conserva las credenciales del proveedor remoto, que sudo borraría.
+        ultima="$(sudo -E bash -c '
+                    [[ -r /etc/nomad/restic-remoto.env ]] && { set -a; . /etc/nomad/restic-remoto.env; set +a; }
+                    restic snapshots --json --repo "$1" --password-file "$2"' \
+                    _ "${repo_principal}" "${RESTIC_PASSWORD_FILE}" 2>/dev/null \
                   | jq -r '.[-1].time // empty' 2>/dev/null || true)"
         if [[ -n "${ultima}" ]]; then
             horas=$(( ( $(date +%s) - $(date -d "${ultima}" +%s) ) / 3600 ))
@@ -418,7 +444,21 @@ verificar_respaldos() {
             aviso "No se han podido leer las instantáneas del repositorio."
         fi
     else
-        aviso "Sin sudo o sin disco: se omite la comprobación de instantáneas."
+        aviso "Sin sudo o sin repositorio accesible: se omite la comprobación de instantáneas."
+    fi
+
+    # Tener respaldos y saber que sirven son cosas distintas.
+    local marca="/var/backups/nomad/ultima-prueba-restauracion"
+    if [[ -r "${marca}" ]]; then
+        local dias
+        dias=$(( ( $(date +%s) - $(date -d "$(cat "${marca}")" +%s) ) / 86400 ))
+        if (( dias <= 40 )); then
+            log_ok "Prueba de restauración superada hace ${dias} días."
+        else
+            fallo "La última prueba de restauración tiene ${dias} días."
+        fi
+    else
+        fallo "NUNCA se ha superado una prueba de restauración."
     fi
 }
 

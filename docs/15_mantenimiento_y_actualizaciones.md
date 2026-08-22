@@ -206,10 +206,12 @@ Criterio: todos `Up` y `(healthy)`.
 
 ```bash
 # [servidor] — ¿queda espacio?
-df -h / /var /srv ${RESTIC_USB_MOUNT}
+df -h / /var /srv
+[ -n "${RESTIC_USB_UUID}" ] && df -h ${RESTIC_USB_MOUNT}
 ```
 
-Criterio: ninguno por encima del 80 %.
+Criterio: ninguno por encima del 80 %. El disco de respaldo solo se comprueba si lo hay: con
+respaldo remoto, `${RESTIC_USB_MOUNT}` no existe y `df` daría un error que no significa nada.
 
 ```bash
 # [servidor] — ¿se hizo el respaldo de anoche?
@@ -222,6 +224,15 @@ Criterio: la última copia tiene menos de 30 horas.
 # [servidor] — ¿hay errores nuevos?
 journalctl -p err --since "7 days ago" --no-pager | tail -20
 ```
+
+```bash
+# [servidor] — ¿sigue vigente la prueba de restauración?
+cat /var/backups/nomad/ultima-prueba-restauracion 2>/dev/null \
+    || echo "NUNCA se ha probado una restauración"
+```
+
+Criterio: la fecha tiene menos de un mes. Es la comprobación que separa «tengo respaldos» de «sé
+que sirven», y la que más se deja para después.
 
 ### 5.2 Rutina mensual — 15 minutos
 
