@@ -453,7 +453,26 @@ fi
 log_paso "4/6 · Exclusiones y script de respaldo"
 
 if (( MODO_CHECK == 0 )); then
-    mkdir -p /etc/nomad /var/backups/nomad
+    # 'pre-respaldo.d' guarda los volcados de bases de datos que deben hacerse
+    # ANTES del respaldo. Se crea vacío: cada proyecto pone el suyo.
+    mkdir -p /etc/nomad /etc/nomad/pre-respaldo.d /var/backups/nomad
+    chmod 700 /etc/nomad/pre-respaldo.d
+fi
+
+# Aviso si hay bases de datos en marcha y ningún gancho que las vuelque: el
+# respaldo saldría en verde con un directorio de datos copiado en caliente, que
+# no sirve para restaurar.
+if (( MODO_CHECK == 0 )) && command -v docker >/dev/null 2>&1; then
+    BASES_EN_MARCHA="$(docker ps --format '{{.Names}}\t{{.Image}}' 2>/dev/null \
+        | grep -iE 'postgres|mysql|mariadb|mongo' | cut -f1 || true)"
+    GANCHOS="$(find /etc/nomad/pre-respaldo.d -maxdepth 1 -type f -perm -u+x 2>/dev/null | wc -l)"
+    if [[ -n "${BASES_EN_MARCHA}" ]] && (( GANCHOS == 0 )); then
+        log_aviso "Hay bases de datos en marcha y ningún gancho que las vuelque:"
+        printf '          %s\n' ${BASES_EN_MARCHA} >&2
+        log_aviso "Copiar su directorio de datos en caliente NO produce un respaldo"
+        log_aviso "restaurable, y la prueba de restauración no lo detecta porque"
+        log_aviso "compara archivos. Ver docs/14_respaldos_restic.md § 3.4."
+    fi
 fi
 
 instalar_plantilla etc/restic-excluir.txt /etc/nomad/restic-excluir.txt 644 root:root

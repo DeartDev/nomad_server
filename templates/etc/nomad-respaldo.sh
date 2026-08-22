@@ -144,6 +144,44 @@ docker network ls --format '{{.Name}}\t{{.Driver}}' \
 } > "${manifiesto}/sistema.txt"
 
 # ===========================================================================
+#  2b. Ganchos previos: volcados de bases de datos
+#
+#  POR QUÉ ESTO NO ES OPCIONAL SI TIENES BASES DE DATOS
+#
+#  Copiar archivo a archivo el directorio de datos de un PostgreSQL o un MySQL
+#  EN MARCHA no produce un respaldo del que se pueda restaurar. PostgreSQL lo
+#  documenta explícitamente. A veces la copia arranca, a veces arranca con
+#  corrupción, y a veces no arranca: depende de qué estuviera escribiendo el
+#  motor en ese instante. Y una prueba de restauración que compara archivos no
+#  lo detecta, porque los archivos están ahí.
+#
+#  La solución es un volcado consistente hecho por el propio motor ANTES del
+#  respaldo. Cada proyecto pone aquí un script ejecutable que genere el suyo
+#  dentro del directorio del proyecto, donde el respaldo lo recogerá.
+#  Ver docs/14_respaldos_restic.md § 3.4.
+# ===========================================================================
+dir_ganchos="/etc/nomad/pre-respaldo.d"
+gancho_fallido=0
+
+if [[ -d "${dir_ganchos}" ]]; then
+    for gancho in "${dir_ganchos}"/*; do
+        [[ -x "${gancho}" ]] || continue
+        registrar "Gancho previo: ${gancho}"
+        if "${gancho}" >>"${manifiesto}/ganchos.log" 2>&1; then
+            registrar "  correcto"
+        else
+            # No se aborta: los archivos siguen mereciendo respaldarse. Pero el
+            # aviso al monitor irá en rojo, porque un respaldo sin el volcado de
+            # la base de datos no sirve para lo que uno cree que sirve.
+            registrar "  FALLÓ: revisa ${manifiesto}/ganchos.log"
+            gancho_fallido=1
+        fi
+    done
+else
+    registrar "Sin ganchos previos en ${dir_ganchos}."
+fi
+
+# ===========================================================================
 #  3. Respaldo
 # ===========================================================================
 # Qué se respalda y por qué está en docs/14_respaldos_restic.md § 3.2.
@@ -236,7 +274,10 @@ else
 fi
 registrar "Tamaño del repositorio: ${tamano:-desconocido}"
 
-if (( copia_remota_fallida == 1 )); then
+if (( gancho_fallido == 1 )); then
+    estado_aviso="down"
+    mensaje_aviso="respaldo+hecho+pero+un+volcado+de+base+de+datos+fallo"
+elif (( copia_remota_fallida == 1 )); then
     estado_aviso="down"
     mensaje_aviso="respaldo+local+correcto+pero+la+copia+remota+fallo"
 else

@@ -136,7 +136,55 @@ cosmético: sin esa línea en la unidad, `restic copy` falla cada noche bajo el 
 funciona solo cuando lanzas el script a mano, porque a mano sí tienes las variables cargadas. Es un
 fallo que se descubre el día que hace falta el respaldo remoto.
 
-### 3.4 El disco se monta por UUID
+### 3.4 Las bases de datos se vuelcan antes, no se copian en caliente
+
+**Decisión: cada base de datos genera un volcado consistente antes del respaldo, con un gancho en
+`/etc/nomad/pre-respaldo.d/`.**
+
+Copiar archivo a archivo el directorio de datos de un PostgreSQL o un MySQL **en marcha no produce
+un respaldo del que se pueda restaurar**. PostgreSQL lo documenta explícitamente: el motor mantiene
+estado en memoria y escribe en varios archivos que deben ser coherentes entre sí, y una copia hecha
+mientras tanto captura un instante distinto de cada uno.
+
+Lo peligroso es cómo falla. A veces la copia arranca sin problemas, a veces arranca con corrupción
+silenciosa, y a veces no arranca. Depende de qué estuviera escribiendo el motor justo entonces. Y
+**la prueba de restauración del paso 10 no lo detecta**, porque compara archivos y los archivos
+están todos ahí: pasa en verde mientras la base de datos que contiene es inservible.
+
+La solución es que el volcado lo haga el propio motor, que sí sabe producir una copia coherente:
+
+```bash
+# [servidor] — instalar el gancho para un proyecto con PostgreSQL
+cd ~/nomad_server && source scripts/lib/entorno.sh
+sudo mkdir -p /etc/nomad/pre-respaldo.d
+nomad_plantilla etc/pre-respaldo-postgres.sh \
+    | sudo tee /etc/nomad/pre-respaldo.d/10-ejemplo-postgres.sh >/dev/null
+sudo chmod 700 /etc/nomad/pre-respaldo.d/10-ejemplo-postgres.sh
+sudo vim /etc/nomad/pre-respaldo.d/10-ejemplo-postgres.sh   # ajusta las tres variables de arriba
+```
+
+Y **pruébalo antes de fiarte de él**, que es la diferencia entre tener el gancho y tener respaldos:
+
+```bash
+# [servidor]
+sudo /etc/nomad/pre-respaldo.d/10-ejemplo-postgres.sh && echo CORRECTO
+```
+
+El script de respaldo ejecuta todo lo ejecutable de ese directorio, por orden de nombre, antes de
+leer el sistema de archivos. Si un gancho falla, el respaldo **continúa** —los archivos siguen
+mereciendo guardarse— pero el aviso al monitor va en rojo con el motivo: un respaldo sin el volcado
+de la base de datos no sirve para lo que uno cree que sirve, y eso hay que verlo el mismo día.
+
+Un detalle del gancho de ejemplo que conviene entender: escribe siempre **el mismo archivo**, no uno
+por fecha. El histórico lo da restic, que guarda la versión de cada día en su instantánea y aplica
+la política de retención. Acumular volcados fechados duplicaría ese trabajo y llenaría el disco.
+
+> **Y una consecuencia para el capítulo [16](16_recuperacion_ante_desastres.md):** al restaurar, la
+> base de datos no se recupera copiando `datos-db` de vuelta, sino creando el contenedor vacío y
+> cargando el volcado con `psql`. Restaurar el directorio de datos de vuelta reintroduce el mismo
+> problema por el otro lado.
+
+### 3.5 El disco se monta por UUID
 
 **Decisión: `/etc/fstab` con `UUID=` y `nofail`.**
 
@@ -148,7 +196,7 @@ termina de arrancar** y se queda esperando en una consola de emergencia a la que
 por SSH. Con `nofail`, el arranque continúa y el respaldo falla ruidosamente, que es exactamente el
 comportamiento correcto.
 
-### 3.5 Retención escalonada
+### 3.6 Retención escalonada
 
 **Decisión: 7 diarios, 4 semanales, 6 mensuales.**
 
@@ -168,7 +216,7 @@ Cubre los tres escenarios reales:
 
 Gracias a la deduplicación, guardar 17 instantáneas ocupa poco más que guardar una.
 
-### 3.6 El script vive fuera del repositorio
+### 3.7 El script vive fuera del repositorio
 
 **Decisión: `/usr/local/bin/nomad-respaldo.sh`, no `~/nomad_server/scripts/…`.**
 
@@ -179,7 +227,7 @@ desorden cuando más falta hace que la copia de esa noche se haga.
 El script se **genera** desde la plantilla con los valores de `config/servidor.env` ya sustituidos,
 de modo que sigue siendo reproducible sin depender del repositorio en tiempo de ejecución.
 
-### 3.7 El fallo se detecta por ausencia de aviso
+### 3.8 El fallo se detecta por ausencia de aviso
 
 **Decisión: avisar a Uptime Kuma solo cuando el respaldo termina bien.**
 
@@ -190,7 +238,7 @@ silencio es peor que no tener respaldo, porque crees que estás cubierto.
 Con un monitor de tipo *Push*, Uptime Kuma espera un aviso cada 24 horas. **Si no llega, salta.** Da
 igual el motivo: fallo del respaldo, servidor apagado, red caída o disco desconectado.
 
-### 3.8 La prueba de restauración es obligatoria
+### 3.9 La prueba de restauración es obligatoria
 
 **Decisión: no se da el capítulo por terminado sin haber restaurado.**
 
@@ -202,7 +250,7 @@ rutas.
 **Todos ellos se descubren en la primera restauración.** La cuestión es si esa primera restauración
 ocurre hoy, con calma, o el día que el disco se muera.
 
-### 3.9 La contraseña, en dos sitios
+### 3.10 La contraseña, en dos sitios
 
 **Decisión: `/root/.restic-password` en el servidor **y** en tu gestor de contraseñas.**
 
