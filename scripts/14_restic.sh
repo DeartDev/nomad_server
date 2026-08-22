@@ -85,6 +85,11 @@ requerir_variables RESTIC_USB_MOUNT RESTIC_REPO_LOCAL RESTIC_PASSWORD_FILE \
 # respaldo viaja por la red y una restauración completa depende de tu bajada.
 ARCHIVO_CRED_REMOTO="/etc/nomad/restic-remoto.env"
 
+# Fecha de la última prueba de restauración superada. Sirve para no repetir un
+# aviso que ya se ha atendido, y para detectar la situación contraria: que la
+# última prueba sea de hace meses y nadie se haya dado cuenta.
+MARCA_PRUEBA="/var/backups/nomad/ultima-prueba-restauracion"
+
 if [[ -n "${RESTIC_USB_UUID:-}" ]]; then
     MODO_RESPALDO="local"
     REPO_PRINCIPAL="${RESTIC_REPO_LOCAL}"
@@ -187,6 +192,22 @@ case "${ACCION}" in
 
         RESULTADO="$(systemctl show nomad-respaldo.service -p Result --value 2>/dev/null || echo '?')"
         log_info "Resultado de la última ejecución: ${RESULTADO}"
+
+        # Tener respaldos y saber que sirven son dos cosas distintas, y el
+        # estado debe informar de las dos.
+        if [[ -r "${MARCA_PRUEBA}" ]]; then
+            FECHA_PRUEBA="$(cat "${MARCA_PRUEBA}")"
+            DIAS=$(( ( $(date +%s) - $(date -d "${FECHA_PRUEBA}" +%s) ) / 86400 ))
+            if (( DIAS <= 30 )); then
+                log_ok "Última prueba de restauración: hace ${DIAS} días."
+            else
+                log_error "La última prueba de restauración tiene ${DIAS} días."
+                log_error "Ejecútala: sudo $0 --probar"
+            fi
+        else
+            log_error "NUNCA se ha superado una prueba de restauración."
+            log_error "Ejecútala: sudo $0 --probar"
+        fi
 
         REPO_ACCESIBLE=0
         if command -v restic >/dev/null 2>&1; then
@@ -315,6 +336,8 @@ case "${ACCION}" in
         echo
         if (( FALLOS == 0 )); then
             log_ok "PRUEBA SUPERADA: el respaldo sirve para reconstruir el servidor."
+            mkdir -p "$(dirname "${MARCA_PRUEBA}")"
+            date -Is > "${MARCA_PRUEBA}"
         else
             log_error "PRUEBA FALLIDA: ${FALLOS} problemas. Corrígelos AHORA,"
             log_error "no el día que necesites restaurar de verdad."
@@ -599,14 +622,35 @@ resumen_final "14_restic"
 
 if (( MODO_CHECK == 0 )); then
     echo
-    log_aviso "════════════════════════════════════════════════════════════════"
-    log_aviso "  FALTA EL PASO MÁS IMPORTANTE: LA PRUEBA DE RESTAURACIÓN"
-    log_aviso ""
-    log_aviso "      sudo $0 --probar"
-    log_aviso ""
-    log_aviso "  Hasta que no la ejecutes, no sabes si tienes respaldos:"
-    log_aviso "  solo sabes que tienes archivos en un disco."
-    log_aviso "════════════════════════════════════════════════════════════════"
+    # El aviso solo aparece si hace falta. Repetirlo a quien acaba de ejecutar
+    # la prueba lo convierte en decorado, y entonces tampoco lo lee quien sí
+    # necesita verlo.
+    if [[ -r "${MARCA_PRUEBA}" ]]; then
+        FECHA_PRUEBA="$(cat "${MARCA_PRUEBA}")"
+        DIAS=$(( ( $(date +%s) - $(date -d "${FECHA_PRUEBA}" +%s) ) / 86400 ))
+        if (( DIAS <= 30 )); then
+            log_ok "Última prueba de restauración superada hace ${DIAS} días."
+        else
+            log_aviso "════════════════════════════════════════════════════════════════"
+            log_aviso "  LA ÚLTIMA PRUEBA DE RESTAURACIÓN TIENE ${DIAS} DÍAS"
+            log_aviso ""
+            log_aviso "      sudo $0 --probar"
+            log_aviso ""
+            log_aviso "  Un respaldo que funcionaba hace meses no es un respaldo que"
+            log_aviso "  funcione hoy: cambian los datos, las versiones y las rutas."
+            log_aviso "  El capítulo 15 la incluye en la rutina mensual."
+            log_aviso "════════════════════════════════════════════════════════════════"
+        fi
+    else
+        log_aviso "════════════════════════════════════════════════════════════════"
+        log_aviso "  FALTA EL PASO MÁS IMPORTANTE: LA PRUEBA DE RESTAURACIÓN"
+        log_aviso ""
+        log_aviso "      sudo $0 --probar"
+        log_aviso ""
+        log_aviso "  Hasta que no la ejecutes, no sabes si tienes respaldos:"
+        log_aviso "  solo sabes que tienes archivos en un sitio."
+        log_aviso "════════════════════════════════════════════════════════════════"
+    fi
     echo
     log_info "Y comprueba que la contraseña del repositorio está guardada"
     log_info "en tu gestor de contraseñas, fuera de este servidor."

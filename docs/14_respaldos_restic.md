@@ -774,6 +774,12 @@ sudo rm -rf /tmp/prueba-restauracion
 **Prueba avanzada, muy recomendable:** restaura un proyecto completo en otra ruta, cambia el
 subdominio en su compose y levántalo. Si arranca y funciona, tu respaldo sirve de verdad.
 
+> **La prueba deja constancia.** Al superarla se escribe la fecha en
+> `/var/backups/nomad/ultima-prueba-restauracion`, y a partir de ahí `--estado` te dice cuántos días
+> hace de la última y protesta si pasan de 30. Es lo que convierte «acuérdate de probar la
+> restauración» en algo comprobable, y lo que permite que el aviso deje de aparecer cuando ya la has
+> hecho: un recordatorio que sale siempre acaba siendo parte del decorado.
+
 ### Paso 11 — Verificación de integridad
 
 ```bash
