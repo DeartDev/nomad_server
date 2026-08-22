@@ -102,7 +102,7 @@ restaurar los datos, pero no levantar los servicios.
 | Variable | Uso en la recuperación |
 |---|---|
 | `RESTIC_USB_UUID`, `RESTIC_USB_MOUNT` | Montar el disco de respaldo |
-| `RESTIC_REPO_LOCAL`, `RESTIC_PASSWORD_FILE` | Abrir el repositorio |
+| `RESTIC_REPO_LOCAL` o `RESTIC_REPO_REMOTO`, `RESTIC_PASSWORD_FILE` | Abrir el repositorio |
 | `DATOS_RAIZ` | Destino de los datos restaurados |
 | `CF_TUNEL_ID`, `CF_TUNEL_NOMBRE` | Túnel a restaurar |
 | `ADMIN_USUARIO`, `SERVIDOR_HOSTNAME`, `LAN_IP` | Identidad del servidor: **deben ser los mismos que antes** |
@@ -112,23 +112,30 @@ restaurar los datos, pero no levantar los servicios.
 Aquí hay una trampa que solo aparece el día de la reconstrucción, y conviene entenderla **antes**:
 
 ```
-Para abrir el respaldo necesitas   →  RESTIC_USB_UUID, RESTIC_REPO_LOCAL, la contraseña
+Para abrir el respaldo necesitas   →  dónde está, y la contraseña del repositorio
 Esos valores están en              →  config/servidor.env
 Y config/servidor.env está en      →  el respaldo
 ```
+
+**Con respaldo remoto la trampa aprieta más**, y conviene verlo con claridad: además de la
+contraseña del repositorio hacen falta **las credenciales del proveedor**, que viven en
+`/etc/nomad/restic-remoto.env`. Ese archivo está dentro del respaldo, o sea dentro de lo que
+intentas abrir. Sin una copia fuera, no hay forma de llegar a tus datos — ni con la contraseña
+correcta.
 
 Se rompe de tres formas, y conviene tener al menos dos:
 
 | Vía | Cómo | Fiabilidad |
 |---|---|---|
 | **Copia de `config/servidor.env` en tu equipo** | El `scp` que recomienda el anexo [98 § 5.2](98_variables_y_entorno.md) al terminar cada tanda | La mejor: lo tienes todo |
-| **Los cuatro valores en el gestor de contraseñas** | Junto a la contraseña de restic: UUID del disco, punto de montaje, ruta del repositorio y nombre del servidor | Suficiente para abrir el repositorio |
-| **Deducirlos del disco** | `sudo blkid` da el UUID; el repositorio se encuentra explorando el disco montado | Funciona, pero a ciegas y con prisa |
+| **Los valores clave en el gestor de contraseñas** | Junto a la contraseña de restic: dónde está el repositorio, el nombre del servidor y, si es remoto, las credenciales del proveedor | Suficiente para abrir el repositorio |
+| **Deducirlos del disco** | `sudo blkid` da el UUID; el repositorio se encuentra explorando el disco montado. **Solo sirve con respaldo local**: un repositorio remoto no se deduce de ninguna parte | Funciona, pero a ciegas y con prisa |
 
-**Sin la contraseña no hay ninguna vía.** Es lo único de esta lista que no se puede deducir ni
-recuperar.
+**Sin la contraseña no hay ninguna vía**, y con respaldo remoto tampoco sin las credenciales del
+proveedor. Son lo único de esta lista que no se puede deducir ni recuperar: o están fuera del
+servidor, o los datos se han perdido con él.
 
-Anota estos cuatro valores en tu gestor de contraseñas, ahora, junto a la contraseña de restic:
+Anota estos valores en tu gestor de contraseñas, ahora, junto a la contraseña de restic:
 
 ```bash
 # [servidor] — con el servidor todavía sano
@@ -141,10 +148,13 @@ cat <<RESCATE
  RESTIC_USB_UUID      : ${RESTIC_USB_UUID}
  RESTIC_USB_MOUNT     : ${RESTIC_USB_MOUNT}
  RESTIC_REPO_LOCAL    : ${RESTIC_REPO_LOCAL}
+ RESTIC_REPO_REMOTO   : ${RESTIC_REPO_REMOTO}
  RESTIC_PASSWORD_FILE : ${RESTIC_PASSWORD_FILE}
  DATOS_RAIZ           : ${DATOS_RAIZ}
  CF_TUNEL_ID          : ${CF_TUNEL_ID}
  (la contraseña del repositorio NO se imprime aquí: está en tu gestor)
+ (las credenciales del proveedor remoto TAMPOCO: /etc/nomad/restic-remoto.env,
+  y también tienen que estar en tu gestor o no abrirás el repositorio)
 ===================================
 RESCATE
 ```
@@ -205,6 +215,29 @@ INSTANTANEA=latest        # o el hash concreto que muestre 'restic snapshots'
 └─ Creo que alguien ha entrado
    └─▶ Escenario G — leer completo antes de tocar nada
 ```
+
+### 5.0b Abrir el repositorio de respaldos
+
+Cualquier escenario que toque los respaldos empieza igual. **Dónde está el repositorio depende de tu
+modo** (capítulo [14](14_respaldos_restic.md) § 3.3), así que se resuelve una vez en la variable
+`REPO` y el resto del capítulo la usa:
+
+```bash
+# [servidor] — con el entorno ya cargado (paso 0)
+if [ -n "${RESTIC_USB_UUID}" ]; then
+    sudo mountpoint -q ${RESTIC_USB_MOUNT} || sudo mount ${RESTIC_USB_MOUNT}
+    export REPO="${RESTIC_REPO_LOCAL}"
+else
+    set -a; . /etc/nomad/restic-remoto.env; set +a
+    export REPO="${RESTIC_REPO_REMOTO}"
+fi
+echo "Repositorio: ${REPO}"
+sudo -E restic snapshots --repo "${REPO}" --password-file ${RESTIC_PASSWORD_FILE} | tail -5
+```
+
+Criterio de aceptación: lista instantáneas con sus fechas. El `-E` de `sudo -E` es imprescindible en
+el caso remoto: sin él, `sudo` limpia el entorno y las credenciales del proveedor no llegan a
+`restic`, con un error de autenticación que despista porque las credenciales sí son correctas.
 
 ---
 
@@ -427,36 +460,69 @@ sudo ./scripts/07_hardening.sh
 #### Fase 2 — Recuperar el respaldo (10 min)
 
 ```bash
-# [servidor] — conecta el disco USB de respaldo
+# [servidor]
 sudo apt install -y restic
-lsblk -f | grep -i respaldo
-
-sudo mkdir -p ${RESTIC_USB_MOUNT}
-sudo mount /dev/disk/by-uuid/${RESTIC_USB_UUID} ${RESTIC_USB_MOUNT}
 ```
 
+**Aquí el camino se bifurca según dónde estén tus respaldos** (capítulo
+[14](14_respaldos_restic.md) § 3.3). Sigue solo el que te corresponda.
+
+**Si respaldas a un disco USB local:**
+
 ```bash
-# [servidor] — restablece la contraseña desde tu gestor
-sudo touch ${RESTIC_PASSWORD_FILE}
-sudo chmod 600 ${RESTIC_PASSWORD_FILE}
+# [servidor] — conecta el disco de respaldo
+lsblk -f | grep -i respaldo
+sudo mkdir -p ${RESTIC_USB_MOUNT}
+sudo mount /dev/disk/by-uuid/${RESTIC_USB_UUID} ${RESTIC_USB_MOUNT}
+export REPO="${RESTIC_REPO_LOCAL}"
+```
+
+**Si respaldas solo a un destino remoto**, el disco no existe y lo que hace falta son las
+credenciales, que **no están en el respaldo** — estarían dentro de lo que intentas abrir. Sácalas
+de tu gestor de contraseñas, igual que la contraseña del repositorio:
+
+```bash
+# [servidor] — recrea el archivo de credenciales del remoto
+sudo mkdir -p /etc/nomad
+sudo install -m 600 -o root -g root /dev/null /etc/nomad/restic-remoto.env
+sudo vim /etc/nomad/restic-remoto.env      # B2_ACCOUNT_ID, B2_ACCOUNT_KEY, o las de tu proveedor
+set -a; . /etc/nomad/restic-remoto.env; set +a
+export REPO="${RESTIC_REPO_REMOTO}"
+```
+
+> **Este es el momento en que se paga el haber guardado bien las credenciales, o no.** Sin la
+> contraseña del repositorio y sin las claves del proveedor, el respaldo remoto es inaccesible y no
+> hay procedimiento que lo arregle. Las dos viven en tu gestor de contraseñas, fuera del servidor,
+> por esto exactamente.
+
+```bash
+# [servidor] — restablece la contraseña del repositorio desde tu gestor
+sudo install -m 600 -o root -g root /dev/null ${RESTIC_PASSWORD_FILE}
 sudo vim ${RESTIC_PASSWORD_FILE}
 ```
 
 ```bash
 # [servidor] — comprueba que el repositorio se abre
-sudo restic snapshots \
-    --repo ${RESTIC_REPO_LOCAL} \
-    --password-file ${RESTIC_PASSWORD_FILE}
+sudo -E restic snapshots --repo "${REPO}" --password-file ${RESTIC_PASSWORD_FILE}
 ```
 
-Criterio de aceptación: lista las instantáneas con sus fechas. Si dice `wrong password or no key
-found`, la contraseña no coincide; si dice `unable to open config file`, la ruta del repositorio es
-otra: explora el disco montado hasta dar con el directorio `restic`.
+Criterio de aceptación: lista las instantáneas con sus fechas.
+
+| Error | Qué significa |
+|---|---|
+| `wrong password or no key found` | La contraseña del repositorio no coincide |
+| `unable to open config file` / `repository does not exist` | La ruta del repositorio es otra |
+| `unauthorized`, `401`, `403` | Las credenciales del proveedor remoto son incorrectas |
+| `bucket not found` | El nombre del cubo no coincide con `RESTIC_REPO_REMOTO` |
 
 ```bash
-# [servidor] — si la ruta no es la esperada, búscala
+# [servidor] — si respaldas a disco y la ruta no es la esperada, búscala
 sudo find ${RESTIC_USB_MOUNT} -maxdepth 3 -name config -path '*restic*' 2>/dev/null
 ```
+
+> El `-E` de `sudo -E` no es decorativo en el caso remoto: sin él, `sudo` limpia el entorno y las
+> credenciales del proveedor que acabas de cargar no llegan a `restic`. El síntoma es un error de
+> autenticación con las credenciales correctas puestas.
 
 **Elige la instantánea y declárala**, para no repetir el identificador en los cinco comandos
 siguientes:
@@ -476,8 +542,8 @@ a los indicios.
 
 ```bash
 # [servidor]
-sudo restic restore ${INSTANTANEA} \
-    --repo ${RESTIC_REPO_LOCAL} \
+sudo -E restic restore ${INSTANTANEA} \
+    --repo "${REPO}" \
     --password-file ${RESTIC_PASSWORD_FILE} \
     --target / \
     --include /home/${ADMIN_USUARIO}/.cloudflared \
@@ -512,8 +578,8 @@ ls ~/.cloudflared/${CF_TUNEL_ID}.json
 
 ```bash
 # [servidor] — consultar el manifiesto: qué había instalado
-sudo restic restore ${INSTANTANEA} \
-    --repo ${RESTIC_REPO_LOCAL} \
+sudo -E restic restore ${INSTANTANEA} \
+    --repo "${REPO}" \
     --password-file ${RESTIC_PASSWORD_FILE} \
     --target /tmp/manifiesto \
     --include /var/backups/nomad
@@ -536,12 +602,22 @@ vez y **volver a desactivar la caducidad de clave**.
 #### Fase 5 — Restaurar los datos (20 min)
 
 ```bash
-# [servidor]
-sudo restic restore ${INSTANTANEA} \
-    --repo ${RESTIC_REPO_LOCAL} \
+# [servidor] — los archivos de los proyectos
+sudo -E restic restore ${INSTANTANEA} \
+    --repo "${REPO}" \
     --password-file ${RESTIC_PASSWORD_FILE} \
     --target / \
     --include ${DATOS_RAIZ}
+```
+
+```bash
+# [servidor] — y los volcados de las bases de datos, que van aparte
+sudo -E restic restore ${INSTANTANEA} \
+    --repo "${REPO}" \
+    --password-file ${RESTIC_PASSWORD_FILE} \
+    --target / \
+    --include /var/backups/nomad
+ls -la /var/backups/nomad/volcados/*/ 2>/dev/null
 ```
 
 **Comprobación previa antes del `chown -R`.** Con `${DATOS_RAIZ}` o `${ADMIN_USUARIO}` vacías, ese
@@ -559,6 +635,57 @@ comando cambiaría el propietario de la raíz del sistema entero, justo cuando m
 sudo chown -R ${ADMIN_USUARIO}:${ADMIN_USUARIO} ${DATOS_RAIZ}
 find ${DATOS_RAIZ} -name '.env' -exec chmod 600 {} \;
 ls -la ${DATOS_RAIZ}
+```
+
+#### Fase 5b — Cargar las bases de datos desde el volcado (10 min)
+
+**Esta fase es obligatoria si alguno de tus proyectos tiene base de datos, y es la que más se
+malinterpreta.** El directorio `datos-db` que acabas de restaurar es una copia hecha con el motor
+escribiendo: puede arrancar, puede arrancar con corrupción, o puede no arrancar. No es de donde se
+restaura (capítulo [14](14_respaldos_restic.md) § 3.4).
+
+Lo que se restaura es el **volcado**, y para eso la base tiene que partir vacía:
+
+```bash
+# [servidor] — para el proyecto y descarta el directorio de datos restaurado
+PROYECTO=ejemplo
+cd ${DATOS_RAIZ}/${PROYECTO}
+docker compose down
+sudo rm -rf datos-db
+```
+
+Criterio de aceptación: `datos-db` ya no existe. Borrarlo es deliberado: si lo dejas, PostgreSQL
+arranca con ese contenido y el volcado no llega a cargarse nunca.
+
+```bash
+# [servidor] — levanta SOLO la base, que se inicializa vacía con el .env restaurado
+docker compose up -d db
+sleep 15
+docker compose ps db
+```
+
+```bash
+# [servidor] — y carga el volcado
+zcat /var/backups/nomad/volcados/${PROYECTO}/*.sql.gz \
+    | docker exec -i ${PROYECTO}-db psql --username proyecto --dbname proyecto
+```
+
+> Ajusta `${PROYECTO}-db`, el usuario y el nombre de la base a los de tu proyecto: son los mismos
+> valores de `POSTGRES_USER` y `POSTGRES_DB` de su `.env`.
+
+```bash
+# [servidor] — comprobación: ¿hay tablas y filas?
+docker exec ${PROYECTO}-db psql --username proyecto --dbname proyecto \
+    -c '\dt' -c 'SELECT count(*) FROM pg_stat_user_tables;'
+```
+
+Criterio de aceptación: aparecen las tablas de tu aplicación. Una base vacía significa que el
+volcado no se cargó — revisa la salida del `psql` anterior antes de seguir, porque el resto de la
+reconstrucción dará por buena una base que no lo está.
+
+```bash
+# [servidor] — y ahora sí, el proyecto entero
+docker compose up -d
 ```
 
 #### Fase 6 — Servicios (20 min)
@@ -605,15 +732,15 @@ ssh ${ADMIN_USUARIO}@${TS_HOSTNAME}
 
 ```bash
 # [servidor] — ¿qué instantáneas hay?
-sudo restic snapshots \
-    --repo ${RESTIC_REPO_LOCAL} \
+sudo -E restic snapshots \
+    --repo "${REPO}" \
     --password-file ${RESTIC_PASSWORD_FILE}
 ```
 
 ```bash
 # [servidor] — buscar el archivo en el histórico
-sudo restic find \
-    --repo ${RESTIC_REPO_LOCAL} \
+sudo -E restic find \
+    --repo "${REPO}" \
     --password-file ${RESTIC_PASSWORD_FILE} \
     "nombre-del-archivo"
 ```
@@ -626,8 +753,8 @@ echo "Se restaurará: ${INSTANTANEA}"
 
 ```bash
 # [servidor] — restaurar a un directorio temporal, NUNCA encima del original
-sudo restic restore ${INSTANTANEA} \
-    --repo ${RESTIC_REPO_LOCAL} \
+sudo -E restic restore ${INSTANTANEA} \
+    --repo "${REPO}" \
     --password-file ${RESTIC_PASSWORD_FILE} \
     --target /tmp/recuperado \
     --include /srv/mi-proyecto/datos
@@ -649,8 +776,8 @@ cp -a /tmp/recuperado/srv/mi-proyecto/datos/<archivo> ${DATOS_RAIZ}/mi-proyecto/
 ```bash
 # [servidor]
 sudo mkdir -p /mnt/restic
-sudo restic mount /mnt/restic \
-    --repo ${RESTIC_REPO_LOCAL} \
+sudo -E restic mount /mnt/restic \
+    --repo "${REPO}" \
     --password-file ${RESTIC_PASSWORD_FILE}
 # en otra terminal:
 ls /mnt/restic/snapshots/
@@ -721,7 +848,7 @@ escalonada del capítulo 14 permiten elegir un punto anterior:
 
 ```bash
 # [servidor]
-sudo restic snapshots --repo ${RESTIC_REPO_LOCAL} --password-file ${RESTIC_PASSWORD_FILE}
+sudo -E restic snapshots --repo "${REPO}" --password-file ${RESTIC_PASSWORD_FILE}
 # elige una instantánea claramente anterior a los indicios
 ```
 
