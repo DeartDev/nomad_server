@@ -216,7 +216,38 @@ Cubre los tres escenarios reales:
 
 Gracias a la deduplicación, guardar 17 instantáneas ocupa poco más que guardar una.
 
-### 3.7 El script vive fuera del repositorio
+### 3.7 El primer respaldo se lanza como servicio, no a mano
+
+**Decisión: la primera ejecución va por `systemctl start nomad-respaldo.service`, nunca llamando
+al script directamente.**
+
+Parece un detalle de estilo y no lo es. El servicio corre con un aislamiento que la ejecución
+manual no tiene: `ProtectSystem=strict` deja todo el sistema de archivos en solo lectura salvo las
+rutas declaradas, el entorno es el que diga `EnvironmentFile` y no el de tu sesión, y los
+directorios de caché los prepara systemd. Un respaldo que funciona perfectamente lanzado a mano
+puede fallar **todas** las noches, y el único sitio donde se ve es el journal.
+
+Ocurrió en el servidor de referencia. El servicio declaraba `ReadWritePaths=/var/cache/restic`, un
+directorio que no existía, y systemd se niega a arrancar un servicio en esa situación:
+
+```text
+nomad-respaldo.service: Failed to set up mount namespacing: /var/cache/restic: No such file or directory
+nomad-respaldo.service: Failed at step NAMESPACE spawning /usr/local/bin/nomad-respaldo.sh
+```
+
+Falla **antes** de ejecutar una sola línea del script. Mientras tanto el respaldo manual funcionaba
+sin una queja, el repositorio tenía instantáneas y todo parecía correcto. Solo el monitor lo habría
+acabado detectando, al dejar de recibir avisos — y por eso ese monitor existe.
+
+Hay dos consecuencias prácticas:
+
+- El directorio de caché se declara con `CacheDirectory=restic`, que systemd **crea** si no está, en
+  lugar de con `ReadWritePaths`, que exige que ya exista.
+- Los ganchos de volcado escriben en `/var/backups/nomad`, no dentro de `${DATOS_RAIZ}`. Si
+  escribieran en el directorio de los proyectos habría que dar al servicio permiso de escritura
+  sobre **todos** los datos de **todos** los proyectos solo para dejar un volcado.
+
+### 3.8 El script vive fuera del repositorio
 
 **Decisión: `/usr/local/bin/nomad-respaldo.sh`, no `~/nomad_server/scripts/…`.**
 
@@ -227,7 +258,7 @@ desorden cuando más falta hace que la copia de esa noche se haga.
 El script se **genera** desde la plantilla con los valores de `config/servidor.env` ya sustituidos,
 de modo que sigue siendo reproducible sin depender del repositorio en tiempo de ejecución.
 
-### 3.8 El fallo se detecta por ausencia de aviso
+### 3.9 El fallo se detecta por ausencia de aviso
 
 **Decisión: avisar a Uptime Kuma solo cuando el respaldo termina bien.**
 
@@ -238,7 +269,7 @@ silencio es peor que no tener respaldo, porque crees que estás cubierto.
 Con un monitor de tipo *Push*, Uptime Kuma espera un aviso cada 24 horas. **Si no llega, salta.** Da
 igual el motivo: fallo del respaldo, servidor apagado, red caída o disco desconectado.
 
-### 3.9 La prueba de restauración es obligatoria
+### 3.10 La prueba de restauración es obligatoria
 
 **Decisión: no se da el capítulo por terminado sin haber restaurado.**
 
@@ -250,7 +281,7 @@ rutas.
 **Todos ellos se descubren en la primera restauración.** La cuestión es si esa primera restauración
 ocurre hoy, con calma, o el día que el disco se muera.
 
-### 3.10 La contraseña, en dos sitios
+### 3.11 La contraseña, en dos sitios
 
 **Decisión: `/root/.restic-password` en el servidor **y** en tu gestor de contraseñas.**
 

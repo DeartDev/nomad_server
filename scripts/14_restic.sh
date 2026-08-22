@@ -536,12 +536,27 @@ if (( MODO_CHECK == 1 )); then
     log_check "ejecutaría el primer respaldo"
 else
     log_info "El primero tarda: hay que leer y cifrar todo."
+    log_info "Se lanza A TRAVÉS DE SYSTEMD, no llamando al script directamente."
+    log_info "Es deliberado: el aislamiento del servicio (ProtectSystem, rutas"
+    log_info "escribibles, variables de entorno) solo se ejerce por esa vía, y un"
+    log_info "respaldo que funciona a mano puede fallar cada noche sin que se note."
+
     if confirmar "¿Ejecutar el primer respaldo ahora?"; then
-        /usr/local/bin/nomad-respaldo.sh || die "El primer respaldo ha fallado."
-        marcar_cambio
-        log_ok "Primer respaldo completado."
+        if systemctl start nomad-respaldo.service; then
+            marcar_cambio
+            log_ok "Primer respaldo completado a través de systemd."
+        else
+            log_error "El respaldo ha fallado al ejecutarse como servicio."
+            log_error "Registro:"
+            journalctl -u nomad-respaldo -n 25 --no-pager | sed 's/^/          /' >&2
+            die "Revisa el registro de arriba."
+        fi
+        journalctl -u nomad-respaldo -n 12 --no-pager | sed 's/^/          /'
     else
-        log_info "Lo puedes lanzar después con: sudo $0 --ahora"
+        log_aviso "Sin ejecutarlo al menos una vez COMO SERVICIO no sabes si el"
+        log_aviso "temporizador funcionará. Lánzalo cuando puedas:"
+        log_aviso "    sudo systemctl start nomad-respaldo.service"
+        log_aviso "    sudo journalctl -u nomad-respaldo -n 20"
     fi
 fi
 

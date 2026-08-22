@@ -27,10 +27,15 @@ set -euo pipefail
 contenedor="proyecto-ejemplo-db"      # nombre del contenedor de la base
 usuario_bd="proyecto"                 # POSTGRES_USER del .env del proyecto
 nombre_bd="proyecto"                  # POSTGRES_DB del .env del proyecto
-directorio="${DATOS_RAIZ}/ejemplo"    # directorio del proyecto
+proyecto="ejemplo"                    # nombre del proyecto, para el directorio
 
 # ---------------------------------------------------------------------------
-destino="${directorio}/volcados"
+# El volcado NO va dentro del proyecto sino a /var/backups/nomad, que el
+# respaldo recoge igual. El motivo es que el servicio de systemd corre con
+# ProtectSystem=strict: si el gancho escribiera en ${DATOS_RAIZ} habría que
+# darle permiso de escritura sobre TODOS los datos de TODOS los proyectos solo
+# para dejar un volcado. Aquí escribe en el único sitio que ya necesita.
+destino="/var/backups/nomad/volcados/${proyecto}"
 mkdir -p "${destino}"
 chmod 750 "${destino}"
 

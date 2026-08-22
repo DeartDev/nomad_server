@@ -61,8 +61,19 @@ TimeoutStartSec=4h
 # El proceso necesita leer todo el sistema, pero no necesita escribir en casi
 # ningún sitio.
 ProtectSystem=strict
+
+# 'CacheDirectory' crea /var/cache/restic si no existe y lo hace escribible.
+# Ponerlo en ReadWritePaths NO valía: systemd se niega a arrancar un servicio
+# cuyo ReadWritePaths apunta a algo inexistente, y falla en la fase de
+# espacios de nombres, ANTES de ejecutar una sola línea del script. El
+# respaldo manual seguía funcionando —no pasa por systemd— así que el fallo
+# solo se veía en el journal, cada noche.
+CacheDirectory=restic
+Environment=RESTIC_CACHE_DIR=/var/cache/restic
+
+# El guion inicial evita el mismo problema si el directorio aún no existe.
 # El disco USB, si lo hay, lo añade el fichero 10-disco-usb.conf.
-ReadWritePaths=/var/backups/nomad /var/cache/restic
+ReadWritePaths=-/var/backups/nomad
 PrivateTmp=true
 NoNewPrivileges=true
 ProtectKernelTunables=true
