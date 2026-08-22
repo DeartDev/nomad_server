@@ -236,13 +236,45 @@ case "${ACCION}" in
         FALLOS=0
 
         # 1. ¿Coincide el contenido?
-        if diff -r --brief "${DATOS_RAIZ}" "${DESTINO}${DATOS_RAIZ}" >/tmp/nomad-diff.txt 2>&1; then
+        # Al 'diff' se le aplican las MISMAS exclusiones que al respaldo. Sin
+        # eso, la comparación denuncia como diferencia todo lo que el respaldo
+        # dejó fuera a propósito —los .bak, los .log, node_modules— y el aviso
+        # se llena de ruido: en el servidor de referencia eran 16 diferencias,
+        # de las cuales 13 eran exclusiones funcionando bien. Un informe así
+        # enseña a no leerlo, que es lo contrario de lo que debe hacer la
+        # comprobación más importante del capítulo.
+        EXCLUIR_DIFF=()
+        if [[ -r /etc/nomad/restic-excluir.txt ]]; then
+            while IFS= read -r patron; do
+                [[ -z "${patron}" || "${patron}" == \#* ]] && continue
+                EXCLUIR_DIFF+=(-x "${patron}")
+            done < /etc/nomad/restic-excluir.txt
+        fi
+
+        if diff -r --brief "${EXCLUIR_DIFF[@]+"${EXCLUIR_DIFF[@]}"}" \
+                "${DATOS_RAIZ}" "${DESTINO}${DATOS_RAIZ}" >/tmp/nomad-diff.txt 2>&1; then
             log_ok "El contenido restaurado es idéntico al original."
         else
             DIFERENCIAS="$(wc -l </tmp/nomad-diff.txt)"
-            log_aviso "Hay ${DIFERENCIAS} diferencias. Algunas son normales (bases de datos"
-            log_aviso "en uso, registros). Revísalas:"
+            log_aviso "Hay ${DIFERENCIAS} diferencias, ya descontado lo que el respaldo"
+            log_aviso "excluye a propósito. Lo habitual es que sean bases de datos que"
+            log_aviso "estaban escribiendo; cualquier otra cosa merece una mirada:"
             head -10 /tmp/nomad-diff.txt | sed 's/^/          /'
+            (( DIFERENCIAS > 10 )) \
+                && log_aviso "  …y $((DIFERENCIAS - 10)) más en /tmp/nomad-diff.txt"
+        fi
+
+        # Y un recordatorio que la comparación de archivos no puede dar: que los
+        # bytes coincidan no significa que una base de datos se pueda abrir.
+        if compgen -G "/var/backups/nomad/volcados/*/*.sql.gz" >/dev/null 2>&1; then
+            log_ok "Hay volcados de base de datos en el respaldo."
+        elif docker ps --format '{{.Image}}' 2>/dev/null \
+                | contiene -iE 'postgres|mysql|mariadb|mongo'; then
+            log_error "Hay bases de datos en marcha y NINGÚN volcado en el respaldo."
+            log_error "Esta prueba compara archivos, así que pasa en verde aunque el"
+            log_error "directorio de datos copiado en caliente sea irrecuperable."
+            log_error "Instala un gancho: docs/14_respaldos_restic.md § 3.4."
+            FALLOS=$((FALLOS + 1))
         fi
 
         # 2. ¿Están los secretos, y con sus permisos?
