@@ -308,7 +308,13 @@ verificar_docker() {
 
     local parados
     parados="$(docker ps -a --filter status=exited --format '{{.Names}}' | head -5 || true)"
-    [[ -n "${parados}" ]] && aviso "Contenedores parados: $(tr '\n' ' ' <<<"${parados}")"
+    # Un 'cond && accion' aquí haría que la función devolviera 1 cuando la
+    # condición es falsa —o sea, cuando NO hay contenedores parados— y con
+    # 'set -e' eso aborta el script entero. La verificación fallaba justo en
+    # los servidores que estaban bien.
+    if [[ -n "${parados}" ]]; then
+        aviso "Contenedores parados: $(tr '\n' ' ' <<<"${parados}")"
+    fi
 }
 
 # ===========================================================================

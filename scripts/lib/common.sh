@@ -54,8 +54,9 @@ nomad_limpiar_contador() {
     rm -f "${NOMAD_CAMBIOS_ARCHIVO}"
     if [[ -e "${NOMAD_ERRORES_ARCHIVO}" ]]; then
         rm -f "${NOMAD_ERRORES_ARCHIVO}"
-        (( estado == 0 )) && exit 1
+        if (( estado == 0 )); then exit 1; fi
     fi
+    return 0
 }
 trap nomad_limpiar_contador EXIT
 

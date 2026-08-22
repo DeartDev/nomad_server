@@ -249,6 +249,30 @@ comprobar_scripts() {
         printf '%s\n' "${escuchas}" | sed 's/^/          /'
     fi
 
+    # Una lista 'condicion && accion' como ÚLTIMA orden de una función hace que
+    # la función devuelva 1 cuando la condición es falsa, y con 'set -e' eso
+    # aborta el script al llamarla. Lo perverso es que falla en el caso bueno:
+    # 'verificar_sistema.sh' moría en los servidores que NO tenían contenedores
+    # parados, y funcionaba en los que sí.
+    local colgantes
+    colgantes="$(awk '
+        /^[[:space:]]*(\[\[|\(\(|command -v |grep |test )/ && /&&/ && !/^[[:space:]]*#/ {
+            linea = FNR; texto = $0; esperando = 1; next
+        }
+        esperando == 1 {
+            if ($0 ~ /^[[:space:]]*$/) next
+            if ($0 ~ /^[[:space:]]*\}[[:space:]]*$/)
+                printf "%s:%d: %s\n", FILENAME, linea, texto
+            esperando = 0
+        }
+    ' scripts/*.sh scripts/lib/*.sh || true)"
+    if [[ -z "${colgantes}" ]]; then
+        log_ok "ninguna función termina en 'condición && acción'"
+    else
+        fallo "estas funciones devuelven 1 cuando su última condición es falsa:"
+        printf '%s\n' "${colgantes}" | sed 's/^/          /'
+    fi
+
     # El contador de cambios vive en un archivo justo porque 'instalar_archivo'
     # corre en el subshell de una tubería. Volver a tratarlo como una variable
     # rompería en silencio todos los «reinicia solo si ha cambiado».
@@ -436,7 +460,11 @@ comprobar_docs() {
             hay_marcadores=1
         fi
     done
-    (( hay_marcadores == 0 )) && log_ok "sin marcadores pendientes"
+    # Con 'if' y no con '&&': como última orden de la función, un '&&' cuya
+    # condición sea falsa la haría devolver 1 y abortaría el script.
+    if (( hay_marcadores == 0 )); then
+        log_ok "sin marcadores pendientes"
+    fi
 }
 
 # ===========================================================================
