@@ -515,6 +515,34 @@ Qué hace, en orden:
 ./scripts/deploy.sh --listar
 ```
 
+### 6.1b Revisar un proyecto que viene de fuera
+
+Un proyecto que ya estaba dockerizado antes de llegar aquí casi nunca cumple las reglas de la
+sección 3: publica puertos, usa volúmenes con nombre, tira de `:latest` y no declara healthchecks.
+Es lo normal, porque esas decisiones tienen sentido en un portátil y no en este servidor.
+
+En lugar de repasarlas a ojo:
+
+```bash
+# [servidor]
+./scripts/revisar_proyecto.sh mi-proyecto
+```
+
+Contrasta el compose **ya resuelto** —variables sustituidas, superposiciones fusionadas, sintaxis
+corta expandida— contra las nueve reglas de este capítulo, y dice qué corregir y por qué. No
+modifica nada, así que se puede ejecutar sobre un proyecto recién clonado que no cumple ninguna.
+
+Comprueba además tres cosas que no están en el compose y se descubren tarde:
+
+- **Que el nombre de host publicado resuelva**, o el proyecto arrancará bien y no será accesible.
+- **Que el nombre del router no choque con otro proyecto.** Son globales en todo el servidor: si dos
+  usan `web`, el segundo pisa al primero sin decir nada.
+- **Que haya gancho de volcado** si el proyecto trae base de datos, porque sin él se respalda su
+  directorio de datos en caliente y no se podrá restaurar (capítulo
+  [14](14_respaldos_restic.md) § 3.4).
+
+Cuando salga limpio, `./scripts/deploy.sh <proyecto> --check` y adelante.
+
 ### 6.2 Correspondencia entre el script y los pasos manuales
 
 | Paso de la sección 5 | ¿Lo hace `deploy.sh`? | Nota |

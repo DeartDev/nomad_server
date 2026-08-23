@@ -198,6 +198,7 @@ docker run --rm -it -v ~/.cloudflared:/home/nonroot/.cloudflared \
 # ---------------------------------------------------------------------------
 # [servidor] — capítulo 12: primer proyecto
 # ---------------------------------------------------------------------------
+./scripts/revisar_proyecto.sh <proyecto>   # ¿cumple las reglas del capítulo 12?
 ./scripts/deploy.sh --listar
 ./scripts/deploy.sh <proyecto> --check
 ./scripts/deploy.sh <proyecto>
