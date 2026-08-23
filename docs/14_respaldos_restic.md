@@ -846,10 +846,22 @@ RESTIC_REPO_REMOTO="b2:mi-bucket:nomad"
 Inicializa el repositorio remoto una vez:
 
 ```bash
-# [servidor]
-set -a; . /etc/nomad/restic-remoto.env; set +a
-sudo -E restic init --repo ${RESTIC_REPO_REMOTO} --password-file ${RESTIC_PASSWORD_FILE}
+# [servidor] — como root, porque el archivo de credenciales es 600 y de root:
+# tu usuario NO puede leerlo, y 'sudo' limpia el entorno entre comandos.
+sudo -i
 ```
+
+```bash
+# [servidor, como root] — ajusta la ruta a la de tu clon
+cd ~<TU_USUARIO>/nomad_server && source scripts/lib/entorno.sh
+set -a; . /etc/nomad/restic-remoto.env; set +a
+restic init --repo ${RESTIC_REPO_REMOTO} --password-file ${RESTIC_PASSWORD_FILE}
+exit
+```
+
+> **`Account ID ($B2_ACCOUNT_ID) is empty` significa que no estás como root**, o que no cargaste el
+> archivo. No se arregla poniendo más `sudo`: el usuario no puede leer un archivo `600` de `root`,
+> así que no hay entorno que `sudo -E` pueda conservar.
 
 El script de respaldo usa `restic copy` para replicar las instantáneas locales al remoto. Copiar en
 lugar de respaldar dos veces evita leer y cifrar todo otra vez.
@@ -1105,7 +1117,8 @@ sudo systemctl daemon-reload
 | Los permisos no se conservan al restaurar | Se restauró sin `sudo`, o el destino es exFAT/NTFS | Restaura con `sudo` y sobre un sistema de archivos POSIX | § 5 paso 1 |
 | `restic check` da errores de integridad | El disco USB se está degradando | Sustituye el disco. Comprueba su salud con `sudo smartctl -H` | Capítulo [02](02_validacion_equipo.md) |
 | El monitor de Uptime Kuma está rojo sin motivo aparente | El respaldo no se ejecutó: servidor apagado, disco desconectado o fallo | Eso es exactamente lo que debe detectar. Mira `journalctl -u nomad-respaldo` | § 3.6 |
-| La copia remota falla y la local no | Credenciales del remoto mal, o sin red | `set -a; . /etc/nomad/restic-remoto.env; set +a` y prueba `restic -r <remoto> snapshots` | [restic — B2](https://restic.readthedocs.io/en/stable/030_preparing_a_new_repo.html#backblaze-b2) |
+| La copia remota falla y la local no | Credenciales del remoto mal, o sin red | Como root (`sudo -i`): `set -a; . /etc/nomad/restic-remoto.env; set +a` y prueba `restic -r <remoto> snapshots` | [restic — B2](https://restic.readthedocs.io/en/stable/030_preparing_a_new_repo.html#backblaze-b2) |
+| `Account ID ($B2_ACCOUNT_ID) is empty` | Se intentó cargar `/etc/nomad/restic-remoto.env` desde una sesión de usuario: es `600` y de `root`, no se puede leer | `sudo -i` primero, y cargarlo dentro | § 5 paso 12 |
 | El servidor se queda en consola de emergencia al arrancar | Falta `nofail` en la línea de `/etc/fstab` | Consola física: edita `/etc/fstab` y añádelo. Es el error más caro del capítulo | § 5 paso 2 |
 | El respaldo falla cada noche con «no está montado» | `RESTIC_USB_UUID` mal copiado o del disco en vez de la partición | `sudo blkid ${DISCO}1` y vuelve a fijarlo con `--fijar` | § 4.2 |
 | El repositorio se creó en `/restic/` o en una ruta rara | `RESTIC_USB_MOUNT` o `SERVIDOR_HOSTNAME` vacías al ejecutar `restic init` | Borra esa ruta, carga el entorno y repite el paso 4 | § 5 paso 0 |

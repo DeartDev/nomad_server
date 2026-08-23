@@ -222,22 +222,42 @@ Cualquier escenario que toque los respaldos empieza igual. **Dónde está el rep
 modo** (capítulo [14](14_respaldos_restic.md) § 3.3), así que se resuelve una vez en la variable
 `REPO` y el resto del capítulo la usa:
 
+**Trabaja como root desde aquí.** No es comodidad: `/etc/nomad/restic-remoto.env` tiene permisos
+`600` y pertenece a `root`, así que tu usuario **no puede leerlo**, y `sudo` limpia el entorno entre
+comandos. Peleándose con eso en cada orden se pierden diez minutos y la paciencia, que son
+exactamente lo que no sobra durante una recuperación:
+
 ```bash
-# [servidor] — con el entorno ya cargado (paso 0)
-if [ -n "${RESTIC_USB_UUID}" ]; then
-    sudo mountpoint -q ${RESTIC_USB_MOUNT} || sudo mount ${RESTIC_USB_MOUNT}
-    export REPO="${RESTIC_REPO_LOCAL}"
-else
-    set -a; . /etc/nomad/restic-remoto.env; set +a
-    export REPO="${RESTIC_REPO_REMOTO}"
-fi
-echo "Repositorio: ${REPO}"
-sudo -E restic snapshots --repo "${REPO}" --password-file ${RESTIC_PASSWORD_FILE} | tail -5
+# [servidor]
+sudo -i
 ```
 
-Criterio de aceptación: lista instantáneas con sus fechas. El `-E` de `sudo -E` es imprescindible en
-el caso remoto: sin él, `sudo` limpia el entorno y las credenciales del proveedor no llegan a
-`restic`, con un error de autenticación que despista porque las credenciales sí son correctas.
+Y ya como root, una sola vez:
+
+```bash
+# [servidor, como root] — ajusta la ruta a la de tu clon del repositorio
+cd ~<TU_USUARIO>/nomad_server && source scripts/lib/entorno.sh
+
+if [ -n "${RESTIC_USB_UUID}" ]; then
+    mountpoint -q ${RESTIC_USB_MOUNT} || mount ${RESTIC_USB_MOUNT}
+    REPO="${RESTIC_REPO_LOCAL}"
+else
+    set -a; . /etc/nomad/restic-remoto.env; set +a
+    REPO="${RESTIC_REPO_REMOTO}"
+fi
+echo "Repositorio: ${REPO}"
+
+restic snapshots --repo "${REPO}" --password-file ${RESTIC_PASSWORD_FILE} | tail -5
+```
+
+Criterio de aceptación: lista instantáneas con sus fechas.
+
+> **Si ves `Account ID ($B2_ACCOUNT_ID) is empty`**, no estás como root o no cargaste el archivo de
+> credenciales: repite el bloque entero. Es el error que aparece cuando se intenta hacer esto con
+> `sudo` delante de cada comando en lugar de dentro de una sesión de root.
+
+Todos los comandos `restic` del resto del capítulo asumen que estás en esa sesión de root con `REPO`
+definida. Si cierras la sesión o abres otra terminal, vuelve a ejecutar el bloque de arriba.
 
 ---
 
@@ -503,7 +523,7 @@ sudo vim ${RESTIC_PASSWORD_FILE}
 
 ```bash
 # [servidor] — comprueba que el repositorio se abre
-sudo -E restic snapshots --repo "${REPO}" --password-file ${RESTIC_PASSWORD_FILE}
+restic snapshots --repo "${REPO}" --password-file ${RESTIC_PASSWORD_FILE}
 ```
 
 Criterio de aceptación: lista las instantáneas con sus fechas.
@@ -542,7 +562,7 @@ a los indicios.
 
 ```bash
 # [servidor]
-sudo -E restic restore ${INSTANTANEA} \
+restic restore ${INSTANTANEA} \
     --repo "${REPO}" \
     --password-file ${RESTIC_PASSWORD_FILE} \
     --target / \
@@ -578,7 +598,7 @@ ls ~/.cloudflared/${CF_TUNEL_ID}.json
 
 ```bash
 # [servidor] — consultar el manifiesto: qué había instalado
-sudo -E restic restore ${INSTANTANEA} \
+restic restore ${INSTANTANEA} \
     --repo "${REPO}" \
     --password-file ${RESTIC_PASSWORD_FILE} \
     --target /tmp/manifiesto \
@@ -603,7 +623,7 @@ vez y **volver a desactivar la caducidad de clave**.
 
 ```bash
 # [servidor] — los archivos de los proyectos
-sudo -E restic restore ${INSTANTANEA} \
+restic restore ${INSTANTANEA} \
     --repo "${REPO}" \
     --password-file ${RESTIC_PASSWORD_FILE} \
     --target / \
@@ -612,7 +632,7 @@ sudo -E restic restore ${INSTANTANEA} \
 
 ```bash
 # [servidor] — y los volcados de las bases de datos, que van aparte
-sudo -E restic restore ${INSTANTANEA} \
+restic restore ${INSTANTANEA} \
     --repo "${REPO}" \
     --password-file ${RESTIC_PASSWORD_FILE} \
     --target / \
@@ -732,14 +752,14 @@ ssh ${ADMIN_USUARIO}@${TS_HOSTNAME}
 
 ```bash
 # [servidor] — ¿qué instantáneas hay?
-sudo -E restic snapshots \
+restic snapshots \
     --repo "${REPO}" \
     --password-file ${RESTIC_PASSWORD_FILE}
 ```
 
 ```bash
 # [servidor] — buscar el archivo en el histórico
-sudo -E restic find \
+restic find \
     --repo "${REPO}" \
     --password-file ${RESTIC_PASSWORD_FILE} \
     "nombre-del-archivo"
@@ -753,7 +773,7 @@ echo "Se restaurará: ${INSTANTANEA}"
 
 ```bash
 # [servidor] — restaurar a un directorio temporal, NUNCA encima del original
-sudo -E restic restore ${INSTANTANEA} \
+restic restore ${INSTANTANEA} \
     --repo "${REPO}" \
     --password-file ${RESTIC_PASSWORD_FILE} \
     --target /tmp/recuperado \
@@ -776,7 +796,7 @@ cp -a /tmp/recuperado${DATOS_RAIZ}/mi-proyecto/datos/<archivo> ${DATOS_RAIZ}/mi-
 ```bash
 # [servidor]
 sudo mkdir -p /mnt/restic
-sudo -E restic mount /mnt/restic \
+restic mount /mnt/restic \
     --repo "${REPO}" \
     --password-file ${RESTIC_PASSWORD_FILE}
 # en otra terminal:
@@ -848,7 +868,7 @@ escalonada del capítulo 14 permiten elegir un punto anterior:
 
 ```bash
 # [servidor]
-sudo -E restic snapshots --repo "${REPO}" --password-file ${RESTIC_PASSWORD_FILE}
+restic snapshots --repo "${REPO}" --password-file ${RESTIC_PASSWORD_FILE}
 # elige una instantánea claramente anterior a los indicios
 ```
 
