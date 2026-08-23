@@ -483,8 +483,10 @@ camino.
 # [servidor] — qué escucha en TODAS las interfaces, mirando la columna local
 ss -tulnH | awk '{print $5}' | grep -E '^(0\.0\.0\.0|\*|\[::\]):' | sort -u
 
-# [servidor] — y qué abre el cortafuegos
-sudo nft list chain inet nomad_filter entrada | grep -E 'dport|policy'
+# [servidor] — y qué abre el cortafuegos, ENTERO
+# Filtrar por 'dport' se deja fuera las reglas por interfaz o por origen, que
+# son las que dejan entrar a Tailscale: verías menos superficie de la que hay.
+sudo nft list chain inet nomad_filter entrada
 
 # [servidor] — ningún puerto publicado por Docker en todas las interfaces
 sudo ss -tulpnH | awk '$5 ~ /^(0\.0\.0\.0|\*|\[::\]):/ && /docker-proxy/'
@@ -493,7 +495,10 @@ docker ps --format 'table {{.Names}}\t{{.Ports}}'
 ```
 
 Criterio: la intersección de las dos primeras listas es SSH y, tras el capítulo
-[08](08_tailscale.md), el `udp 41641` de Tailscale. El tercer comando no debe imprimir nada:
+[08](08_tailscale.md), el `udp 41641` de Tailscale. Ten presente que la cadena tiene además reglas
+**por interfaz y por rango** —`iifname tailscale0 accept` y el CGNAT `100.64.0.0/10`—, así que todo
+lo que escuche en la loopback o en la IP de Tailscale es alcanzable **desde tu tailnet** aunque no
+aparezca en la primera lista. Es el diseño, no un descuido: la tailnet es red de confianza. El tercer comando no debe imprimir nada:
 **Docker se salta la cadena de entrada**, así que un puerto suyo en `0.0.0.0` está expuesto tenga o
 no regla (capítulo [07](07_endurecimiento_del_sistema.md) § 7).
 
