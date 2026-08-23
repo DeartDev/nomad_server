@@ -757,18 +757,18 @@ sudo -E restic restore ${INSTANTANEA} \
     --repo "${REPO}" \
     --password-file ${RESTIC_PASSWORD_FILE} \
     --target /tmp/recuperado \
-    --include /srv/mi-proyecto/datos
+    --include ${DATOS_RAIZ}/mi-proyecto/datos
 ```
 
 ```bash
 # [servidor] — revisa antes de copiar
-ls -la /tmp/recuperado/srv/mi-proyecto/datos
-diff -r /tmp/recuperado/srv/mi-proyecto/datos ${DATOS_RAIZ}/mi-proyecto/datos
+ls -la /tmp/recuperado${DATOS_RAIZ}/mi-proyecto/datos
+diff -r /tmp/recuperado${DATOS_RAIZ}/mi-proyecto/datos ${DATOS_RAIZ}/mi-proyecto/datos
 ```
 
 ```bash
 # [servidor] — y solo entonces
-cp -a /tmp/recuperado/srv/mi-proyecto/datos/<archivo> ${DATOS_RAIZ}/mi-proyecto/datos/
+cp -a /tmp/recuperado${DATOS_RAIZ}/mi-proyecto/datos/<archivo> ${DATOS_RAIZ}/mi-proyecto/datos/
 ```
 
 **Para explorar sin restaurar**, restic puede montar el repositorio como un sistema de archivos:
