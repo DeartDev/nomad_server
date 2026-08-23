@@ -472,14 +472,26 @@ camino.
 **Paso 5 — Revisar la superficie expuesta.**
 
 ```bash
-# [servidor]
-sudo ss -tulpn | grep LISTEN
+# [servidor] — qué escucha en TODAS las interfaces, mirando la columna local
+ss -tulnH | awk '{print $5}' | grep -E '^(0\.0\.0\.0|\*|\[::\]):' | sort -u
+
+# [servidor] — y qué abre el cortafuegos
+sudo nft list chain inet nomad_filter entrada | grep -E 'dport|policy'
+
+# [servidor] — ningún puerto publicado por Docker en todas las interfaces
+sudo ss -tulpnH | awk '$5 ~ /^(0\.0\.0\.0|\*|\[::\]):/ && /docker-proxy/'
+
 docker ps --format 'table {{.Names}}\t{{.Ports}}'
-sudo nft list ruleset | head -40
 ```
 
-Criterio: solo SSH y el punto de entrada interno de Traefik en su dirección privada. Ningún
-contenedor publicando en `0.0.0.0`.
+Criterio: la intersección de las dos primeras listas es SSH y, tras el capítulo
+[08](08_tailscale.md), el `udp 41641` de Tailscale. El tercer comando no debe imprimir nada:
+**Docker se salta la cadena de entrada**, así que un puerto suyo en `0.0.0.0` está expuesto tenga o
+no regla (capítulo [07](07_endurecimiento_del_sistema.md) § 7).
+
+> No filtres por la línea entera buscando `0.0.0.0`: `ss` imprime `0.0.0.0:*` en la columna del par
+> remoto de **todo** socket en escucha, así que casaría con todas y el criterio dejaría de decir
+> nada. Se mira la quinta columna, la dirección local.
 
 ```bash
 # [cliente, desde fuera de tu red]
@@ -515,10 +527,19 @@ sudo ncdu /var --exclude /var/lib/docker
 Si algún volumen supera el 70 %, amplíalo ahora en lugar de esperar a que se llene:
 
 ```bash
-# [servidor]
-sudo lvextend -r -L +20G /dev/vg0/var
+# [servidor] — el nombre del grupo es el de TU servidor, no 'vg0'
+VG="$(sudo vgs --noheadings -o vg_name | tr -d ' ')"
+echo "Grupo de volúmenes: ${VG}"
+sudo lvextend -r -L +20G "/dev/${VG}/var"
 df -h /var
 ```
+
+El nombre del grupo lo eligió el instalador en el capítulo [03](03_instalacion_debian.md) y suele ser
+el del servidor. Copiar un `/dev/vg0/var` de ejemplo falla sin más, pero conviene sacarlo del sistema
+en lugar de adivinarlo: `lvextend` sobre el volumen equivocado sí haría algo, y no lo que querías.
+
+> `-r` redimensiona además el sistema de archivos. Sin él amplías el volumen y `df` sigue mostrando
+> el tamaño antiguo, que es un desconcierto clásico.
 
 ### 5.4 Subir de versión mayor de Debian
 
