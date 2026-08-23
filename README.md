@@ -187,6 +187,7 @@ No son capítulos de procedimiento: se consultan desde cualquier punto del monta
 
 | # | Anexo | Para qué |
 |---|---|---|
+| 96 | [Contrato de dockerización](docs/96_contrato_de_dockerizacion.md) | **Cómo debe estar construido un proyecto** para poder desplegarse aquí. Autocontenido: se entrega a quien lo desarrolle |
 | 97 | [Las dos vías de montaje](docs/97_vias_de_montaje.md) | La secuencia completa con scripts, la equivalencia manual, y qué no automatiza nada |
 | 98 | [Variables, entorno y sesiones](docs/98_variables_y_entorno.md) | De dónde sale cada `${VALOR}`, cómo cargarlo, y cómo parar y retomar el montaje |
 | 99 | [Glosario y referencias](docs/99_glosario_y_referencias.md) | Términos y documentación oficial |
