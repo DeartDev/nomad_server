@@ -175,6 +175,31 @@ leer el sistema de archivos. Si un gancho falla, el respaldo **continúa** —lo
 mereciendo guardarse— pero el aviso al monitor va en rojo con el motivo: un respaldo sin el volcado
 de la base de datos no sirve para lo que uno cree que sirve, y eso hay que verlo el mismo día.
 
+**Hay una plantilla por motor**, porque el comando de volcado y sus trampas son distintos:
+
+| Motor | Plantilla | El detalle que importa |
+|---|---|---|
+| PostgreSQL | `etc/pre-respaldo-postgres.sh` | `pg_dump` es consistente por sí solo: trabaja dentro de una transacción |
+| MySQL / MariaDB | `etc/pre-respaldo-mysql.sh` | **`--single-transaction` no es opcional**: sin él, un volcado de una base en uso mezcla el estado de unas tablas con el de otras. Solo funciona con InnoDB |
+| MongoDB | `etc/pre-respaldo-mongodb.sh` | `--archive` produce un solo archivo en lugar de un árbol, más fácil de mover |
+
+**Redis es un caso aparte y conviene decidirlo, no heredarlo.** Si lo usas de caché, no hay nada que
+respaldar: se reconstruye solo y respaldarlo solo añade peso. Si lo usas como almacén de datos, su
+fichero `dump.rdb` se escribe periódicamente, así que copiarlo sin más te da un estado de hace unos
+minutos. Para forzar uno actual, el gancho sería:
+
+```bash
+docker exec miproyecto-redis redis-cli BGSAVE
+sleep 5   # BGSAVE es asíncrono: vuelve antes de terminar
+docker cp miproyecto-redis:/data/dump.rdb /var/backups/nomad/volcados/miproyecto/
+```
+
+Ninguna de las tres plantillas escribe la contraseña dentro: la leen del entorno del propio
+contenedor, que ya la tiene. Así el gancho no es un secreto más que custodiar y proteger.
+
+Las tres comprueban además que el volcado **no esté vacío**. Un volcado de 200 bytes es lo que
+produce una autenticación fallida, y pasaría desapercibido junto a los correctos durante meses.
+
 Un detalle del gancho de ejemplo que conviene entender: escribe siempre **el mismo archivo**, no uno
 por fecha. El histórico lo da restic, que guarda la versión de cada día en su instantánea y aplica
 la política de retención. Acumular volcados fechados duplicaría ese trabajo y llenaría el disco.
