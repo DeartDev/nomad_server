@@ -463,8 +463,16 @@ que da un disco antes de morirse.
 # [servidor]
 sudo lynis audit system --quick --quiet \
     --report-file ~/nomad_server/inventario/lynis-$(date +%F).dat
-grep '^hardening_index' ~/nomad_server/inventario/lynis-*.dat | tail -5
+
+# Sin este chown el informe queda de root dentro de tu directorio y el grep de
+# abajo se salta precisamente el que acabas de generar, en silencio.
+sudo chown "${USER}:" ~/nomad_server/inventario/lynis-$(date +%F).dat
+
+grep -h '^hardening_index' ~/nomad_server/inventario/lynis-*.dat | tail -5
 ```
+
+Criterio: aparece una línea **por cada auditoría**, la de hoy incluida. Si ves menos líneas que
+archivos hay en `inventario/`, alguna no se puede leer.
 
 El número absoluto no dice nada. **Que haya bajado sí**: significa que algo se desactivó por el
 camino.

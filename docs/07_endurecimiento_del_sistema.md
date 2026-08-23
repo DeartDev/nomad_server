@@ -529,6 +529,11 @@ Guarda el resultado con fecha:
 mkdir -p ~/nomad_server/inventario
 sudo lynis audit system --quick --quiet --report-file \
     ~/nomad_server/inventario/lynis-$(date +%F).dat
+
+# El informe lo escribe root con permisos restrictivos, dentro de TU directorio:
+# sin esto no puedes ni leerlo.
+sudo chown "${USER}:" ~/nomad_server/inventario/lynis-$(date +%F).dat
+
 grep -E '^hardening_index' ~/nomad_server/inventario/lynis-$(date +%F).dat
 ```
 
