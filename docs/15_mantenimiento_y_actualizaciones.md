@@ -106,6 +106,21 @@ Tarda segundos gracias a la deduplicación. No hay excusa para saltárselo.
 | `docker system prune -a` | Además, **todas las imágenes sin contenedor en marcha** | Hay que volver a descargarlo todo; con red lenta, el arranque tras un reinicio se alarga mucho |
 | `docker volume prune` | Volúmenes sin usar | **Puede borrar datos.** Este montaje usa montajes de directorio, así que no debería haber volúmenes con datos, pero conviene revisar antes |
 
+**Y hay una razón más para no usar `-a` justo después de actualizar**, que es cuando más tienta:
+las imágenes «sin usar» que ves ahí incluyen **la versión anterior de lo que acabas de actualizar**.
+Es exactamente la que necesitarías para volver atrás si la nueva resulta tener un problema que no se
+nota el primer día.
+
+```console
+$ docker system df
+TYPE      TOTAL   ACTIVE   SIZE      RECLAIMABLE
+Images    13      7        2.52GB    97.56MB (3%)
+```
+
+Seis imágenes inactivas ocupando 97 MB en un disco con decenas de gigas libres no son un problema
+que resolver: son tu vía de vuelta. Deja que se acumulen un ciclo o dos y límpialas cuando el
+espacio apriete de verdad, o cuando la versión nueva lleve un mes funcionando.
+
 ### 3.6 Ampliar volúmenes en caliente
 
 **Decisión: dejar espacio sin asignar en el grupo de volúmenes y ampliar cuando haga falta.**
