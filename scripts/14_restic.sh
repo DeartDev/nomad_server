@@ -516,7 +516,18 @@ if (( MODO_CHECK == 0 )); then
     # 'pre-respaldo.d' guarda los volcados de bases de datos que deben hacerse
     # ANTES del respaldo. Se crea vacío: cada proyecto pone el suyo.
     mkdir -p /etc/nomad /etc/nomad/pre-respaldo.d /var/backups/nomad
-    chmod 700 /etc/nomad/pre-respaldo.d
+
+    # El directorio es legible; los ganchos de dentro, no. Lo que hay que
+    # proteger es su CONTENIDO —pueden llevar nombres de base y rutas—, y eso
+    # lo dan los 700 de cada archivo, que instala cada proyecto.
+    #
+    # Con el directorio en 700, 'revisar_proyecto.sh' no puede expandir el
+    # glob que busca el gancho de un proyecto, porque se ejecuta sin
+    # privilegios: la comprobación fallaba SIEMPRE, también con el gancho
+    # correctamente instalado, y el capítulo 12 quedaba imposible de aprobar.
+    # Lo único que se expone así son los nombres de archivo, es decir qué
+    # proyectos tienen base de datos.
+    chmod 755 /etc/nomad/pre-respaldo.d
 fi
 
 # Aviso si hay bases de datos en marcha y ningún gancho que las vuelque: el

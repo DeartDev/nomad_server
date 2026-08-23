@@ -170,6 +170,13 @@ Y **pruébalo antes de fiarte de él**, que es la diferencia entre tener el ganc
 sudo /etc/nomad/pre-respaldo.d/10-ejemplo-postgres.sh && echo CORRECTO
 ```
 
+> **Por qué el directorio es `755` y los ganchos `700`.** Lo que hay que proteger es el contenido de
+> cada gancho, y de eso se encargan sus propios `700`. El directorio se deja legible porque
+> `revisar_proyecto.sh` (capítulo 12) comprueba si un proyecto tiene gancho expandiendo un glob, y
+> se ejecuta sin privilegios: con el directorio en `700` esa comprobación falla **siempre**, también
+> con el gancho bien instalado, y el capítulo 12 se vuelve imposible de aprobar. Lo único que queda
+> a la vista son los nombres de archivo, o sea qué proyectos tienen base de datos.
+
 El script de respaldo ejecuta todo lo ejecutable de ese directorio, por orden de nombre, antes de
 leer el sistema de archivos. Si un gancho falla, el respaldo **continúa** —los archivos siguen
 mereciendo guardarse— pero el aviso al monitor va en rojo con el motivo: un respaldo sin el volcado
