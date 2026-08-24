@@ -537,10 +537,24 @@ verificar_auditoria() {
 
     # Proyectos que no cumplen el anexo 96, según lo que dejó el conserje.
     local incumplen=0 informe
-    for informe in "${DATOS_RAIZ}"/auditoria/informes/*.auditoria; do
+    for informe in "${dir_informes}"/*.auditoria; do
         [[ -f "${informe}" ]] || continue
+        local proyecto
+        proyecto="$(basename "${informe}" .auditoria)"
+
+        # No poder leer el informe NO es incumplir. Sin esta distinción, un
+        # problema de permisos se disfraza de proyecto defectuoso y se busca
+        # el fallo donde no está.
+        if [[ ! -r "${informe}" ]]; then
+            fallo "No se puede leer el informe de '${proyecto}': permisos incorrectos."
+            fallo "    sudo ./scripts/17_auditoria.sh   (corrige dueño y grupo)"
+            incumplen=$(( incumplen + 1 ))
+            continue
+        fi
+
         if ! sed -n 's/^\[codigo de salida: \([0-9]*\)\]$/\1/p' "${informe}" | contiene -x 0; then
-            fallo "El proyecto '$(basename "${informe}" .auditoria)' no cumple el anexo 96."
+            fallo "El proyecto '${proyecto}' no cumple el anexo 96."
+            fallo "    Detalle: ${informe}"
             incumplen=$(( incumplen + 1 ))
         fi
     done

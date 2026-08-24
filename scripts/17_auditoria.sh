@@ -141,35 +141,12 @@ log_paso "Directorio de informes"
 GRUPO_ADMIN="$(id -gn "${ADMIN_USUARIO}")"
 
 for D in "${DIR_AUDITORIA}" "${DIR_INFORMES}"; do
-    if [[ ! -d "${D}" ]]; then
-        ejecutar install -d -m 0750 -o "${AUDITORIA_USUARIO}" -g "${GRUPO_ADMIN}" "${D}"
-        continue
-    fi
-
-    # Existe: hay que comprobar que su dueño, grupo y modo son los correctos y
-    # corregirlos si no. Darlo por bueno solo porque el directorio existe deja
-    # los permisos de una versión anterior para siempre.
-    ACTUAL="$(stat -c '%U:%G:%a' "${D}")"
-    DESEADO="${AUDITORIA_USUARIO}:${GRUPO_ADMIN}:750"
-    if [[ "${ACTUAL}" == "${DESEADO}" ]]; then
-        log_sinca "${D} ya existe con dueño y permisos correctos."
+    if [[ -d "${D}" ]]; then
+        log_sinca "${D} ya existe."
     else
-        log_info "${D}: ${ACTUAL} → ${DESEADO}"
-        ejecutar chown "${AUDITORIA_USUARIO}:${GRUPO_ADMIN}" "${D}"
-        ejecutar chmod 750 "${D}"
+        ejecutar install -d -m 0750 -o "${AUDITORIA_USUARIO}" -g "${GRUPO_ADMIN}" "${D}"
     fi
 done
-
-# Los informes que ya estuvieran escritos conservan el grupo antiguo hasta que
-# el recolector los reescriba. Se corrigen ahora para no dejar una ventana en
-# la que el capítulo está instalado y el informe sigue sin poder leerse.
-if compgen -G "${DIR_INFORMES}/*" >/dev/null 2>&1; then
-    if [[ -n "$(find "${DIR_INFORMES}" -maxdepth 1 -type f ! -group "${GRUPO_ADMIN}" -print -quit)" ]]; then
-        ejecutar chgrp "${GRUPO_ADMIN}" "${DIR_INFORMES}"/*
-    else
-        log_sinca "Los informes ya tienen el grupo correcto."
-    fi
-fi
 
 # --- Paso 3: los scripts -----------------------------------------------------
 log_paso "Recolector y conserje"
@@ -195,6 +172,40 @@ fi
 
 habilitar_servicio nomad-auditoria.timer
 habilitar_servicio nomad-conserje.path
+
+# --- Paso 5: reconciliar dueño, grupo y permisos -----------------------------
+log_paso "Permisos de los informes"
+
+# ESTO VA AL FINAL, Y EL ORDEN NO ES CASUAL.
+#
+# Un 'chown' sobre ${DATOS_RAIZ}/auditoria produce un evento de atributo en
+# ${DATOS_RAIZ}, que es justo lo que vigila nomad-conserje.path. Si esta
+# corrección se hiciera antes de instalar el conserje nuevo, el vigilante
+# lanzaría el VIEJO y volvería a escribir los informes con el grupo antiguo,
+# deshaciendo lo que se acaba de arreglar. Se vio pasar en un servidor real.
+#
+# Corriendo aquí, cualquier disparo usa ya el conserje nuevo, que escribe con
+# el grupo correcto.
+DESEADO="${AUDITORIA_USUARIO}:${GRUPO_ADMIN}:750"
+for D in "${DIR_AUDITORIA}" "${DIR_INFORMES}"; do
+    ACTUAL="$(stat -c '%U:%G:%a' "${D}" 2>/dev/null || echo 'ninguno')"
+    if [[ "${ACTUAL}" == "${DESEADO}" ]]; then
+        log_sinca "${D} con dueño y permisos correctos."
+    else
+        log_info "${D}: ${ACTUAL} → ${DESEADO}"
+        ejecutar chown "${AUDITORIA_USUARIO}:${GRUPO_ADMIN}" "${D}"
+        ejecutar chmod 750 "${D}"
+    fi
+done
+
+# Los informes ya escritos conservan el grupo con el que nacieron hasta que
+# alguien los reescriba. Se corrigen ahora para no dejar una ventana en la que
+# el capítulo está instalado y el informe sigue sin poder leerse.
+if [[ -n "$(find "${DIR_INFORMES}" -maxdepth 1 -type f ! -group "${GRUPO_ADMIN}" -print -quit 2>/dev/null)" ]]; then
+    ejecutar chgrp "${GRUPO_ADMIN}" "${DIR_INFORMES}"/*
+else
+    log_sinca "Los informes ya tienen el grupo correcto."
+fi
 
 # --- Aviso de lo que queda a mano --------------------------------------------
 if [[ -z "${AUDITORIA_PUSH_URL:-}" ]]; then

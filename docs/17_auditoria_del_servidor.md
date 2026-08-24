@@ -120,6 +120,17 @@ la única persona que va a leerlo: la rutina semanal del capítulo 15 se ejecuta
 Es un fallo que engaña dos veces, porque el mensaje apunta al sitio equivocado. Por eso el
 verificador comprueba primero si puede entrar en el directorio y lo dice con esas palabras.
 
+### 3.6 Los permisos se reconcilian al final, y el orden no es casual
+
+`scripts/17_auditoria.sh` corrige dueño, grupo y modo **después** de instalar el conserje, no antes.
+
+El motivo se descubrió en un servidor real: un `chown` sobre `${DATOS_RAIZ}/auditoria` produce un
+evento de atributo en `${DATOS_RAIZ}`, que es justo lo que vigila `nomad-conserje.path`. Corrigiendo
+los permisos primero, el vigilante disparaba el conserje **viejo**, que volvía a escribir los
+informes con el grupo antiguo y deshacía en el acto lo que se acababa de arreglar.
+
+Corriendo al final, cualquier disparo usa ya el conserje nuevo.
+
 ### 3.6 El vigilante detecta proyectos nuevos, no compose editados
 
 `systemd.path` vigila un directorio **sin recursividad** y no admite comodines. Por tanto
@@ -518,6 +529,7 @@ El servidor vuelve exactamente al estado anterior; **ningún otro capítulo depe
 | Se fijó la URL pero sigue sin llegar nada | No se reinstaló el recolector después. La URL se incrusta al renderizar la plantilla | `sudo ./scripts/17_auditoria.sh`, y comprueba con `sudo grep '^push_url=' /usr/local/sbin/nomad-auditoria.sh` |
 | Al fijar la URL aparecen `[1] 97815` y `[2] 97816`, y la URL queda cortada | El `&` de la URL sin comillas: el shell parte el comando y lanza trabajos en segundo plano | Vuelve a fijarla **entre comillas simples** y solo hasta el token. El script se niega a instalar si detecta `?` o `&` |
 | Kuma avisa de que la auditoría cayó, pero el servidor está bien | El *Heartbeat Interval* del monitor es menor que 24 h | Súbelo a 93600 s (26 h): la auditoría solo avisa una vez al día |
+| `sed: can't read ....auditoria: Permission denied` seguido de «no cumple el anexo 96» | Un informe con el grupo antiguo. **No poder leerlo no es incumplir**: el mensaje de incumplimiento es engañoso | `sudo ./scripts/17_auditoria.sh`. Desde esta versión el verificador distingue los dos casos |
 | `verificar_sistema.sh` dice que no hay `sello.txt`, pero con `sudo cat` sí está | El directorio de informes tiene el grupo del usuario de la auditoría en vez del tuyo, así que no puedes entrar. El mensaje engaña: no es que falte, es que no se ve | `sudo ./scripts/17_auditoria.sh`, que corrige dueño, grupo y modo de lo que ya existía |
 | El verificador dice que `traefik` u `observabilidad` no cumplen el anexo 96 | Versión anterior del conserje: medía la infraestructura con la vara de los proyectos | Actualiza el repositorio y reinstala con `sudo ./scripts/17_auditoria.sh`. El conserje retira solo los informes huérfanos |
 | Un proyecto nuevo no dispara el conserje | `systemd.path` no es recursivo | Es una limitación conocida, explicada en § 3.6. La revisión diaria lo cubre en menos de 24 h |
