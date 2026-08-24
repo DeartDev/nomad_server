@@ -556,6 +556,24 @@ git commit -m "Redactar antes de publicar, y no publicar si la redaccion falla"
 
 ```bash
 # ===========================================================================
+#  LO VOLÁTIL
+# ===========================================================================
+#  Líneas que cambian en cada ejecución sin que haya cambiado nada del
+#  servidor. Se quitan ANTES de comparar, no del informe: en el informe la
+#  marca de tiempo del verificador es información legítima; en el diff es
+#  ruido que aparecería todos los días.
+#
+#  Esto no es cosmética. En la fase 3 el agente lee este diff a diario, así
+#  que cada línea de ruido se paga en tokens todas las mañanas y, peor, tapa
+#  lo que sí cambió.
+sin_volatil() {
+    sed -E \
+        -e '/^==> Verificación de .* — [0-9]{4}-[0-9]{2}-[0-9]{2}/d' \
+        -e 's/Up [0-9]+ (second|minute|hour|day|week|month)s?/Up …/g' \
+        -e 's/\(healthy\)/(sano)/g'
+}
+
+# ===========================================================================
 #  VALORES SUSTITUIDOS AL INSTALAR
 # ===========================================================================
 dir_informes="${DATOS_RAIZ}/hermes/informes"
@@ -567,17 +585,25 @@ anterior="${dir_informes}/estado.anterior.txt"
 sello="${dir_informes}/sello.txt"
 cambios="${dir_informes}/cambios.txt"
 
+# Donde se deja el informe SIN publicar cuando la redacción no lo deja limpio.
+# En /root y con permisos 600: fuera del directorio de informes, así que el
+# agente no puede leerlo ni siquiera en la fase 2.
+fuga="/root/nomad-auditoria-fuga.txt"
+
 inicio="$(date +%s)"
-tmp="$(mktemp)"
-trap 'rm -f "${tmp}"' EXIT
+crudo="$(mktemp)"
+limpio="$(mktemp)"
+trap 'rm -f "${crudo}" "${limpio}"' EXIT
 
 # ===========================================================================
 #  RECOLECCIÓN
 # ===========================================================================
-#  Cada bloque va con '|| true'. Un recolector que aborta al primer comando
-#  que falla produce justo el informe que no sirve: el del día en que algo iba
-#  mal. Los fallos se anotan y se sigue.
+#  Cada bloque termina en '|| true'. Un recolector que aborta al primer
+#  comando que falla produce justo el informe que no sirve: el del día en que
+#  algo iba mal. Los fallos se anotan y se sigue.
 titulo() { printf '\n===== %s =====\n' "$1"; }
+
+codigo_verificador=""
 
 {
     printf 'INFORME DE ESTADO — %s\n' "$(hostname)"
@@ -604,19 +630,31 @@ titulo() { printf '\n===== %s =====\n' "$1"; }
     df -h / /var /srv 2>&1 || true
 
     titulo "SALUD DE LOS DISCOS"
-    # No se ejecuta un autotest: solo se lee lo que el disco ya sabe de sí
+    # No se lanza ningún autotest: solo se lee lo que el disco ya sabe de sí
     # mismo. Un test largo cada mañana desgasta más de lo que informa.
-    for disco in /dev/nvme?n? /dev/sd?; do
-        [[ -b "${disco}" ]] || continue
-        printf -- '--- %s\n' "${disco}"
-        smartctl -H "${disco}" 2>&1 | grep -iE 'result|health' || true
-    done
+    #
+    # Si smartctl no está, se dice. Una sección vacía se lee como 'todo bien'
+    # y en realidad significa 'no se ha medido nada', que es lo contrario.
+    if ! command -v smartctl >/dev/null 2>&1; then
+        printf 'NO MEDIDO: smartctl no está instalado (paquete smartmontools).\n'
+    else
+        for disco in /dev/nvme?n? /dev/sd?; do
+            [[ -b "${disco}" ]] || continue
+            printf -- '--- %s\n' "${disco}"
+            salida_smart="$(smartctl -H "${disco}" 2>&1 | grep -iE 'result|health' || true)"
+            if [[ -n "${salida_smart}" ]]; then
+                printf '%s\n' "${salida_smart}"
+            else
+                printf 'NO MEDIDO: smartctl no devolvió veredicto para este disco.\n'
+            fi
+        done
+    fi
 
     titulo "ÍNDICE DE ENDURECIMIENTO"
     # Se LEE el último informe de lynis; no se ejecuta lynis. Ejecutarlo tarda
     # minutos y necesita escribir en /var/log, que esta unidad no permite. Que
-    # el informe esté viejo también es información: la rutina trimestral del
-    # capítulo 15 es la que lo renueva.
+    # el informe esté viejo también es información: quien lo renueva es la
+    # rutina trimestral del capítulo 15.
     if [[ -r /var/log/lynis-report.dat ]]; then
         grep -E '^hardening_index=' /var/log/lynis-report.dat || true
         printf 'medido el: %s\n' "$(date -r /var/log/lynis-report.dat --iso-8601=seconds)"
@@ -629,36 +667,66 @@ titulo() { printf '\n===== %s =====\n' "$1"; }
 
     titulo "REINICIO PENDIENTE"
     if [[ -f /var/run/reboot-required ]]; then
-        printf 'SI — hay un reinicio pendiente desde %s\n' \
+        printf 'SI — pendiente desde %s\n' \
                "$(date -r /var/run/reboot-required --iso-8601=seconds)"
     else
         printf 'No.\n'
     fi
-} > "${tmp}" 2>&1 || true
+} > "${crudo}" 2>&1 || true
 
 # ===========================================================================
 #  REDACCIÓN Y PUBLICACIÓN
 # ===========================================================================
-limpio="$(mktemp)"
-trap 'rm -f "${tmp}" "${limpio}"' EXIT
-redactar < "${tmp}" > "${limpio}"
+redactar < "${crudo}" > "${limpio}"
 
-# FALLA CERRADA. Si algo sobrevivió a la redacción, no se publica informe: se
-# publica el aviso. Un informe con un secreto dentro acabaría en la API de un
-# tercero, y de ahí no se vuelve.
+escribir_para_el_agente() {
+    install -m 0640 -o "${usuario}" -g "${usuario}" "$1" "$2"
+}
+
+# FALLA CERRADA. Si algo sobrevivió a la redacción, no se publica el informe:
+# se publica el aviso. Un informe con un secreto dentro acabaría en la API de
+# un tercero, y de ahí no se vuelve.
 if fugas < "${limpio}" >/dev/null 2>&1; then
+    n_fugas="$(fugas < "${limpio}" 2>/dev/null | wc -l || true)"
+
+    # EL ORDEN IMPORTA. Primero la alarma, después la ayuda de depuración.
+    #
+    # Al revés —guardar el crudo y luego avisar— un fallo al guardarlo mata el
+    # script con 'set -e' y deja en su sitio el informe de AYER, con su sello
+    # diciendo 'publicado'. Es el peor resultado posible: parece que todo va
+    # bien y nadie se entera de nada. Ocurrió al probar esta rama.
     {
-        printf 'INFORME NO PUBLICADO — %s\n' "$(date --iso-8601=seconds)"
-        printf '\nLa redacción no ha dejado limpio el informe: quedaban patrones\n'
-        printf 'que corresponden a secretos. No se publica nada.\n\n'
-        printf 'Revísalo a mano en el servidor:\n'
-        printf '    sudo /usr/local/sbin/nomad-auditoria.sh --depurar\n'
-    } > "${estado}"
-    chown "${usuario}:${usuario}" "${estado}"; chmod 0640 "${estado}"
-    printf 'fecha=%s\nresultado=fuga-detectada\n' "$(date --iso-8601=seconds)" > "${sello}"
-    chown "${usuario}:${usuario}" "${sello}"; chmod 0640 "${sello}"
-    echo "nomad-auditoria: fuga detectada tras redactar; informe no publicado" >&2
+        printf 'INFORME NO PUBLICADO — %s\n\n' "$(date --iso-8601=seconds)"
+        printf 'La redacción no ha dejado limpio el informe: han sobrevivido %s\n' "${n_fugas}"
+        printf 'coincidencias con patrones de secreto. No se publica nada.\n\n'
+        printf 'El informe sin publicar se guarda en %s con permisos 600 y\n' "${fuga}"
+        printf 'dueño root: fuera de este directorio a propósito, para que no lo\n'
+        printf 'lea nadie más. Revísalo como root:\n\n'
+        printf '    sudo less %s\n\n' "${fuga}"
+        printf 'Cuando sepas qué patrón falta, añádelo a patrones_fuga en\n'
+        printf 'templates/etc/nomad-auditoria.sh y vuelve a ejecutar\n'
+        printf 'scripts/17_hermes.sh. Capítulo 17 § 9.\n'
+    } > "${crudo}"
+    escribir_para_el_agente "${crudo}" "${estado}"
+
+    printf 'fecha=%s\nresultado=fuga-detectada\ncoincidencias=%s\n' \
+           "$(date --iso-8601=seconds)" "${n_fugas}" > "${crudo}"
+    escribir_para_el_agente "${crudo}" "${sello}"
+
+    # Ahora sí, la copia para depurar. Si falla, se anota y se sigue: la
+    # alarma ya está dada, que es lo que no podía perderse.
+    if ! install -m 0600 -o root -g root "${limpio}" "${fuga}" 2>/dev/null; then
+        echo "nomad-auditoria: no se pudo guardar ${fuga}" >&2
+    fi
+
+    echo "nomad-auditoria: ${n_fugas} fugas tras redactar; informe no publicado" >&2
     exit 1
+fi
+
+# Una fuga anterior ya resuelta no debe dejar el fichero crudo ahí para
+# siempre: en cuanto se publica un informe limpio, se retira.
+if [[ -f "${fuga}" ]]; then
+    rm -f "${fuga}"
 fi
 
 # El informe de ayer se conserva para poder comparar. Solo uno: el histórico
@@ -671,7 +739,7 @@ if [[ -f "${estado}" ]]; then
     cp -a "${estado}" "${anterior}"
 fi
 
-install -m 0640 -o "${usuario}" -g "${usuario}" "${limpio}" "${estado}"
+escribir_para_el_agente "${limpio}" "${estado}"
 
 # ===========================================================================
 #  QUÉ CAMBIÓ DESDE AYER
@@ -679,22 +747,26 @@ install -m 0640 -o "${usuario}" -g "${usuario}" "${limpio}" "${estado}"
 #  Esto es control de coste, no comodidad: en la fase 3 el agente lee este
 #  fichero y no el informe entero.
 #
-#  El '|| true' no es decorativo: diff devuelve 1 cuando encuentra
+#  El '|| true' del diff no es decorativo: diff devuelve 1 cuando encuentra
 #  diferencias, que es el caso normal, y con 'set -e' eso mataría el script
 #  justo cuando hay algo que contar.
 {
     if [[ -f "${anterior}" ]]; then
         printf 'CAMBIOS DESDE EL INFORME ANTERIOR\n'
         printf 'Anterior: %s\n\n' "$(date -r "${anterior}" --iso-8601=seconds)"
-        # Se descartan las dos primeras líneas del informe (nombre y fecha):
-        # cambian siempre y ensucian el diff de todos los días.
-        diff -u <(tail -n +3 "${anterior}") <(tail -n +3 "${estado}") \
+        # Se descartan las tres primeras líneas de cada informe (nombre, fecha
+        # y tiempo en marcha) y después lo volátil. Sin esto, dos ejecuciones
+        # seguidas sin ningún cambio real producen igualmente un diff.
+        diff -u <(tail -n +4 "${anterior}" | sin_volatil) \
+                <(tail -n +4 "${estado}"   | sin_volatil) \
             | tail -n +3 || true
     else
         printf 'Primera ejecución: no hay informe anterior con el que comparar.\n'
     fi
-} > "${cambios}"
-chown "${usuario}:${usuario}" "${cambios}"; chmod 0640 "${cambios}"
+} > "${crudo}"
+escribir_para_el_agente "${crudo}" "${cambios}"
+
+lineas_cambiadas="$(grep -c '^[+-]' "${cambios}" 2>/dev/null || true)"
 
 # El sello permite detectar desde fuera que el recolector dejó de correr, que
 # es un fallo silencioso: sin él, un informe de hace tres semanas se lee igual
@@ -704,9 +776,12 @@ chown "${usuario}:${usuario}" "${cambios}"; chmod 0640 "${cambios}"
     printf 'resultado=publicado\n'
     printf 'codigo_verificador=%s\n' "${codigo_verificador:-desconocido}"
     printf 'duracion_segundos=%s\n'  "$(( $(date +%s) - inicio ))"
-    printf 'lineas_cambiadas=%s\n'   "$(grep -c '^[+-]' "${cambios}" 2>/dev/null || echo 0)"
-} > "${sello}"
-chown "${usuario}:${usuario}" "${sello}"; chmod 0640 "${sello}"
+    # 'grep -c' ya imprime el número, incluso cuando es cero, y ADEMÁS
+    # devuelve 1 en ese caso. Un '|| echo 0' añadiría un segundo cero en una
+    # línea suelta y rompería el formato clave=valor del sello.
+    printf 'lineas_cambiadas=%s\n'   "${lineas_cambiadas:-0}"
+} > "${crudo}"
+escribir_para_el_agente "${crudo}" "${sello}"
 
 exit 0
 ```
@@ -729,6 +804,65 @@ make check
 Esperado: sin fallos. En particular, la comprobación de variables debe aceptar
 `${DATOS_RAIZ}`, `${HERMES_USUARIO}` y `${ADMIN_USUARIO}` porque las tres están en la plantilla
 desde la tarea 1.
+
+- [ ] **Paso 3b: Probarlo de verdad, en un aislado**
+
+No hace falta el servidor ni root: se renderiza la plantilla y se desvían las rutas a `/tmp`.
+
+```bash
+bash -c '
+cd ~/nomad_server && source scripts/lib/entorno.sh >/dev/null
+rm -rf /tmp/aud && mkdir -p /tmp/aud/informes
+nomad_plantilla etc/nomad-auditoria.sh \
+ | sed -e "s#^dir_informes=.*#dir_informes=\"/tmp/aud/informes\"#" \
+       -e "s#^usuario=.*#usuario=\"$(id -un)\"#" \
+       -e "s#^fuga=.*#fuga=\"/tmp/aud/fuga.txt\"#" \
+ > /tmp/aud/aislado.sh
+chmod +x /tmp/aud/aislado.sh
+/tmp/aud/aislado.sh && cat /tmp/aud/informes/sello.txt'
+```
+
+Esperado: `resultado=publicado` y los tres ficheros en `/tmp/aud/informes/` con modo `640`.
+
+Antes de eso, comprueba que la plantilla se renderizó entera:
+
+```bash
+grep -nE '\$\{[A-Z][A-Z0-9_]*\}' /tmp/aud/aislado.sh || echo "[OK] ninguna variable sin sustituir"
+```
+
+- [ ] **Paso 3c: Dos ejecuciones seguidas deben dar CERO cambios**
+
+```bash
+/tmp/aud/aislado.sh >/dev/null && /tmp/aud/aislado.sh >/dev/null
+grep lineas_cambiadas /tmp/aud/informes/sello.txt
+cat /tmp/aud/informes/cambios.txt
+```
+
+Esperado: `lineas_cambiadas=0`. Si sale distinto de cero, hay ruido que cambia solo y hay que
+añadirlo a `sin_volatil()`. La primera vez salió `2`: el verificador imprime su propia marca de
+tiempo. En la fase 3 el agente lee este fichero a diario, así que cada línea de ruido se paga en
+tokens todas las mañanas y además tapa lo que sí cambió.
+
+- [ ] **Paso 3d: Probar que se niega a publicar — la rama que importa el día que haga falta**
+
+Se sabotea la redacción a propósito, sustituyéndola por `cat` y colando un secreto:
+
+```bash
+sed 's#^redactar < "${crudo}" > "${limpio}"#{ cat "${crudo}"; echo "Authorization: Bearer AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"; } > "${limpio}"#' \
+    /tmp/aud/aislado.sh > /tmp/aud/saboteado.sh
+chmod +x /tmp/aud/saboteado.sh
+/tmp/aud/saboteado.sh; echo "codigo: $?"
+cat /tmp/aud/informes/sello.txt
+grep -c 'Bearer AAAA' /tmp/aud/informes/estado.txt || echo "0 — el secreto NO salio"
+```
+
+Esperado: código `1`, `resultado=fuga-detectada` con su número de coincidencias, `estado.txt`
+convertido en el aviso, y **cero apariciones del secreto**.
+
+Esta prueba destapó el orden equivocado: guardar el crudo antes de dar la alarma. Si guardarlo
+falla, `set -e` mata el script y deja en su sitio el informe de ayer con su sello diciendo
+`publicado`. Parece que todo va bien y nadie se entera. Por eso ahora la alarma va primero y el
+guardado del crudo es opcional.
 
 - [ ] **Paso 4: Commit**
 
