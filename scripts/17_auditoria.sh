@@ -59,6 +59,25 @@ if [[ "${AUDITORIA_HABILITADA}" != "si" ]]; then
     exit 0
 fi
 
+# La URL de aviso, si la hay, debe ser la BASE y nada más.
+#
+# Kuma no enseña la URL desnuda: enseña un ejemplo listo para pegar, del tipo
+#   .../api/push/TOKEN?status=up&msg=OK&ping=
+# Copiarlo entero rompe el aviso de dos maneras a la vez, y las dos en
+# silencio: el shell parte el comando en el primer '&' —guardando la URL a
+# medias y lanzando trabajos en segundo plano—, y aunque se escape, el
+# recolector añade DESPUÉS su propia cadena de consulta y queda duplicada.
+#
+# Nada de eso da error. Simplemente no llega ningún aviso, y eso solo se nota
+# el día que hacía falta.
+if [[ -n "${AUDITORIA_PUSH_URL:-}" && "${AUDITORIA_PUSH_URL}" == *[\?\&]* ]]; then
+    log_error "AUDITORIA_PUSH_URL no debe llevar cadena de consulta."
+    log_error "Valor actual: ${AUDITORIA_PUSH_URL}"
+    log_error "Quédate solo con la parte hasta el token, y entre comillas simples:"
+    log_error "    ./scripts/variables.sh --fijar 'AUDITORIA_PUSH_URL=${AUDITORIA_PUSH_URL%%\?*}'"
+    die "Corrige la URL y vuelve a ejecutar."
+fi
+
 # Se valida aquí y no en el temporizador porque systemd acepta un OnCalendar
 # mal formado sin rechistar y se queda sin disparar nunca. El fallo se vería
 # semanas después, al preguntarse por qué no hay informes.

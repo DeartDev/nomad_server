@@ -278,15 +278,30 @@ Esto **no lo hace ningún script**: es interfaz web.
 2. Nombre: `Auditoría diaria`.
 3. *Heartbeat Interval*: **93600** segundos (26 horas). Da margen a un reinicio sin falsas alarmas.
 4. Asigna tu notificación de Telegram, la misma del respaldo.
-5. Copia la *Push URL* y fíjala:
+5. Copia la *Push URL* — **solo hasta el token**.
+
+   Kuma no enseña la URL desnuda: enseña un ejemplo listo para pegar, del tipo
+   `.../api/push/TOKEN?status=up&msg=OK&ping=`. Ese sufijo **no va aquí**: el recolector añade
+   su propia cadena de consulta.
+
+   Y fíjala **entre comillas simples**. Sin ellas el shell parte el comando en el primer `&`,
+   guarda la URL a medias y lanza un par de trabajos en segundo plano. No da error: simplemente
+   no vuelve a llegar ningún aviso.
 
 ```bash
-# [servidor]
-./scripts/variables.sh --fijar AUDITORIA_PUSH_URL=<la-url>
+# [servidor] — comillas simples, y sin '?' ni '&'
+./scripts/variables.sh --fijar 'AUDITORIA_PUSH_URL=http://estado.<servidor>.lan:8080/api/push/TOKEN'
 source scripts/lib/entorno.sh
 nomad_plantilla etc/nomad-auditoria.sh | sudo tee /usr/local/sbin/nomad-auditoria.sh >/dev/null
 sudo chmod 0750 /usr/local/sbin/nomad-auditoria.sh
 ```
+
+```bash
+# [servidor] — comprobación: la URL quedó incrustada en el script instalado
+sudo grep -n '^push_url=' /usr/local/sbin/nomad-auditoria.sh
+```
+
+Si sale vacía, no reinstalaste. Es el olvido más fácil de este capítulo, porque nada falla.
 
 **Y pruébalo.** Un sistema de avisos sin probar no es un sistema de avisos:
 
@@ -469,6 +484,8 @@ El servidor vuelve exactamente al estado anterior; **ningún otro capítulo depe
 | El temporizador está habilitado y no dispara nunca | Una variable sin sustituir en `OnCalendar` | `systemctl cat nomad-auditoria.timer \| grep OnCalendar`. Si ves `${AUDITORIA_HORA}`, reinstala la unidad |
 | `cambios.txt` sale enorme todos los días | Ruido que cambia en cada ejecución | Añade el patrón a `sin_volatil()` en la plantilla del recolector y reinstala |
 | No llega ningún aviso, ni bueno ni malo | `AUDITORIA_PUSH_URL` vacía, o el monitor no existe | `./scripts/variables.sh --estado \| grep PUSH`, y § 5 paso 6 |
+| Se fijó la URL pero sigue sin llegar nada | No se reinstaló el recolector después. La URL se incrusta al renderizar la plantilla | `sudo ./scripts/17_auditoria.sh`, y comprueba con `sudo grep '^push_url=' /usr/local/sbin/nomad-auditoria.sh` |
+| Al fijar la URL aparecen `[1] 97815` y `[2] 97816`, y la URL queda cortada | El `&` de la URL sin comillas: el shell parte el comando y lanza trabajos en segundo plano | Vuelve a fijarla **entre comillas simples** y solo hasta el token. El script se niega a instalar si detecta `?` o `&` |
 | Kuma avisa de que la auditoría cayó, pero el servidor está bien | El *Heartbeat Interval* del monitor es menor que 24 h | Súbelo a 93600 s (26 h): la auditoría solo avisa una vez al día |
 | Un proyecto nuevo no dispara el conserje | `systemd.path` no es recursivo | Es una limitación conocida, explicada en § 3.6. La revisión diaria lo cubre en menos de 24 h |
 | `El uid 10000 ya está ocupado` | Otro usuario tiene ese uid | Elige otro por encima de 10000 con `variables.sh --fijar AUDITORIA_UID=<otro>` |
