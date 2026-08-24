@@ -375,6 +375,29 @@ Los secretos —tokens de bot y clave del proveedor— **no van aquí**: van en
 | `templates/systemd/` | `nomad-auditoria.{service,timer}`, `nomad-conserje.path`, `nomad-portero.path` y sus units |
 | `templates/etc/` | `nomad-auditoria.sh`, `nomad-conserje.sh`, `nomad-portero.sh` |
 | `scripts/17_hermes.sh` | Script del capítulo: idempotente, `--check`, `--help` |
+| `docs/instalar-hermes-debian.md` | **Se absorbe y desaparece.** Ver más abajo |
+
+**Sobre `docs/instalar-hermes-debian.md`.** Es el documento de partida de esta integración y
+**no se versiona**: se absorbe en el capítulo 17 durante la fase 5 y se borra del árbol de trabajo.
+
+Lo que se conserva de él es su sección de errores frecuentes, que está bien vista y encaja tal cual
+en la sección 9 del capítulo 17: `hermes: command not found` tras instalar, `/tmp` sin espacio,
+`No space left on device`, y los fallos de configuración de la clave del proveedor.
+
+Lo que **no** se conserva, porque este diseño lo descarta expresamente:
+
+| Del documento de partida | Por qué no sobrevive |
+|---|---|
+| `curl \| bash` del instalador oficial | Imagen fijada por digest y `deploy.sh` (§ 3) |
+| `sudo adduser hermes` + `usermod -aG sudo` | El usuario existe, pero con `nologin` y sin sudo (§ 6.5) |
+| `systemctl --user` y `loginctl enable-linger` | Unidades de sistema `nomad-*`, la convención del repositorio |
+| `hermes cron` | Temporizadores systemd; dos planificadores divergen |
+| `hermes gateway run` sin acotar | Allowlist obligatoria y panel solo por tailnet (§ 8) |
+| `usermod -aG adm` para leer logs | El anillo 0 no se abre: los logs llegan redactados en los informes (§ 7) |
+| `hermes update` | Cambiar el digest, revisar el diff y `deploy.sh`, como con Traefik |
+
+Hasta que llegue la fase 5, el fichero se queda sin versionar. Es deuda consciente y con fecha de
+caducidad, no un descuido.
 
 ## 16. Fases de entrega
 
