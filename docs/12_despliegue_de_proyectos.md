@@ -740,6 +740,7 @@ servicio que ya no existe.
 | El healthcheck de Postgres falla siempre | Se quitó el `$$` de `$${POSTGRES_USER}` | Restaura el doble dólar | § 5 paso 2 |
 | Volví al día siguiente y los comandos usan rutas raras | `PROYECTO` y el entorno se perdieron al desconectar | Vuelve a declarar ambos (paso 1) | § 4.2 |
 | `deploy.sh` no encuentra el proyecto | El nombre pasado como argumento no coincide con el directorio | `./scripts/deploy.sh --listar` | § 6.1 |
+| `revisar_proyecto.sh` dice que el router lo usa un contenedor **del propio proyecto** | Versión anterior del script: comparaba el nombre del contenedor con el del proyecto dando por hecho que uno era prefijo del otro. Un `container_name` que no empiece por el nombre del directorio lo desmiente | Actualiza el repositorio. Ahora se pregunta por la etiqueta `com.docker.compose.project`, que Docker pone sola | § 3.1 |
 
 ---
 

@@ -263,9 +263,23 @@ else
         while read -r r; do
             [[ -z "${r}" ]] && continue
             if grep -qx "${r}" <<<"${AJENOS}" 2>/dev/null; then
-                CONTENEDOR="$(docker ps --filter "label=traefik.http.routers.${r}.rule" \
-                              --format '{{.Names}}' | head -1)"
-                if [[ -n "${CONTENEDOR}" && "${CONTENEDOR}" != "${PROYECTO}"* ]]; then
+                # De quién es el contenedor que ya usa ese router. Se pregunta
+                # por la etiqueta que pone Docker, no por el nombre.
+                #
+                # Antes se comparaba el NOMBRE del contenedor con el del
+                # proyecto, dando por hecho que uno es prefijo del otro. La
+                # plantilla proyecto-ejemplo de este mismo repositorio lo
+                # desmiente: se despliega en un directorio 'ejemplo' y fija
+                # 'container_name: proyecto-ejemplo'. El resultado era que el
+                # proyecto de referencia se denunciaba a sí mismo por pisar su
+                # propio router, y así llevaba desde el capítulo 12.
+                LINEA="$(docker ps --filter "label=traefik.http.routers.${r}.rule" \
+                         --format '{{.Names}}|{{.Label "com.docker.compose.project"}}' | head -1)"
+                CONTENEDOR="${LINEA%%|*}"
+                DUENO="${LINEA##*|}"
+                # Un contenedor sin esa etiqueta no lo creó compose, así que no
+                # es de este proyecto: ahí el conflicto es real.
+                if [[ -n "${CONTENEDOR}" && "${DUENO}" != "${PROYECTO}" ]]; then
                     falla "El router '${r}' ya lo usa el contenedor '${CONTENEDOR}'."
                     log_error "Los nombres de router son globales: el segundo pisa al primero."
                     log_error "Usa el nombre del proyecto como prefijo."
