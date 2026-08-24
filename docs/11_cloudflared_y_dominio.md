@@ -435,12 +435,31 @@ dig prueba.${DOMINIO_PUBLICO} +short
 
 Criterio de aceptación: devuelve direcciones IP de Cloudflare (no la tuya).
 
-### Paso 7 — Comprueba el modo TLS
+### Paso 7 — Comprueba el modo TLS y la redirección a HTTPS
 
 En <https://dash.cloudflare.com> → tu dominio → **SSL/TLS** → **Overview**, selecciona **Full**.
 
 > Si está en **Flexible**, el tramo entre Cloudflare y tu servidor iría sin cifrar por internet.
 > Es un error frecuente y silencioso: la web se ve bien y el candado aparece.
+
+Y en **SSL/TLS** → **Edge Certificates**, activa **Always Use HTTPS**.
+
+Esto no es cosmético, y va emparejado con el HSTS del capítulo [10](10_traefik.md) § 3.4: **un
+navegador ignora la cabecera `Strict-Transport-Security` si le llega por HTTP en claro.** Con la
+redirección apagada, quien escriba el dominio a secas es servido por HTTP, nunca ve la cabecera y
+nunca queda protegido — justo en la primera visita, que es el momento en que es interceptable. HSTS
+acabaría protegiendo solo a quien ya llegó por HTTPS, es decir, a quien no lo necesitaba.
+
+Aquí no tiene ningún coste: todo el tráfico pasa por Cloudflare, el origen solo habla HTTP dentro
+del túnel y este montaje no usa retos ACME por HTTP.
+
+**En la misma página, al activar HSTS, revisa sus sub-opciones:**
+
+| Opción | Cómo debe quedar | Por qué |
+|---|---|---|
+| `max-age` | 12 meses | Un año es difícil de revertir: si un subdominio tuviera que servirse por HTTP, el navegador se negaría todo ese tiempo |
+| `Include subdomains` | **Apagado** | No arrastra a subdominios que aún no existen (capítulo 10 § 3.4) |
+| `Preload` | **Apagado** | Salir de la lista de precarga tarda meses y no depende de ti. Es lo único de esta página que no se deshace en un día |
 
 ### Paso 8 — Levanta el túnel
 
@@ -629,7 +648,7 @@ credenciales existan, sin levantar nada.
 | 4 — colocar las credenciales | Sí | Y corrige los permisos a `600` |
 | 5 — `config.yml` y compose | Sí | Desde `templates/compose/cloudflared/` |
 | 6 — registros DNS | Sí, con `--ruta` | Uno por subdominio |
-| 7 — modo TLS **Full** | **No** | Es un ajuste de la consola web |
+| 7 — modo TLS **Full**, `Always Use HTTPS` y HSTS | **No** | Son ajustes de la consola web |
 | 8 — levantar el túnel | Sí | Espera a que registre conexiones, y falla si no llegan en 60 s |
 | 9 — prueba de extremo a extremo | **No** | Requiere un cliente fuera de tu red |
 | 10 — comprobar que no se expone nada | Sí | |
@@ -642,6 +661,9 @@ credenciales existan, sin levantar nada.
 - [ ] **Poner el modo TLS en Full** (paso 7). Es el error silencioso más grave del capítulo: en
       `Flexible` la web se ve bien, con candado y todo, pero el tramo entre Cloudflare y tu servidor
       viajaría sin cifrar.
+- [ ] **Activar `Always Use HTTPS` y HSTS** (paso 7), con `Include subdomains` y `Preload`
+      apagados. Sin la redirección, el HSTS del capítulo 10 § 3.4 no llega a los visitantes nuevos:
+      la cabecera se ignora cuando viaja por HTTP en claro.
 - [ ] **Guardar una copia del archivo `<UUID>.json`** en tu gestor de contraseñas hasta que el
       capítulo 14 lo respalde automáticamente.
 
