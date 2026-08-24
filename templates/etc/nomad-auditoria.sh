@@ -157,6 +157,10 @@ fuga="/root/nomad-auditoria-fuga.txt"
 #
 #  El mensaje va con '+' en vez de espacios porque viaja en una cadena de
 #  consulta, sin escapar nada más: se construye aquí, no viene de fuera.
+# SOLO ASCII EN EL MENSAJE. Viaja en una cadena de consulta sin escapar, así
+# que un carácter multibyte —un guion medio tipográfico, un acento— sale sin
+# codificar, el servidor responde con error y 'curl -f' lo da por fallido. El
+# aviso se pierde entero por un adorno. Pasó con un '·' de separador.
 avisar() {
     local estado_aviso="$1" mensaje="$2"
     [[ -n "${push_url}" ]] || return 0
@@ -377,9 +381,9 @@ fallidas="$(sed -n 's/.*Comprobaciones fallidas: \([0-9]*\).*/\1/p' "${estado}" 
 fallidas="${fallidas:-0}"
 
 if (( codigo_verificador == 0 )); then
-    avisar up "sin+fallos+·+${lineas_cambiadas:-0}+lineas+cambiadas"
+    avisar up "sin+fallos+-+${lineas_cambiadas:-0}+lineas+cambiadas"
 else
-    avisar down "${fallidas}+comprobaciones+fallidas+·+${lineas_cambiadas:-0}+lineas+cambiadas"
+    avisar down "${fallidas}+fallidas+-+${lineas_cambiadas:-0}+lineas+cambiadas"
 fi
 
 exit 0

@@ -462,10 +462,15 @@ sin `sudo`: es la prueba de que la rutina semanal del capítulo 15 podrá leer e
 
 ```bash
 # [servidor] — el usuario no puede iniciar sesión
-sudo -u ${AUDITORIA_USUARIO} -s
+sudo -u ${AUDITORIA_USUARIO} -i
 ```
 
 Esperado: `This account is currently not available`.
+
+**`-i` y no `-s`**, y la diferencia importa: `sudo -s` ejecuta el `$SHELL` de **quien invoca**, no
+el del usuario destino, así que da una shell aunque la cuenta tenga `nologin` y la prueba parezca
+fallar cuando en realidad no estaba probando nada. `-i` simula un inicio de sesión y usa la shell
+que dice `/etc/passwd`, que es la que se quería comprobar.
 
 ```bash
 # [servidor] — el usuario no pertenece a ningún grupo con privilegios
@@ -529,6 +534,8 @@ El servidor vuelve exactamente al estado anterior; **ningún otro capítulo depe
 | Se fijó la URL pero sigue sin llegar nada | No se reinstaló el recolector después. La URL se incrusta al renderizar la plantilla | `sudo ./scripts/17_auditoria.sh`, y comprueba con `sudo grep '^push_url=' /usr/local/sbin/nomad-auditoria.sh` |
 | Al fijar la URL aparecen `[1] 97815` y `[2] 97816`, y la URL queda cortada | El `&` de la URL sin comillas: el shell parte el comando y lanza trabajos en segundo plano | Vuelve a fijarla **entre comillas simples** y solo hasta el token. El script se niega a instalar si detecta `?` o `&` |
 | Kuma avisa de que la auditoría cayó, pero el servidor está bien | El *Heartbeat Interval* del monitor es menor que 24 h | Súbelo a 93600 s (26 h): la auditoría solo avisa una vez al día |
+| No llega ningún aviso aunque el informe se publique y la URL esté bien | Un carácter no ASCII en el mensaje del aviso. Viaja sin codificar en la cadena de consulta, el servidor responde error y `curl -f` lo da por fallido | Mira el registro: `journalctl -u nomad-auditoria.service -n 20`. Los mensajes son solo ASCII desde esta versión |
+| `--check` nunca baja de cero cambios y siempre reescribe los mismos ficheros | Un modo con cero inicial (`0750`) frente a lo que devuelve `stat -c '%a'` (`750`): nunca casan | Corregido en `lib/common.sh`, que ahora normaliza los dos antes de compararlos |
 | `sed: can't read ....auditoria: Permission denied` seguido de «no cumple el anexo 96» | Un informe con el grupo antiguo. **No poder leerlo no es incumplir**: el mensaje de incumplimiento es engañoso | `sudo ./scripts/17_auditoria.sh`. Desde esta versión el verificador distingue los dos casos |
 | `verificar_sistema.sh` dice que no hay `sello.txt`, pero con `sudo cat` sí está | El directorio de informes tiene el grupo del usuario de la auditoría en vez del tuyo, así que no puedes entrar. El mensaje engaña: no es que falte, es que no se ve | `sudo ./scripts/17_auditoria.sh`, que corrige dueño, grupo y modo de lo que ya existía |
 | El verificador dice que `traefik` u `observabilidad` no cumplen el anexo 96 | Versión anterior del conserje: medía la infraestructura con la vara de los proyectos | Actualiza el repositorio y reinstala con `sudo ./scripts/17_auditoria.sh`. El conserje retira solo los informes huérfanos |

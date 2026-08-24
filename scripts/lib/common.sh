@@ -418,9 +418,16 @@ instalar_archivo() {
     cat > "${tmp}"
 
     if [[ -f "${destino}" ]] && cmp -s "${tmp}" "${destino}"; then
-        local modo_actual
-        modo_actual="$(stat -c '%a' "${destino}")"
-        if [[ "${modo_actual}" == "${modo}" ]]; then
+        # Los dos modos se normalizan antes de compararlos. 'stat -c %a'
+        # devuelve 750, sin cero inicial, así que un llamante que pase "0750"
+        # —perfectamente válido para chmod— nunca casaría: el archivo se
+        # reescribiría en cada ejecución y el script no sería idempotente
+        # jamás, sin que nada lo delatara salvo un contador de cambios que no
+        # baja a cero.
+        local modo_actual modo_deseado
+        modo_actual="$(printf '%04o' "0$(stat -c '%a' "${destino}")")"
+        modo_deseado="$(printf '%04o' "0${modo}")"
+        if [[ "${modo_actual}" == "${modo_deseado}" ]]; then
             rm -f "${tmp}"
             log_sinca "${destino} ya está actualizado."
             return 0

@@ -150,8 +150,8 @@ done
 
 # --- Paso 3: los scripts -----------------------------------------------------
 log_paso "Recolector y conserje"
-instalar_plantilla etc/nomad-auditoria.sh /usr/local/sbin/nomad-auditoria.sh 0750 root:root
-instalar_plantilla etc/nomad-conserje.sh  /usr/local/sbin/nomad-conserje.sh  0750 root:root
+instalar_plantilla etc/nomad-auditoria.sh /usr/local/sbin/nomad-auditoria.sh 750 root:root
+instalar_plantilla etc/nomad-conserje.sh  /usr/local/sbin/nomad-conserje.sh  750 root:root
 
 # --- Paso 4: las unidades ----------------------------------------------------
 log_paso "Temporizador y vigilante"
