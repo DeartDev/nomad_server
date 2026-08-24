@@ -362,7 +362,7 @@ FIN
 #  Capítulo : docs/17_hermes_guardian.md
 #
 #  Propósito : ejecutar como root lo que el agente NO puede ejecutar, redactar
-#              su salida y dejarla en ${DATOS_RAIZ}/hermes/informes/.
+#              su salida y dejarla en el directorio de informes.
 #
 #  Se instala FUERA del repositorio, como nomad-respaldo.sh, para que el
 #  temporizador no dependa de que el repositorio esté clonado y al día.
@@ -378,8 +378,7 @@ FIN
 #
 #  Escrito así, y no con un ejemplo entre llaves, a propósito: el ejemplo
 #  parecería una variable de verdad y verificar_repositorio.sh lo exigiría en
-#  config/servidor.env.example. Le pasa a nomad-respaldo.sh, que se libra solo
-#  porque el validador no mira los .sh de templates/.
+#  config/servidor.env.example.
 # ===========================================================================
 set -euo pipefail
 
@@ -395,25 +394,37 @@ set -euo pipefail
 #
 #  PRINCIPIO: sobre-redactar es aceptable, sub-redactar no. Si un patrón se
 #  come de más, el informe pierde detalle. Si se queda corto, un secreto sale
-#  del servidor. Ante la duda, se amplía.
+#  del servidor hacia la API de un tercero, y de ahí no se vuelve. Ante la
+#  duda, se amplía.
+#  EL ORDEN IMPORTA. sed aplica las expresiones en secuencia sobre cada
+#  línea, así que las que se comen el resto de la línea —las cabeceras— van
+#  antes que las que buscan un token suelto.
 patrones_fuga=(
+    '([Aa]uthorization|[Xx]-[Aa]pi-[Kk]ey|[Pp]roxy-[Aa]uthorization):[[:space:]]*.*$'
+    '[Bb]earer[[:space:]]+[A-Za-z0-9._~+/=-]{16,}'
+    'eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(\.[A-Za-z0-9_-]+)?'
     '(sk|xoxb|ghp|gho|glpat)-[A-Za-z0-9_-]{12,}'
     '100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}'
     '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
     '(b2|s3|sftp|rest|swift|azure|gs):[^[:space:]]+'
     '(ssh-(rsa|dss|ed25519)|ecdsa-sha2-[a-z0-9-]+)[[:space:]]+[A-Za-z0-9+/=]{20,}'
-    '[A-Z_]*(PASSWORD|PASSWD|SECRET|TOKEN|KEY)[A-Z_]*[[:space:]]*=[[:space:]]*[^[:space:]]+'
-    '([Aa]uthorization|[Xx]-[Aa]pi-[Kk]ey):[[:space:]]*[^[:space:]]+'
+    '([A-Za-z0-9_]*(PASSWORD|PASSWD|SECRET|TOKEN|APIKEY|KEY)[A-Za-z0-9_]*)[[:space:]]*=[[:space:]]*[^[:space:]]+'
     '(AKIA|ASIA)[A-Z0-9]{16}'
 )
+#  Las que llevan '\1' conservan la parte que SÍ informa —el nombre de la
+#  cabecera, el nombre de la variable— y tiran solo el valor. Un informe que
+#  dice 'DEEPSEEK_API_KEY=[REDACTADO]' te cuenta algo; uno que dice
+#  '[REDACTADO]' a secas, nada.
 etiquetas_fuga=(
+    '\1: [REDACTADO:cabecera]'
+    '[REDACTADO:bearer]'
+    '[REDACTADO:jwt]'
     '[REDACTADO:clave]'
     '[REDACTADO:ip-tailnet]'
     '[REDACTADO:uuid]'
     '[REDACTADO:repositorio]'
     '[REDACTADO:llave-ssh]'
-    '[REDACTADO:variable-secreta]'
-    '[REDACTADO:cabecera]'
+    '\1=[REDACTADO:variable-secreta]'
     '[REDACTADO:clave-nube]'
 )
 
@@ -430,12 +441,23 @@ redactar() {
 # que grep. Se ejecuta DESPUÉS de redactar, sobre el resultado: es la red que
 # convierte un fallo de la redacción en un informe que no se publica, en vez
 # de en un secreto que sale del servidor.
+#
+# Se descartan las coincidencias que YA son una marca de redacción. Sin ese
+# filtro el detector se dispararía siempre: el patrón de una cabecera sigue
+# casando con 'Authorization: [REDACTADO:cabecera]', que es justo el resultado
+# correcto.
+#
+# LO QUE ESTE DETECTOR NO PUEDE HACER: cazar lo que ningún patrón sabe
+# nombrar. Es una red contra el fallo de la redacción, no contra el hueco en
+# la lista de patrones. Ese hueco solo lo encuentra un humano leyendo el
+# informe entero, y por eso el capítulo 17 § 5 lo exige la primera vez y el
+# capítulo 15 lo repite cada trimestre.
 fugas() {
     local i args=()
     for i in "${!patrones_fuga[@]}"; do
         args+=(-e "${patrones_fuga[i]}")
     done
-    grep -nE "${args[@]}"
+    grep -oE "${args[@]}" | grep -v 'REDACTADO'
 }
 ```
 
@@ -458,10 +480,15 @@ La IP de Tailscale del servidor es [REDACTADO:ip-tailnet]
 CF_TUNEL_ID=[REDACTADO:uuid]
 restic -r [REDACTADO:repositorio] snapshots
 [REDACTADO:llave-ssh] deart@equipo
-[REDACTADO:cabecera]
+Authorization: [REDACTADO:cabecera]
 B2_ACCOUNT_KEY=[REDACTADO:variable-secreta]
 Esta linea no tiene nada que ocultar y debe sobrevivir intacta.
 ```
+
+Fíjate en dos cosas. El **nombre** de la variable y el de la cabecera sobreviven: un informe que dice
+`DEEPSEEK_API_KEY=[REDACTADO]` te cuenta algo, uno que dice `[REDACTADO]` a secas no cuenta nada. Y
+la **última línea sale idéntica**: un redactor que destroza el informe es tan inútil como uno que no
+redacta.
 
 Fíjate en la última línea: **tiene que salir idéntica**. Un redactor que destroza el informe es tan
 inútil como uno que no redacta.
@@ -484,6 +511,28 @@ bash -c 'source templates/etc/nomad-auditoria.sh
 
 Esperado: `7`. Si sale menos, hay un patrón que no está cazando lo que dice cazar, y eso es
 exactamente el fallo que este paso existe para descubrir.
+
+- [ ] **Paso 4b: Probar que no destroza la salida real**
+
+Un redactor demasiado ávido es un problema distinto y igual de real. Se comprueba contra salida de
+verdad:
+
+```bash
+./scripts/verificar_repositorio.sh --solo docs 2>&1 | head -20 > /tmp/muestra-real.txt
+cat >> /tmp/muestra-real.txt <<'FIN'
+traefik            running   Up 3 days (healthy)
+/dev/nvme0n1: SMART overall-health self-assessment test result: PASSED
+hardening_index=73
+/dev/mapper/nomadservernw-srv  170G   38G  124G  24% /srv
+un token perdido en un error: Bearer abcdefghijklmnopqrstuvwxyz123456
+FIN
+bash -c 'source templates/etc/nomad-auditoria.sh; redactar < /tmp/muestra-real.txt' > /tmp/muestra-real.red.txt
+diff /tmp/muestra-real.txt /tmp/muestra-real.red.txt
+```
+
+Esperado: **una sola línea de diferencia**, la del `Bearer`. `hardening_index=73`, la salud SMART,
+los nombres de contenedor y las cifras del disco tienen que sobrevivir tal cual: son lo que el
+informe existe para contar.
 
 - [ ] **Paso 5: Commit**
 
