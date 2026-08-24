@@ -42,14 +42,41 @@ fi
 # unos pocos y cada revisión tarda menos de un segundo.
 hubo_fallo=0
 revisados=0
+vistos=""
+
+# LA INFRAESTRUCTURA NO ES UN PROYECTO, Y NO SE MIDE CON EL ANEXO 96
+#
+# Estos directorios los montan los propios capítulos del repositorio, y
+# incumplen el contrato A PROPÓSITO, porque el contrato está escrito para lo
+# que va DETRÁS del proxy, no para el proxy:
+#
+#   traefik        publica el punto de entrada interno en el host (cap. 10),
+#                  que es justo lo que la regla 1 prohíbe a un proyecto
+#   observabilidad el intermediario del socket monta /var/run/docker.sock
+#                  (cap. 13), que es justo lo que prohíbe la regla 2
+#   cloudflared    el túnel monta sus credenciales del host (cap. 11)
+#   auditoria      no es un proyecto, es este capítulo
+#
+# Medirlos con la vara equivocada produce tres fallos todos los días, y una
+# alarma que suena siempre deja de ser una alarma.
+infraestructura="traefik observabilidad cloudflared auditoria"
 
 for compose in "${datos_raiz}"/*/docker-compose.yml; do
     [[ -f "${compose}" ]] || continue
 
     proyecto="$(basename "$(dirname "${compose}")")"
 
-    # El propio directorio de la auditoría no es un proyecto.
-    [[ "${proyecto}" == "auditoria" ]] && continue
+    # 'case' y no una tubería a 'grep -qx': con 'pipefail', grep -q cierra la
+    # tubería en cuanto encuentra y el printf de arriba recibe SIGPIPE, así que
+    # el estado de la tubería puede acabar siendo el del printf muerto y la
+    # condición evaluarse al revés. Falla pocas veces, que es lo peor que puede
+    # hacer. Es la misma razón por la que lib/common.sh tiene contiene().
+    case " ${infraestructura} " in
+        *" ${proyecto} "*)
+            echo "nomad-conserje: ${proyecto} es infraestructura del servidor; no se mide con el anexo 96."
+            continue
+            ;;
+    esac
 
     destino="${dir_informes}/${proyecto}.auditoria"
     tmp="$(mktemp)"
@@ -74,10 +101,25 @@ for compose in "${datos_raiz}"/*/docker-compose.yml; do
     rm -f "${tmp}"
 
     revisados=$(( revisados + 1 ))
+    vistos="${vistos} ${proyecto}"
     if (( codigo != 0 )); then
         hubo_fallo=1
         echo "nomad-conserje: ${proyecto} NO cumple el contrato (codigo ${codigo})" >&2
     fi
+done
+
+# Informes huérfanos: de un proyecto que se borró, o de uno que ha pasado a
+# considerarse infraestructura. Si no se retiran, siguen contando como
+# incumplimiento para siempre y nadie entiende por qué.
+for informe in "${dir_informes}"/*.auditoria; do
+    [[ -f "${informe}" ]] || continue
+    proyecto="$(basename "${informe}" .auditoria)"
+    case " ${vistos} " in
+        *" ${proyecto} "*) ;;
+        *)  echo "nomad-conserje: retirando informe huérfano de '${proyecto}'."
+            rm -f "${informe}"
+            ;;
+    esac
 done
 
 # El aviso solo se manda cuando algo incumple. Un conserje que avisa cada vez

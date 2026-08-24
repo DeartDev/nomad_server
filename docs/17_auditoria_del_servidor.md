@@ -128,6 +128,27 @@ El hueco se cubre por dos caminos, y por eso se puede vivir con él:
 Queda escrito aquí para no descubrirlo dentro de un año, cuando un compose editado no dispare nada
 y parezca que la vigilancia está rota.
 
+### 3.7 La infraestructura no se mide con el anexo 96
+
+El conserje **no revisa** `traefik`, `observabilidad`, `cloudflared` ni `auditoria`. No es una
+excepción de conveniencia: esos directorios los montan los propios capítulos 10, 11, 13 y 17, e
+incumplen el contrato **a propósito**, porque el contrato está escrito para lo que va *detrás* del
+proxy, no para el proxy.
+
+| Directorio | Qué regla incumple, y por qué debe incumplirla |
+|---|---|
+| `traefik` | Regla 1. Publica el punto de entrada interno en el host: es su trabajo (capítulo 10) |
+| `observabilidad` | Regla 2. El intermediario del socket monta `/var/run/docker.sock`, que es la pieza que evita que lo monten Traefik y Dozzle (capítulo 13) |
+| `cloudflared` | Monta las credenciales del túnel desde el host (capítulo 11) |
+| `auditoria` | No es un proyecto, es este capítulo |
+
+Medirlos con la vara equivocada producía **tres fallos todos los días**, y una alarma que suena
+siempre deja de ser una alarma. Se descubrió al aplicar el capítulo en un servidor real.
+
+El conserje también **retira los informes huérfanos**: los de un proyecto que se borró o que pasó a
+considerarse infraestructura. Sin eso seguirían contando como incumplimiento para siempre y nadie
+entendería por qué.
+
 ### 3.7 Lo que se decide NO hacer
 
 | Medida | Por qué no |
@@ -487,6 +508,7 @@ El servidor vuelve exactamente al estado anterior; **ningún otro capítulo depe
 | Se fijó la URL pero sigue sin llegar nada | No se reinstaló el recolector después. La URL se incrusta al renderizar la plantilla | `sudo ./scripts/17_auditoria.sh`, y comprueba con `sudo grep '^push_url=' /usr/local/sbin/nomad-auditoria.sh` |
 | Al fijar la URL aparecen `[1] 97815` y `[2] 97816`, y la URL queda cortada | El `&` de la URL sin comillas: el shell parte el comando y lanza trabajos en segundo plano | Vuelve a fijarla **entre comillas simples** y solo hasta el token. El script se niega a instalar si detecta `?` o `&` |
 | Kuma avisa de que la auditoría cayó, pero el servidor está bien | El *Heartbeat Interval* del monitor es menor que 24 h | Súbelo a 93600 s (26 h): la auditoría solo avisa una vez al día |
+| El verificador dice que `traefik` u `observabilidad` no cumplen el anexo 96 | Versión anterior del conserje: medía la infraestructura con la vara de los proyectos | Actualiza el repositorio y reinstala con `sudo ./scripts/17_auditoria.sh`. El conserje retira solo los informes huérfanos |
 | Un proyecto nuevo no dispara el conserje | `systemd.path` no es recursivo | Es una limitación conocida, explicada en § 3.6. La revisión diaria lo cubre en menos de 24 h |
 | `El uid 10000 ya está ocupado` | Otro usuario tiene ese uid | Elige otro por encima de 10000 con `variables.sh --fijar AUDITORIA_UID=<otro>` |
 | El script se niega: `pertenece al grupo 'docker'` | Alguien metió al usuario en un grupo con privilegios | `sudo gpasswd -d ${AUDITORIA_USUARIO} docker`. Pertenecer a `docker` equivale a ser root |
