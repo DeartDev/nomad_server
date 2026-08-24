@@ -188,6 +188,7 @@ No son capítulos de procedimiento: se consultan desde cualquier punto del monta
 
 | # | Anexo | Para qué |
 |---|---|---|
+| 95 | [Desplegar un proyecto, paso a paso](docs/95_despliegue_paso_a_paso.md) | La secuencia lineal, sin explicaciones: de la llave de despliegue al monitor. Para seguir con el terminal abierto |
 | 96 | [Contrato de dockerización](docs/96_contrato_de_dockerizacion.md) | **Cómo debe estar construido un proyecto** para poder desplegarse aquí. Autocontenido: se entrega a quien lo desarrolle |
 | 97 | [Las dos vías de montaje](docs/97_vias_de_montaje.md) | La secuencia completa con scripts, la equivalencia manual, y qué no automatiza nada |
 | 98 | [Variables, entorno y sesiones](docs/98_variables_y_entorno.md) | De dónde sale cada `${VALOR}`, cómo cargarlo, y cómo parar y retomar el montaje |
@@ -291,7 +292,7 @@ Todos los capítulos tienen exactamente las mismas 10 secciones, en el mismo ord
 ```
 nomad_server/
 ├── config/servidor.env.example   Todas las variables del despliegue, comentadas
-├── docs/                         Los 18 capítulos + 4 anexos transversales
+├── docs/                         Los 18 capítulos + 5 anexos transversales
 ├── scripts/
 │   ├── lib/common.sh             Biblioteca de los scripts: registro, validaciones, idempotencia
 │   ├── lib/entorno.sh            Se importa con 'source' para trabajar a mano
