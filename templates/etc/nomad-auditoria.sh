@@ -253,8 +253,18 @@ codigo_verificador=""
 # ===========================================================================
 redactar < "${crudo}" > "${limpio}"
 
-escribir_para_el_agente() {
-    install -m 0640 -o "${usuario}" -g "${usuario}" "$1" "$2"
+# El dueño es el usuario de la auditoría, pero el GRUPO es el del
+# administrador. Sin eso, el informe queda ilegible para la única persona que
+# va a leerlo: la rutina semanal del capítulo 15 se ejecuta sin sudo, y
+# verificar_sistema.sh informaría de que no hay informe cuando lo que pasa es
+# que no puede mirar.
+#
+# El grupo se resuelve aquí y no se incrusta al instalar porque el grupo
+# primario de un usuario no tiene por qué llamarse como él.
+grupo_admin="$(id -gn "${ADMIN_USUARIO}")"
+
+publicar() {
+    install -m 0640 -o "${usuario}" -g "${grupo_admin}" "$1" "$2"
 }
 
 # FALLA CERRADA. Si algo sobrevivió a la redacción, no se publica el informe:
@@ -281,11 +291,11 @@ if fugas < "${limpio}" >/dev/null 2>&1; then
         printf 'templates/etc/nomad-auditoria.sh y vuelve a ejecutar\n'
         printf 'scripts/17_auditoria.sh. Capítulo 17 § 9.\n'
     } > "${crudo}"
-    escribir_para_el_agente "${crudo}" "${estado}"
+    publicar "${crudo}" "${estado}"
 
     printf 'fecha=%s\nresultado=fuga-detectada\ncoincidencias=%s\n' \
            "$(date --iso-8601=seconds)" "${n_fugas}" > "${crudo}"
-    escribir_para_el_agente "${crudo}" "${sello}"
+    publicar "${crudo}" "${sello}"
 
     # Ahora sí, la copia para depurar. Si falla, se anota y se sigue: la
     # alarma ya está dada, que es lo que no podía perderse.
@@ -314,7 +324,7 @@ if [[ -f "${estado}" ]]; then
     cp -a "${estado}" "${anterior}"
 fi
 
-escribir_para_el_agente "${limpio}" "${estado}"
+publicar "${limpio}" "${estado}"
 
 # ===========================================================================
 #  QUÉ CAMBIÓ DESDE AYER
@@ -339,7 +349,7 @@ escribir_para_el_agente "${limpio}" "${estado}"
         printf 'Primera ejecución: no hay informe anterior con el que comparar.\n'
     fi
 } > "${crudo}"
-escribir_para_el_agente "${crudo}" "${cambios}"
+publicar "${crudo}" "${cambios}"
 
 lineas_cambiadas="$(grep -c '^[+-]' "${cambios}" 2>/dev/null || true)"
 
@@ -356,7 +366,7 @@ lineas_cambiadas="$(grep -c '^[+-]' "${cambios}" 2>/dev/null || true)"
     # línea suelta y rompería el formato clave=valor del sello.
     printf 'lineas_cambiadas=%s\n'   "${lineas_cambiadas:-0}"
 } > "${crudo}"
-escribir_para_el_agente "${crudo}" "${sello}"
+publicar "${crudo}" "${sello}"
 
 # ===========================================================================
 #  Y AVISAR

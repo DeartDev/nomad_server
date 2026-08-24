@@ -112,6 +112,14 @@ Existe por trazabilidad: un `ls -l` distingue lo que escribiste tú de lo que es
 Y el script **comprueba sus grupos en cada ejecución** y se niega a seguir si alguien lo ha metido
 en alguno con privilegios. Pertenecer al grupo `docker` equivale a ser root (capítulo 09 § 3.2).
 
+**Pero el grupo de los informes es el tuyo, no el suyo.** El directorio es `0750` con dueño
+`${AUDITORIA_USUARIO}` y grupo el del administrador. Sin eso el informe queda ilegible justo para
+la única persona que va a leerlo: la rutina semanal del capítulo 15 se ejecuta **sin `sudo`**, y
+`verificar_sistema.sh` informaría de que no hay informe cuando lo que ocurre es que no puede mirar.
+
+Es un fallo que engaña dos veces, porque el mensaje apunta al sitio equivocado. Por eso el
+verificador comprueba primero si puede entrar en el directorio y lo dice con esas palabras.
+
 ### 3.6 El vigilante detecta proyectos nuevos, no compose editados
 
 `systemd.path` vigila un directorio **sin recursividad** y no admite comodines. Por tanto
@@ -433,11 +441,13 @@ Salida esperada:
 ```
 
 ```bash
-# [servidor] — permisos y dueño de los informes
-sudo ls -l ${DATOS_RAIZ}/auditoria/informes/
+# [servidor] — permisos y dueño de los informes. SIN sudo, a propósito:
+# si necesitas sudo para leerlos, el capítulo está mal instalado
+ls -l ${DATOS_RAIZ}/auditoria/informes/
 ```
 
-Esperado: todo `-rw-r-----` y dueño `${AUDITORIA_USUARIO}`.
+Esperado: todo `-rw-r-----`, dueño `${AUDITORIA_USUARIO}` y **grupo el tuyo**. Y que el `ls` funcione
+sin `sudo`: es la prueba de que la rutina semanal del capítulo 15 podrá leer el informe.
 
 ```bash
 # [servidor] — el usuario no puede iniciar sesión
@@ -508,6 +518,7 @@ El servidor vuelve exactamente al estado anterior; **ningún otro capítulo depe
 | Se fijó la URL pero sigue sin llegar nada | No se reinstaló el recolector después. La URL se incrusta al renderizar la plantilla | `sudo ./scripts/17_auditoria.sh`, y comprueba con `sudo grep '^push_url=' /usr/local/sbin/nomad-auditoria.sh` |
 | Al fijar la URL aparecen `[1] 97815` y `[2] 97816`, y la URL queda cortada | El `&` de la URL sin comillas: el shell parte el comando y lanza trabajos en segundo plano | Vuelve a fijarla **entre comillas simples** y solo hasta el token. El script se niega a instalar si detecta `?` o `&` |
 | Kuma avisa de que la auditoría cayó, pero el servidor está bien | El *Heartbeat Interval* del monitor es menor que 24 h | Súbelo a 93600 s (26 h): la auditoría solo avisa una vez al día |
+| `verificar_sistema.sh` dice que no hay `sello.txt`, pero con `sudo cat` sí está | El directorio de informes tiene el grupo del usuario de la auditoría en vez del tuyo, así que no puedes entrar. El mensaje engaña: no es que falte, es que no se ve | `sudo ./scripts/17_auditoria.sh`, que corrige dueño, grupo y modo de lo que ya existía |
 | El verificador dice que `traefik` u `observabilidad` no cumplen el anexo 96 | Versión anterior del conserje: medía la infraestructura con la vara de los proyectos | Actualiza el repositorio y reinstala con `sudo ./scripts/17_auditoria.sh`. El conserje retira solo los informes huérfanos |
 | Un proyecto nuevo no dispara el conserje | `systemd.path` no es recursivo | Es una limitación conocida, explicada en § 3.6. La revisión diaria lo cubre en menos de 24 h |
 | `El uid 10000 ya está ocupado` | Otro usuario tiene ese uid | Elige otro por encima de 10000 con `variables.sh --fijar AUDITORIA_UID=<otro>` |

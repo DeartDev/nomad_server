@@ -477,7 +477,19 @@ verificar_auditoria() {
         return
     fi
 
-    local sello="${DATOS_RAIZ}/auditoria/informes/sello.txt"
+    local dir_informes="${DATOS_RAIZ}/auditoria/informes"
+    local sello="${dir_informes}/sello.txt"
+
+    # Esto va ANTES de mirar el sello, y no es una comprobación de cortesía.
+    # Sin permiso para entrar en el directorio, la prueba '[[ -e ]]' del sello
+    # también falla, así que el mensaje sería "no hay informe" cuando la verdad
+    # es "no puedo mirar". Se tarda más en descubrirlo que en escribirlo.
+    if [[ ! -r "${dir_informes}" || ! -x "${dir_informes}" ]]; then
+        fallo "No puedes leer ${dir_informes}, así que no se puede saber si hay informe."
+        fallo "El directorio debe tener el grupo de ${ADMIN_USUARIO}. Corrígelo con:"
+        fallo "    sudo ./scripts/17_auditoria.sh"
+        return
+    fi
 
     if systemctl is-enabled --quiet nomad-auditoria.timer 2>/dev/null; then
         log_ok "nomad-auditoria.timer habilitado."

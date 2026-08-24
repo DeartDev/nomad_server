@@ -133,13 +133,43 @@ log_paso "Directorio de informes"
 
 # 0750 y no 0755: el informe redactado sigue describiendo la infraestructura
 # con bastante detalle. Que lo lean su dueño y su grupo, no todo el sistema.
+#
+# Y el GRUPO es el del administrador, no el del usuario de la auditoría. Sin
+# eso el informe queda ilegible para la única persona que va a leerlo: la
+# rutina semanal del capítulo 15 se ejecuta sin sudo, y verificar_sistema.sh
+# informaría de que no hay informe cuando lo que ocurre es que no puede mirar.
+GRUPO_ADMIN="$(id -gn "${ADMIN_USUARIO}")"
+
 for D in "${DIR_AUDITORIA}" "${DIR_INFORMES}"; do
-    if [[ -d "${D}" ]]; then
-        log_sinca "${D} ya existe."
+    if [[ ! -d "${D}" ]]; then
+        ejecutar install -d -m 0750 -o "${AUDITORIA_USUARIO}" -g "${GRUPO_ADMIN}" "${D}"
+        continue
+    fi
+
+    # Existe: hay que comprobar que su dueño, grupo y modo son los correctos y
+    # corregirlos si no. Darlo por bueno solo porque el directorio existe deja
+    # los permisos de una versión anterior para siempre.
+    ACTUAL="$(stat -c '%U:%G:%a' "${D}")"
+    DESEADO="${AUDITORIA_USUARIO}:${GRUPO_ADMIN}:750"
+    if [[ "${ACTUAL}" == "${DESEADO}" ]]; then
+        log_sinca "${D} ya existe con dueño y permisos correctos."
     else
-        ejecutar install -d -m 0750 -o "${AUDITORIA_USUARIO}" -g "${AUDITORIA_USUARIO}" "${D}"
+        log_info "${D}: ${ACTUAL} → ${DESEADO}"
+        ejecutar chown "${AUDITORIA_USUARIO}:${GRUPO_ADMIN}" "${D}"
+        ejecutar chmod 750 "${D}"
     fi
 done
+
+# Los informes que ya estuvieran escritos conservan el grupo antiguo hasta que
+# el recolector los reescriba. Se corrigen ahora para no dejar una ventana en
+# la que el capítulo está instalado y el informe sigue sin poder leerse.
+if compgen -G "${DIR_INFORMES}/*" >/dev/null 2>&1; then
+    if [[ -n "$(find "${DIR_INFORMES}" -maxdepth 1 -type f ! -group "${GRUPO_ADMIN}" -print -quit)" ]]; then
+        ejecutar chgrp "${GRUPO_ADMIN}" "${DIR_INFORMES}"/*
+    else
+        log_sinca "Los informes ya tienen el grupo correcto."
+    fi
+fi
 
 # --- Paso 3: los scripts -----------------------------------------------------
 log_paso "Recolector y conserje"

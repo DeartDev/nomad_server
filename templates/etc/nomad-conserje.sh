@@ -29,6 +29,10 @@ usuario="${AUDITORIA_USUARIO}"
 repo="/home/${ADMIN_USUARIO}/nomad_server"
 push_url="${AUDITORIA_PUSH_URL}"
 
+# Ver el comentario de nomad-auditoria.sh: el grupo del administrador, para
+# que el informe lo pueda leer quien lo va a leer.
+grupo_admin="$(id -gn "${ADMIN_USUARIO}")"
+
 revisor="${repo}/scripts/revisar_proyecto.sh"
 
 if [[ ! -x "${revisor}" ]]; then
@@ -97,7 +101,7 @@ for compose in "${datos_raiz}"/*/docker-compose.yml; do
 
     printf '\n[codigo de salida: %s]\n' "${codigo}" >> "${tmp}"
 
-    install -m 0640 -o "${usuario}" -g "${usuario}" "${tmp}" "${destino}"
+    install -m 0640 -o "${usuario}" -g "${grupo_admin}" "${tmp}" "${destino}"
     rm -f "${tmp}"
 
     revisados=$(( revisados + 1 ))
