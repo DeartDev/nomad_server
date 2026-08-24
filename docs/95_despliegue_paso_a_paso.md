@@ -437,6 +437,7 @@ Para que no lo busques a mano:
 | `git pull` en el despliegue pide frase de paso | Se creó la llave con frase, o git usa tu llave personal | Recrea la llave con `-N ''` y comprueba `IdentitiesOnly yes` |
 | El subdominio no resuelve | Falta el registro DNS | Paso 2. Consulta contra `1.1.1.1`, no contra el resolutor local |
 | `revisar_proyecto.sh` falla en la regla 8 | Dos proyectos usan el mismo nombre de router | Prefija el router con el nombre del proyecto |
+| Error de TLS en el navegador, pero el DNS resuelve y el contenedor responde | El host tiene dos niveles (`api.proyecto.dominio`). El *Universal SSL* de Cloudflare solo cubre un nivel | Usa un subdominio plano. Capítulo [11](11_cloudflared_y_dominio.md) § 3.4 |
 | HTTP 502 desde internet | El contenedor no está en `${DOCKER_RED_PROXY}`, o el puerto de la etiqueta no coincide | Capítulo [10](10_traefik.md) |
 | HTTP 404 desde internet | Traefik no tiene router para ese host | Revisa `traefik.enable=true` y la regla |
 | Cambié el `.env` y no pasa nada | `deploy.sh` no recrea contenedores por un cambio de variables | `docker compose up -d --force-recreate` en el directorio del proyecto |

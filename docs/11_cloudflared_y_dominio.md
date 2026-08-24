@@ -151,6 +151,23 @@ es una línea de comando por proyecto.
 Hay además una ventaja discreta en no usar comodín: solo existe públicamente lo que has creado a
 propósito. Un servicio interno que se te olvide marcar como interno no queda expuesto por defecto.
 
+**Un límite que conviene conocer antes de elegir el nombre de un proyecto:** el certificado
+*Universal SSL* que Cloudflare emite gratis cubre el ápice y **un solo nivel** de subdominio, es
+decir `${DOMINIO_PUBLICO}` y `*.${DOMINIO_PUBLICO}`.
+
+| Nombre | ¿Cubierto? |
+|---|---|
+| `${DOMINIO_PUBLICO}` | Sí |
+| `proyecto.${DOMINIO_PUBLICO}` | Sí |
+| `api.proyecto.${DOMINIO_PUBLICO}` | **No** |
+
+Un host de dos niveles da error de TLS en el navegador y **parece un problema de Traefik**, porque
+el registro DNS existe, el túnel entrega y el contenedor responde. Lo que falla es el certificado
+del borde, un tramo antes. Cubrirlo exige un certificado avanzado, que es de pago.
+
+Por eso la convención del [anexo 95](95_despliegue_paso_a_paso.md) es un subdominio plano por
+proyecto: `tienda`, no `api.tienda`.
+
 ### 3.5 Modo TLS «Full» en Cloudflare
 
 **Decisión: `Full`, no `Flexible` ni `Full (strict)`.**
