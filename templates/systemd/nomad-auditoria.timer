@@ -1,0 +1,34 @@
+# ===========================================================================
+#  nomad_server — temporizador de la auditoría diaria
+#  Destino  : /etc/systemd/system/nomad-auditoria.timer
+#  Generado por scripts/17_auditoria.sh
+#  Capítulo : docs/17_auditoria_del_servidor.md
+#
+#  CÓMO APLICARLA A MANO (equivalente a lo que hace el script)
+#
+#      cd ~/nomad_server
+#      source scripts/lib/entorno.sh
+#      nomad_plantilla systemd/nomad-auditoria.timer \
+#          | sudo tee /etc/systemd/system/nomad-auditoria.timer >/dev/null
+#      sudo systemctl daemon-reload
+#      sudo systemctl enable --now nomad-auditoria.timer
+# ===========================================================================
+
+[Unit]
+Description=Auditoria diaria del servidor
+
+[Timer]
+OnCalendar=*-*-* ${AUDITORIA_HORA}:00
+
+# Si el servidor estuvo apagado a esa hora, auditar en cuanto arranque: el
+# informe del día en que el servidor no estaba es precisamente el que interesa.
+Persistent=true
+
+# Cinco minutos de margen. Menos que el respaldo porque aquí no hay disco que
+# compartir: solo se trata de no coincidir al segundo con otra tarea nocturna.
+RandomizedDelaySec=5min
+
+Unit=nomad-auditoria.service
+
+[Install]
+WantedBy=timers.target

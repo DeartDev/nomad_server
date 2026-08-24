@@ -1,0 +1,39 @@
+# ===========================================================================
+#  nomad_server — validación de proyectos
+#  Destino  : /etc/systemd/system/nomad-conserje.service
+#  Generado por scripts/17_auditoria.sh
+#  Capítulo : docs/17_auditoria_del_servidor.md
+#
+#  Esta unidad no se habilita: la dispara nomad-conserje.path.
+#
+#  CÓMO APLICARLA A MANO
+#      nomad_plantilla systemd/nomad-conserje.service \
+#          | sudo tee /etc/systemd/system/nomad-conserje.service >/dev/null
+#      sudo systemctl daemon-reload
+# ===========================================================================
+
+[Unit]
+Description=Validacion de los proyectos contra el anexo 96
+Documentation=file:///home/${ADMIN_USUARIO}/nomad_server/docs/96_contrato_de_dockerizacion.md
+
+# 'Requires' y no 'Wants', al revés que la auditoría: revisar_proyecto.sh
+# resuelve el compose con 'docker compose config' y consulta los contenedores
+# en marcha. Sin Docker no produce un veredicto incompleto, produce uno falso.
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/nomad-conserje.sh
+
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=10min
+
+ProtectSystem=strict
+ReadWritePaths=${DATOS_RAIZ}
+PrivateTmp=true
+NoNewPrivileges=true
+
+# ProtectHome NO se activa, por lo mismo que en la auditoría: el script
+# invoca revisar_proyecto.sh, que vive en el repositorio.

@@ -1,0 +1,43 @@
+# ===========================================================================
+#  nomad_server — vigilante de los proyectos
+#  Destino  : /etc/systemd/system/nomad-conserje.path
+#  Generado por scripts/17_auditoria.sh
+#  Capítulo : docs/17_auditoria_del_servidor.md
+#
+#  CÓMO APLICARLA A MANO
+#      nomad_plantilla systemd/nomad-conserje.path \
+#          | sudo tee /etc/systemd/system/nomad-conserje.path >/dev/null
+#      sudo systemctl daemon-reload
+#      sudo systemctl enable --now nomad-conserje.path
+# ===========================================================================
+
+[Unit]
+Description=Vigila la aparicion de proyectos nuevos
+
+[Path]
+# LO QUE ESTA UNIDAD SÍ DETECTA Y LO QUE NO
+#
+# systemd.path vigila el directorio indicado y NO baja por sus subdirectorios:
+# no admite comodines ni vigilancia recursiva. Por tanto:
+#
+#   SÍ detecta  — un proyecto NUEVO: aparece un directorio en la raíz de datos.
+#                 Es el caso que motivó esta pieza: "clono un proyecto en el
+#                 servidor y quiero que se valide solo".
+#
+#   NO detecta  — editar el compose de un proyecto que ya existía. Ese fichero
+#                 está un nivel más abajo y el inotify de aquí no llega.
+#
+# El hueco se cubre por dos caminos, y por eso se puede vivir con él:
+#   1. nomad-auditoria.service arrastra a nomad-conserje.service, así que
+#      TODOS los proyectos se revisan otra vez cada día.
+#   2. El anexo 96 manda ejecutar revisar_proyecto.sh antes de desplegar, y
+#      eso no lo sustituye ninguna automatización.
+#
+# Escribirlo aquí y no descubrirlo dentro de un año, cuando un compose
+# editado no dispare nada y parezca que la vigilancia está rota.
+PathChanged=${DATOS_RAIZ}
+
+Unit=nomad-conserje.service
+
+[Install]
+WantedBy=multi-user.target

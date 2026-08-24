@@ -30,7 +30,7 @@ Opciones:
                       Es la rutina semanal (unos 30 segundos).
   --seccion <nombre>  Ejecuta solo un bloque:
                         sistema | seguridad | red | docker |
-                        publicacion | respaldos
+                        publicacion | respaldos | auditoria
   -h, --help          Muestra esta ayuda.
 
 Código de salida:
@@ -468,6 +468,78 @@ verificar_respaldos() {
     fi
 }
 
+verificar_auditoria() {
+    log_paso "Auditoría automática"
+
+    # El capítulo 17 es opcional. Que no esté instalado no es un fallo.
+    if [[ "${AUDITORIA_HABILITADA:-no}" != "si" ]]; then
+        log_sinca "AUDITORIA_HABILITADA no es 'si': el capítulo 17 no está instalado."
+        return
+    fi
+
+    local sello="${DATOS_RAIZ}/auditoria/informes/sello.txt"
+
+    if systemctl is-enabled --quiet nomad-auditoria.timer 2>/dev/null; then
+        log_ok "nomad-auditoria.timer habilitado."
+    else
+        fallo "nomad-auditoria.timer no está habilitado: no habrá informe diario."
+    fi
+
+    if systemctl is-enabled --quiet nomad-conserje.path 2>/dev/null; then
+        log_ok "nomad-conserje.path habilitado."
+    else
+        fallo "nomad-conserje.path no está habilitado: los proyectos nuevos no se validan solos."
+    fi
+
+    # Aviso y no fallo: la primera vez que se instala el capítulo todavía no ha
+    # corrido ninguna auditoría, y el propio recolector ejecuta este verificador.
+    # Marcarlo como fallo haría que la PRIMERA auditoría correcta se avisara
+    # como fallida.
+    if [[ ! -r "${sello}" ]]; then
+        aviso "Todavía no hay ${sello}: la auditoría no ha llegado a publicar."
+        aviso "Lánzala a mano: sudo systemctl start nomad-auditoria.service"
+        return
+    fi
+
+    # Un informe viejo es peor que ninguno: se lee con la misma confianza que
+    # uno de esta mañana. 36 horas dan margen a un reinicio o a un apagón sin
+    # convertir cada incidencia en un fallo.
+    local edad_horas
+    edad_horas=$(( ( $(date +%s) - $(stat -c %Y "${sello}") ) / 3600 ))
+    if (( edad_horas > 36 )); then
+        fallo "El último informe tiene ${edad_horas} horas: la auditoría no está corriendo."
+    else
+        log_ok "Informe de hace ${edad_horas} h."
+    fi
+
+    # 'fuga-detectada' significa que la redacción no dejó limpio el informe y el
+    # recolector se negó a publicarlo. Es un fallo, no un aviso: mientras dure,
+    # no hay informe y el que se lee es el aviso.
+    local resultado
+    resultado="$(sed -n 's/^resultado=//p' "${sello}")"
+    case "${resultado}" in
+        publicado)      log_ok "Último informe publicado correctamente." ;;
+        fuga-detectada) fallo "La redacción detectó una fuga y no se publicó informe (capítulo 17 § 9)." ;;
+        *)              aviso "Resultado desconocido en el sello: '${resultado}'" ;;
+    esac
+
+    # Proyectos que no cumplen el anexo 96, según lo que dejó el conserje.
+    local incumplen=0 informe
+    for informe in "${DATOS_RAIZ}"/auditoria/informes/*.auditoria; do
+        [[ -f "${informe}" ]] || continue
+        if ! sed -n 's/^\[codigo de salida: \([0-9]*\)\]$/\1/p' "${informe}" | contiene -x 0; then
+            fallo "El proyecto '$(basename "${informe}" .auditoria)' no cumple el anexo 96."
+            incumplen=$(( incumplen + 1 ))
+        fi
+    done
+    # 'if' y no 'condición && acción': una lista '&&' como última orden de una
+    # función devuelve 1 cuando la condición es falsa, y con 'set -e' arriba
+    # eso mata al llamante. Lo vigila verificar_repositorio.sh.
+    if (( incumplen == 0 )); then
+        log_ok "Ningún proyecto incumple el contrato de dockerización."
+    fi
+}
+
 # ===========================================================================
 #  EJECUCIÓN
 # ===========================================================================
@@ -482,13 +554,15 @@ if (( RAPIDO == 1 )); then
 else
     case "${SECCION}" in
         todo)        verificar_sistema; verificar_seguridad; verificar_red
-                     verificar_docker; verificar_publicacion; verificar_respaldos ;;
+                     verificar_docker; verificar_publicacion; verificar_respaldos
+                     verificar_auditoria ;;
         sistema)     verificar_sistema ;;
         seguridad)   verificar_seguridad ;;
         red)         verificar_red ;;
         docker)      verificar_docker ;;
         publicacion) verificar_publicacion ;;
         respaldos)   verificar_respaldos ;;
+        auditoria)   verificar_auditoria ;;
         *) die "Sección desconocida: '${SECCION}'. Usa --help." ;;
     esac
 fi

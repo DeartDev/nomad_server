@@ -1,4 +1,11 @@
-# Hermes fase 1 — el recolector · plan de implementación
+# Auditoría automática del servidor · plan de implementación
+
+> **Completado el 2026-08-24.** Empezó como «fase 1 de la integración de Hermes» y terminó siendo
+> el capítulo 17 entero, porque al desglosar el valor se vio que ninguna de las piezas útiles
+> necesitaba un agente. El nombre de los ficheros cambió en consecuencia: `HERMES_*` pasó a
+> `AUDITORIA_*`, `17_hermes.sh` a `17_auditoria.sh`, y el capítulo se llama «Auditoría automática
+> del servidor». Un capítulo que prometiera Hermes sin instalarlo sería justo la clase de mentira
+> que este repositorio existe para evitar.
 
 > **Para quien ejecute este plan:** usa `superpowers:subagent-driven-development` o
 > `superpowers:executing-plans`. Los pasos llevan casilla (`- [ ]`) para poder seguirlos.

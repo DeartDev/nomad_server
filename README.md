@@ -28,7 +28,7 @@ esa opción, *cómo verificar* que funcionó y *qué hacer* cuando falla.
 | Principio | Cómo se materializa |
 |---|---|
 | **Reproducibilidad** | Cero valores inventados sobre la marcha: todo sale de `config/servidor.env`. Cada paso tiene comando exacto y salida esperada. |
-| **Consistencia** | Los 17 capítulos de procedimiento comparten la misma estructura de 10 secciones. Siempre sabes dónde mirar. |
+| **Consistencia** | Los 18 capítulos de procedimiento comparten la misma estructura de 10 secciones. Siempre sabes dónde mirar. |
 | **Dos vías, un resultado** | Cada capítulo se puede ejecutar con su script o a mano, comando a comando. Las dos rutas están escritas enteras y producen lo mismo. |
 | **Robustez** | Todo script es idempotente y admite `--check` para simular. Nada se sobrescribe sin copia de seguridad previa. |
 | **Seguridad** | Nada se expone a internet. SSH solo con llaves. Firewall con política de denegación por defecto. Ningún contenedor publica puertos al host. |
@@ -180,6 +180,7 @@ que no los saltes: el 06 da por hecho lo que hizo el 05.
 | 14 | [Respaldos con restic](docs/14_respaldos_restic.md) | Copias cifradas automáticas y restauración probada |
 | 15 | [Mantenimiento](docs/15_mantenimiento_y_actualizaciones.md) | Una rutina para que el servidor no se pudra con el tiempo |
 | 16 | [Recuperación ante desastres](docs/16_recuperacion_ante_desastres.md) | Volver a estar en pie tras un fallo grave |
+| 17 | [Auditoría automática](docs/17_auditoria_del_servidor.md) | Que las comprobaciones se ejecuten solas y te avisen |
 
 ### Anexos transversales
 
@@ -290,11 +291,11 @@ Todos los capítulos tienen exactamente las mismas 10 secciones, en el mismo ord
 ```
 nomad_server/
 ├── config/servidor.env.example   Todas las variables del despliegue, comentadas
-├── docs/                         Los 17 capítulos + 3 anexos transversales
+├── docs/                         Los 18 capítulos + 4 anexos transversales
 ├── scripts/
 │   ├── lib/common.sh             Biblioteca de los scripts: registro, validaciones, idempotencia
 │   ├── lib/entorno.sh            Se importa con 'source' para trabajar a mano
-│   ├── 01…14_*.sh                Un script por capítulo, idempotente y con --check
+│   ├── 01…17_*.sh                Un script por capítulo, idempotente y con --check
 │   ├── variables.sh              Estado y edición de config/servidor.env
 │   ├── deploy.sh                 Despliegue de proyectos, con reversión automática
 │   ├── verificar_sistema.sh      Estado del servidor: lo que se ejecuta cada semana

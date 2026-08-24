@@ -1,0 +1,72 @@
+# ===========================================================================
+#  nomad_server — servicio de la auditoría diaria
+#  Destino  : /etc/systemd/system/nomad-auditoria.service
+#  Generado por scripts/17_auditoria.sh
+#  Capítulo : docs/17_auditoria_del_servidor.md
+#
+#  CÓMO APLICARLA A MANO (equivalente a lo que hace el script)
+#
+#      cd ~/nomad_server
+#      source scripts/lib/entorno.sh
+#      nomad_diff systemd/nomad-auditoria.service /etc/systemd/system/nomad-auditoria.service
+#      nomad_plantilla systemd/nomad-auditoria.service \
+#          | sudo tee /etc/systemd/system/nomad-auditoria.service >/dev/null
+#      sudo chmod 644 /etc/systemd/system/nomad-auditoria.service
+#
+#  Y después, para que tenga efecto:
+#      sudo systemctl daemon-reload
+# ===========================================================================
+
+[Unit]
+Description=Auditoria diaria del servidor
+Documentation=file:///home/${ADMIN_USUARIO}/nomad_server/docs/17_auditoria_del_servidor.md
+
+# 'Wants' y no 'Requires': si Docker estuviera parado, el resto del informe
+# —disco, servicios fallidos, reinicio pendiente— sigue mereciendo la pena. Y
+# que Docker esté parado es justo lo que quieres leer en el informe, no el
+# motivo por el que no lo tienes.
+Wants=docker.service
+After=docker.service network-online.target
+
+# La revisión diaria de los proyectos va enganchada aquí, y no en un
+# temporizador propio, porque cubre el hueco de nomad-conserje.path: esa
+# unidad detecta proyectos nuevos, pero no un compose editado dentro de un
+# proyecto que ya existía (el detalle, en la propia unidad). Arrastrándola una
+# vez al día, ningún cambio se queda sin revisar más de 24 horas.
+Wants=nomad-conserje.service
+Before=nomad-conserje.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/nomad-auditoria.sh
+
+# La auditoría no compite con nada: puede tardar lo que haga falta.
+Nice=19
+IOSchedulingClass=idle
+
+# Un verificador colgado no debe dejar el temporizador bloqueado para siempre.
+TimeoutStartSec=20min
+
+# --- Aislamiento -----------------------------------------------------------
+# Necesita leer prácticamente todo el sistema y escribir en un solo sitio.
+ProtectSystem=strict
+ReadWritePaths=${DATOS_RAIZ}/auditoria
+
+# El informe sin publicar, cuando la redacción falla, se guarda en /root con
+# permisos 600. Sin esta línea 'ProtectSystem=strict' lo impediría y la rama
+# de fallo perdería su única ayuda para depurar.
+ReadWritePaths=/root
+
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+# ProtectHome NO se activa. El recolector invoca los scripts del repositorio,
+# que vive en /home/${ADMIN_USUARIO}/nomad_server. Con 'ProtectHome=yes' el
+# servicio arrancaría igual y el informe saldría todos los días diciendo que
+# no encuentra el verificador: un fallo que se lee como si faltara el
+# repositorio, y no como lo que es.
+
+[Install]
+WantedBy=multi-user.target

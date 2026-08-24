@@ -2,8 +2,8 @@
 # ===========================================================================
 #  nomad_server — recolector de la auditoría diaria
 #  Destino  : /usr/local/sbin/nomad-auditoria.sh
-#  Generado por scripts/17_hermes.sh
-#  Capítulo : docs/17_hermes_guardian.md
+#  Generado por scripts/17_auditoria.sh
+#  Capítulo : docs/17_auditoria_del_servidor.md
 #
 #  Propósito : ejecutar como root lo que el agente NO puede ejecutar, redactar
 #              su salida y dejarla en el directorio de informes.
@@ -14,7 +14,7 @@
 #  los encuentra, lo anota en el informe y sigue con lo que sí puede recoger.
 #
 #  No lo edites aquí: edita config/servidor.env y vuelve a ejecutar
-#  scripts/17_hermes.sh
+#  scripts/17_auditoria.sh
 #
 #  NOTA PARA QUIEN EDITE LA PLANTILLA: las variables en mayúscula y entre
 #  llaves se sustituyen al generar el archivo. Las variables propias del
@@ -125,9 +125,10 @@ sin_volatil() {
 # ===========================================================================
 #  VALORES SUSTITUIDOS AL INSTALAR
 # ===========================================================================
-dir_informes="${DATOS_RAIZ}/hermes/informes"
-usuario="${HERMES_USUARIO}"
+dir_informes="${DATOS_RAIZ}/auditoria/informes"
+usuario="${AUDITORIA_USUARIO}"
 repo="/home/${ADMIN_USUARIO}/nomad_server"
+push_url="${AUDITORIA_PUSH_URL}"
 
 estado="${dir_informes}/estado.txt"
 anterior="${dir_informes}/estado.anterior.txt"
@@ -138,6 +139,30 @@ cambios="${dir_informes}/cambios.txt"
 # En /root y con permisos 600: fuera del directorio de informes, así que el
 # agente no puede leerlo ni siquiera en la fase 2.
 fuga="/root/nomad-auditoria-fuga.txt"
+
+# ===========================================================================
+#  AVISO
+# ===========================================================================
+#  Se reutiliza el monitor Push de Uptime Kuma del capítulo 14: ya tiene
+#  configurado y probado el canal de avisos, así que no hace falta ningún bot
+#  nuevo ni ninguna credencial nueva.
+#
+#  TRES SEÑALES CON UNA SOLA URL:
+#    up    — la auditoría corrió y el verificador no encontró fallos
+#    down  — la auditoría corrió y SÍ encontró fallos; Kuma te avisa con el
+#            recuento, que es el "dime qué pasa" sin que nadie lo interprete
+#    nada  — la auditoría no llegó a ejecutarse, y el monitor salta solo por
+#            ausencia de aviso, igual que hace el del respaldo (capítulo 14
+#            § 3.6). Es la única señal que sobrevive a un servidor apagado.
+#
+#  El mensaje va con '+' en vez de espacios porque viaja en una cadena de
+#  consulta, sin escapar nada más: se construye aquí, no viene de fuera.
+avisar() {
+    local estado_aviso="$1" mensaje="$2"
+    [[ -n "${push_url}" ]] || return 0
+    curl -fsS -m 10 "${push_url}?status=${estado_aviso}&msg=${mensaje}" >/dev/null 2>&1 \
+        || echo "nomad-auditoria: no se ha podido avisar al monitor" >&2
+}
 
 inicio="$(date +%s)"
 crudo="$(mktemp)"
@@ -254,7 +279,7 @@ if fugas < "${limpio}" >/dev/null 2>&1; then
         printf '    sudo less %s\n\n' "${fuga}"
         printf 'Cuando sepas qué patrón falta, añádelo a patrones_fuga en\n'
         printf 'templates/etc/nomad-auditoria.sh y vuelve a ejecutar\n'
-        printf 'scripts/17_hermes.sh. Capítulo 17 § 9.\n'
+        printf 'scripts/17_auditoria.sh. Capítulo 17 § 9.\n'
     } > "${crudo}"
     escribir_para_el_agente "${crudo}" "${estado}"
 
@@ -268,6 +293,7 @@ if fugas < "${limpio}" >/dev/null 2>&1; then
         echo "nomad-auditoria: no se pudo guardar ${fuga}" >&2
     fi
 
+    avisar down "auditoria+SIN+publicar:+${n_fugas}+fugas+tras+redactar"
     echo "nomad-auditoria: ${n_fugas} fugas tras redactar; informe no publicado" >&2
     exit 1
 fi
@@ -331,5 +357,19 @@ lineas_cambiadas="$(grep -c '^[+-]' "${cambios}" 2>/dev/null || true)"
     printf 'lineas_cambiadas=%s\n'   "${lineas_cambiadas:-0}"
 } > "${crudo}"
 escribir_para_el_agente "${crudo}" "${sello}"
+
+# ===========================================================================
+#  Y AVISAR
+# ===========================================================================
+#  El recuento sale del propio verificador, no de una interpretación de su
+#  salida: es la misma línea que ves al ejecutarlo a mano.
+fallidas="$(sed -n 's/.*Comprobaciones fallidas: \([0-9]*\).*/\1/p' "${estado}" | tail -1)"
+fallidas="${fallidas:-0}"
+
+if (( codigo_verificador == 0 )); then
+    avisar up "sin+fallos+·+${lineas_cambiadas:-0}+lineas+cambiadas"
+else
+    avisar down "${fallidas}+comprobaciones+fallidas+·+${lineas_cambiadas:-0}+lineas+cambiadas"
+fi
 
 exit 0

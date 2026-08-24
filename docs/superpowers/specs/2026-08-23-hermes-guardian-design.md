@@ -1,7 +1,27 @@
 # Hermes como guardián de nomadservernw — especificación de diseño
 
-> **Estado:** aprobado en conversación el 2026-08-23. Pendiente de convertirse en plan de
-> implementación.
+> **Estado: NO CONSTRUIDO, por decisión del 2026-08-24.**
+>
+> Se construyó la **fase 1** y se paró ahí. El motivo, en corto: al desglosar el valor por piezas,
+> casi todo lo que se buscaba —auditoría diaria, validación automática de los proyectos que llegan,
+> aviso a Telegram de lo que cambió— lo dan tres piezas de bash sin ninguna IA de por medio. Lo que
+> quedaba para Hermes era **interpretar** el informe y **escribir** la corrección de un compose; y
+> esa segunda mitad ya se cubre desde el portátil con la skill `desplegar-en-nomadservernw`, con un
+> modelo mejor y con el repositorio entero en contexto.
+>
+> Lo construido está en el **capítulo 17**, que se llama «Auditoría automática del servidor» y no
+> menciona a Hermes: instala un recolector diario, un vigilante de proyectos y un aviso por el
+> monitor Push de Uptime Kuma que ya existía. Ni contenedor, ni clave de API, ni bot nuevo, ni un
+> solo dato del servidor saliendo hacia un tercero.
+>
+> **Este documento se conserva a propósito.** Dentro de unos meses el informe diario dará el dato
+> que hoy no existe: cuántas veces dijo algo que no se sabía, y cuántos proyectos llegaron
+> necesitando arreglo. Si ese dato dice que hace falta, las fases 2 a 6 están diseñadas aquí y se
+> retoman sin volver a pensarlas. Si dice que no, se ahorró un contenedor, una factura y la pieza
+> más delicada del repositorio.
+>
+> Para instalar Hermes si se retoma: `docs/instalar-hermes-debian.md`, sin versionar, en la raíz de
+> trabajo. Sus indicaciones hay que corregirlas con lo de la § 3 de este documento.
 >
 > **Convención de este documento:** las variables que **todavía no existen** en
 > `config/servidor.env.example` se escriben sin llaves (`HERMES_MODELO`) para que
