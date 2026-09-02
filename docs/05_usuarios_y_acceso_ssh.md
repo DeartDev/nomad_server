@@ -172,13 +172,64 @@ mal la contraseña de `sudo` tres veces sería un final absurdo para este capít
 
 ---
 
+### 3.8 `AllowUsers` no es acumulativa
+
+Es la trampa que espera a quien, meses después, quiera autorizar a un segundo usuario. `AllowUsers`
+no suma: gana la **primera aparición** de la directiva, y la lista de esa única línea es la que
+decide. Un archivo nuevo en `sshd_config.d/` con otra línea `AllowUsers` no añade a nadie —
+`50-nomad.conf` se lee antes y su lista sigue siendo la que manda.
+
+Por eso los usuarios adicionales van en la misma línea, y la plantilla los toma de una variable:
+
+```
+AllowUsers ${ADMIN_USUARIO} ${SSH_USUARIOS_EXTRA}
+```
+
+Para autorizar a alguien más, con el usuario ya creado en el servidor y su llave instalada:
+
+```bash
+# [servidor]
+cd ~/nomad_server
+scripts/variables.sh --fijar SSH_USUARIOS_EXTRA=mimir
+source scripts/lib/entorno.sh
+sudo ./scripts/05_ssh.sh --check     # muestra el cambio sin aplicarlo
+sudo ./scripts/05_ssh.sh
+```
+
+Comprobación, **sin cerrar la sesión abierta**:
+
+```bash
+# [servidor]
+sudo sshd -T | grep '^allowusers'
+```
+
+Criterio de aceptación: aparecen los dos nombres en la misma línea. Después, y solo después,
+comprueba desde otra terminal que el nuevo usuario entra de verdad.
+
+Dos cosas que no cambian por añadirlo a la lista: la autenticación por contraseña sigue desactivada
+para todos, así que ese usuario necesita su propio `~/.ssh/authorized_keys` (700 el directorio, 600
+el archivo, y suyo el propietario); y el origen de la conexión lo sigue decidiendo el cortafuegos
+del capítulo [06](06_red_y_firewall.md), no `sshd`.
+
+Editar a mano `/etc/ssh/sshd_config.d/50-nomad.conf` también funciona, pero el cambio dura hasta la
+siguiente ejecución de `scripts/05_ssh.sh`, que reescribe el archivo desde la plantilla. Si dudas de
+si el archivo instalado coincide con lo que dice el repositorio:
+
+```bash
+# [servidor]
+nomad_diff etc/sshd_50-nomad.conf /etc/ssh/sshd_config.d/50-nomad.conf
+```
+
+---
+
 ## 4. Variables usadas
 
 ### 4.1 De `config/servidor.env`
 
 | Variable | Uso | Dónde se usa |
 |---|---|---|
-| `ADMIN_USUARIO` | Único usuario autorizado en `AllowUsers` | Cliente y servidor |
+| `ADMIN_USUARIO` | Primer usuario autorizado en `AllowUsers` | Cliente y servidor |
+| `SSH_USUARIOS_EXTRA` | Usuarios adicionales en `AllowUsers`, separados por espacios; vacía lo normal | Servidor |
 | `ADMIN_SSH_CLAVE_PUBLICA` | Ruta a la llave **pública** en el equipo cliente | Solo cliente |
 | `SSH_PUERTO` | Puerto de escucha de `sshd` y puerto vigilado por fail2ban | Servidor |
 | `LAN_CIDR` | Red excluida de los bloqueos de fail2ban | Servidor |
@@ -475,7 +526,7 @@ UsePAM yes
 # Acceso
 Port ${SSH_PUERTO}
 PermitRootLogin no
-AllowUsers ${ADMIN_USUARIO}
+AllowUsers ${ADMIN_USUARIO} ${SSH_USUARIOS_EXTRA}
 MaxAuthTries 3
 MaxSessions 5
 LoginGraceTime 30
@@ -857,7 +908,8 @@ Criterio de aceptación: `CORRECTO`.
 sudo sshd -T | grep '^allowusers'
 ```
 
-Criterio de aceptación: aparece tu usuario. Si la línea no aparece o sale vacía, **corrígelo antes
+Criterio de aceptación: aparecen tu usuario y los de `SSH_USUARIOS_EXTRA`, si has puesto alguno.
+Si la línea no aparece o sale vacía, **corrígelo antes
 de cerrar la sesión abierta**.
 
 **Prueba final:** reinicia el servidor y comprueba que puedes entrar con la llave sin intervención
@@ -917,6 +969,7 @@ sudo systemctl enable --now ssh.socket
 | fail2ban no bloquea nada | Backend por defecto buscando `/var/log/auth.log`, que no existe | `backend = systemd` en `jail.d/nomad.local` (§ 3.7) | [fail2ban — Jails](https://github.com/fail2ban/fail2ban/wiki) |
 | fail2ban falla al arrancar | `banaction` de iptables en un sistema con nftables sin capa de compatibilidad | Usa `banaction = nftables-multiport` | [fail2ban — Actions](https://github.com/fail2ban/fail2ban/wiki) |
 | Me he bloqueado a mí mismo con fail2ban | Falta tu red en `ignoreip` | Desde consola física: `sudo fail2ban-client set sshd unbanip <ip>` y añade `${LAN_CIDR}` a `ignoreip` | § 3.7 |
+| Añadí un archivo nuevo en `sshd_config.d/` con otra línea `AllowUsers` y el usuario sigue sin entrar | `AllowUsers` no suma: gana la primera aparición, y `50-nomad.conf` se lee antes | Un solo `AllowUsers` con todos los nombres separados por espacios, vía `SSH_USUARIOS_EXTRA` (§ 3.8) | [sshd_config(5)](https://manpages.debian.org/trixie/openssh-server/sshd_config.5.en.html) |
 | `ssh-copy-id: command not found` | No está instalado en el cliente | Usa la vía manual del paso 2 | — |
 | La sesión se corta sola tras unos minutos | Un router intermedio cierra conexiones inactivas | `ServerAliveInterval 60` en `~/.ssh/config` (paso 4) | [ssh_config(5)](https://manpages.debian.org/trixie/openssh-client/ssh_config.5.en.html) |
 | `WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED` | Se reinstaló el servidor y cambiaron sus claves de host | Si el cambio es esperado: `ssh-keygen -R <ip>`. **Si no lo esperabas, investígalo** | [OpenSSH — known_hosts](https://man.openbsd.org/ssh#SSH_KNOWN_HOSTS_FILE_FORMAT) |
