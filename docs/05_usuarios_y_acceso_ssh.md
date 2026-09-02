@@ -203,8 +203,12 @@ Comprobación, **sin cerrar la sesión abierta**:
 sudo sshd -T | grep '^allowusers'
 ```
 
-Criterio de aceptación: aparecen los dos nombres en la misma línea. Después, y solo después,
-comprueba desde otra terminal que el nuevo usuario entra de verdad.
+Criterio de aceptación: aparecen los dos nombres. Ojo, porque despista: `sshd -T` vuelca **una
+línea `allowusers` por usuario**, aunque en el archivo estén todos en la misma línea. Ver dos
+líneas es lo correcto; lo que sería un error es ver dos directivas `AllowUsers` en el propio
+`50-nomad.conf`, porque entonces la segunda no valdría para nada.
+
+Después, y solo después, comprueba desde otra terminal que el nuevo usuario entra de verdad.
 
 Dos cosas que no cambian por añadirlo a la lista: la autenticación por contraseña sigue desactivada
 para todos, así que ese usuario necesita su propio `~/.ssh/authorized_keys` (700 el directorio, 600
