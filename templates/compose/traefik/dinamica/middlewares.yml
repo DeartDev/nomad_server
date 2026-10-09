@@ -88,6 +88,9 @@ http:
           - video/mp4
           - application/zip
           - application/gzip
+          # Los APK ya son un zip: comprimirlos otra vez quita el Content-Length
+          # (sin barra de progreso al descargar) y gasta CPU.
+          - application/vnd.android.package-archive
 
     # --- Limitación de peticiones ----------------------------------------
     # No se aplica por omisión: se añade por proyecto cuando tenga sentido.
