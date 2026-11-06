@@ -537,6 +537,14 @@ compose_arriba() {
     fi
 }
 
+# Paquetes del capítulo 18. Una sola lista: la instala 18_pantalla.sh y la
+# comprueba verificar_sistema.sh. 'xwayland' porque Moonlight solo trae el plugin
+# Qt 'xcb'; 'kbd' porque de ahí sale 'chvt', y las unidades lo llaman.
+# shellcheck disable=SC2034  # la consumen los scripts que importan esta lib
+PAQUETES_PANTALLA=(cage xwayland kbd intel-media-va-driver mesa-va-drivers vainfo
+                   libgl1-mesa-dri libegl-mesa0 alsa-utils libopengl0
+                   libfontconfig1 libva-x11-2)
+
 # Instala paquetes APT solo si faltan.
 instalar_paquetes() {
     local pendientes=()

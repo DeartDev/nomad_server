@@ -18,7 +18,8 @@
 #  BatchMode falla mientras la clave no se haya cargado con AddKeysToAgent.
 #
 #  Las últimas secciones prueban el lado del HP: el lanzador, ya renderizado, con
-#  un Moonlight de mentira, y las plantillas de las unidades.
+#  un Moonlight de mentira; las plantillas de las unidades; y 18_pantalla.sh
+#  --check y verificar_sistema.sh con dobles de lo que consultan.
 # ===========================================================================
 set -euo pipefail
 
@@ -30,8 +31,9 @@ mostrar_ayuda() {
 Uso: bash scripts/emisor/probar_pantalla_hp.sh [--help]
 
 Ejecuta las pruebas de pantalla-hp.sh con dobles de kscreen-doctor, systemd-run,
-systemctl, ssh, ip, curl y sleep, y las del lanzador y las unidades del HP. No toca
-las pantallas ni se conecta a nada. Termina con 0 si todas pasan.
+systemctl, ssh, ip, curl y sleep, y las del lado del HP: el lanzador, las unidades,
+18_pantalla.sh --check y verificar_sistema.sh. No toca las pantallas ni el sistema
+y no se conecta a nada. Termina con 0 si todas pasan.
 AYUDA
 }
 
@@ -1385,6 +1387,222 @@ prueba_limites_en_la_porcion_del_usuario() {
     grep -qx '\[Slice\]' "${f}" || fallar "falta [Slice]"
     grep -qx 'CPUWeight=50' "${f}" || fallar "falta CPUWeight"
     grep -qx 'MemoryMax=2G' "${f}" || fallar "falta MemoryMax"
+}
+
+# ===========================================================================
+#  EL MONTAJE Y LA VERIFICACIÓN EN EL HP
+# ===========================================================================
+
+# Una caja con los scripts del HP y dobles de lo que consultan. 18_pantalla.sh
+# solo se ejecuta con --check: su doble de 'requerir_root' deja correrlo sin ser
+# root, y nada escribe en el sistema.
+#
+#   usuario_grupos  los grupos de 'pantalla'; sin él, el usuario no existe.
+#   sin_paquetes    los paquetes que dpkg-query no encuentra, uno por línea.
+#   sudoers         lo que tiene /etc/sudoers.d/nomad-pantalla.
+#   sin_sudo        sudo -n falla.
+#   apprun_cerrado  'pantalla' no puede ejecutar AppRun.
+preparar_hp() {
+    local d="${CAJA}/dobles_hp"
+    mkdir -p "${d}" "${CAJA}/repo/templates"
+    cp "${RAIZ}/scripts/18_pantalla.sh" "${RAIZ}/scripts/verificar_sistema.sh" "${CAJA}/repo/scripts/"
+    cp -r "${RAIZ}/templates/." "${CAJA}/repo/templates/"
+    cp "${RAIZ}/config/servidor.env.example" "${CAJA}/repo/config/"
+    echo 'requerir_root() { :; }' >> "${CAJA}/repo/scripts/lib/common.sh"
+    {
+        echo 'ADMIN_USUARIO="admin"'
+        echo 'PANTALLA_HABILITADA="si"'
+        echo 'PANTALLA_USUARIO="pantalla"'
+        echo "PANTALLA_EMISOR_IP=\"${IP_EMISOR}\""
+        echo 'PANTALLA_BITRATE="40000"'
+        echo 'MOONLIGHT_VERSION="6.2.0"'
+        echo 'MOONLIGHT_SHA256="abc"'
+    } > "${CAJA}/repo/config/servidor.env"
+    echo "pantalla video render audio" > "${CAJA}/usuario_grupos"
+    echo "admin ALL=(root) NOPASSWD: /usr/bin/systemctl start nomad-pantalla.service, /usr/bin/systemctl stop nomad-pantalla.service" \
+        > "${CAJA}/sudoers"
+
+    cat > "${d}/id" <<'DOBLE'
+#!/bin/bash
+[[ -e "${CAJA}/usuario_grupos" && "${*: -1}" == pantalla ]] || exit 1
+if [[ "$1" == -u ]]; then echo 999; else cat "${CAJA}/usuario_grupos"; fi
+DOBLE
+    cat > "${d}/dpkg-query" <<'DOBLE'
+#!/bin/bash
+paquete="${*: -1}"
+if [[ -e "${CAJA}/sin_paquetes" ]] && grep -qxF -- "${paquete}" "${CAJA}/sin_paquetes"; then exit 1; fi
+[[ "${paquete}" == libfuse2t64 ]] && exit 1
+echo "install ok installed"
+DOBLE
+    cat > "${d}/sudo" <<'DOBLE'
+#!/bin/bash
+[[ ! -e "${CAJA}/sin_sudo" ]] || exit 1
+case "$*" in
+    "-n true")                 exit 0 ;;
+    "-n cat "*)                cat "${CAJA}/sudoers" ;;
+    "-n test ! -e "*)          exit 1 ;;
+    "-n -u pantalla true")     exit 0 ;;
+    "-n -u pantalla test -x "*) [[ ! -e "${CAJA}/apprun_cerrado" ]] ;;
+    "-n -u pantalla vainfo")   echo "VAProfileHEVCMain : VAEntrypointVLD" ;;
+    *)                         exit 1 ;;
+esac
+DOBLE
+    cat > "${d}/systemctl" <<'DOBLE'
+#!/bin/bash
+[[ "$1" != cat ]] || exit 1
+[[ "$1" != is-enabled ]] || echo static
+exit 0
+DOBLE
+    printf '#!/bin/bash\nexit 0\n' > "${d}/visudo"
+    chmod +x "${d}"/*
+}
+
+ejecutar_hp() {
+    RC=0
+    ( cd "${CAJA}" && env -i "PATH=${CAJA}/dobles_hp:${CAJA}/dobles:/usr/bin:/bin" "HOME=${CAJA}/home" \
+        "CAJA=${CAJA}" TERM=dumb /usr/bin/timeout 20 "$@" ) > "${CAJA}/salida" 2>&1 < /dev/null || RC=$?
+}
+montar_hp()    { ejecutar_hp "${CAJA}/repo/scripts/18_pantalla.sh" --check; }
+verificar_hp() { ejecutar_hp "${CAJA}/repo/scripts/verificar_sistema.sh" --seccion pantalla; }
+
+prueba_hp_con_no_no_exige_el_resto_de_variables() {
+    preparar_hp
+    echo 'PANTALLA_HABILITADA="no"' > "${CAJA}/repo/config/servidor.env"
+    chmod 600 "${CAJA}/repo/config/servidor.env"
+    montar_hp
+    rc_es 0
+    dice "no es 'si'"
+    no_dice "Paquetes"
+}
+
+prueba_hp_sin_la_variable_tampoco_hace_nada() {
+    preparar_hp
+    : > "${CAJA}/repo/config/servidor.env"
+    montar_hp
+    rc_es 0
+    dice "no es 'si'"
+}
+
+prueba_hp_con_si_exige_las_variables() {
+    preparar_hp
+    sed -i '/^PANTALLA_BITRATE=/d' "${CAJA}/repo/config/servidor.env"
+    montar_hp
+    rc_no_es_cero
+    dice "PANTALLA_BITRATE"
+}
+
+prueba_hp_instala_xwayland_y_kbd() {
+    preparar_hp
+    printf '%s\n' xwayland kbd > "${CAJA}/sin_paquetes"
+    montar_hp
+    rc_es 0
+    dice "Paquetes por instalar: xwayland kbd"
+}
+
+prueba_hp_usuario_existente_recibe_los_grupos_que_le_faltan() {
+    preparar_hp
+    echo "pantalla video" > "${CAJA}/usuario_grupos"
+    montar_hp
+    rc_es 0
+    dice "ejecutaría: usermod -aG render pantalla"
+    dice "ejecutaría: usermod -aG audio pantalla"
+    no_dice "usermod -aG video"
+}
+
+prueba_hp_usuario_con_sus_grupos_no_se_toca() {
+    preparar_hp
+    montar_hp
+    rc_es 0
+    no_dice "usermod"
+}
+
+prueba_hp_rechaza_al_usuario_en_input() {
+    preparar_hp
+    echo "pantalla video render audio input" > "${CAJA}/usuario_grupos"
+    montar_hp
+    rc_no_es_cero
+    dice "gpasswd -d pantalla input"
+}
+
+prueba_hp_limites_en_la_porcion_del_uid_con_recarga() {
+    preparar_hp
+    montar_hp
+    rc_es 0
+    dice "escribiría /etc/systemd/system/user-999.slice.d/50-nomad-pantalla.conf"
+    dice "ejecutaría: systemctl daemon-reload"
+}
+
+prueba_hp_sin_usuario_avisa_de_los_limites_con_check() {
+    preparar_hp
+    rm "${CAJA}/usuario_grupos"
+    montar_hp
+    rc_es 0
+    dice "ejecutaría: useradd"
+    dice "user-<uid>.slice.d/50-nomad-pantalla.conf"
+}
+
+prueba_verificar_sudoers_exacto_con_comentarios_pasa() {
+    preparar_hp
+    sed -i '1i # comentario\n' "${CAJA}/sudoers"
+    verificar_hp
+    dice "sudoers con las dos reglas exactas"
+}
+
+prueba_verificar_sudoers_con_una_regla_de_mas_falla() {
+    preparar_hp
+    echo "admin ALL=(root) NOPASSWD: ALL" >> "${CAJA}/sudoers"
+    verificar_hp
+    rc_no_es_cero
+    dice "no contiene exactamente las reglas esperadas"
+    no_dice "sudoers con las dos reglas exactas"
+}
+
+prueba_verificar_paquete_que_falta_falla() {
+    preparar_hp
+    echo kbd > "${CAJA}/sin_paquetes"
+    verificar_hp
+    rc_no_es_cero
+    dice "Faltan paquetes: kbd"
+}
+
+prueba_verificar_con_todos_los_paquetes() {
+    preparar_hp
+    verificar_hp
+    dice "Paquetes de la pantalla instalados."
+}
+
+prueba_verificar_apprun_como_su_usuario() {
+    preparar_hp
+    verificar_hp
+    dice "ejecutable por pantalla"
+    touch "${CAJA}/apprun_cerrado"
+    verificar_hp
+    rc_no_es_cero
+    dice "pantalla no puede ejecutar"
+}
+
+prueba_verificar_sin_sudo_es_aviso_y_no_fallo() {
+    preparar_hp
+    touch "${CAJA}/sin_sudo" "${CAJA}/apprun_cerrado"
+    verificar_hp
+    dice "No puedo comprobar sin sudo que pantalla ejecute"
+    no_dice "no puede ejecutar"
+    no_dice "Faltan paquetes"
+}
+
+prueba_verificar_rechaza_el_grupo_input() {
+    preparar_hp
+    echo "pantalla video render audio input" > "${CAJA}/usuario_grupos"
+    verificar_hp
+    rc_no_es_cero
+    dice "gpasswd -d pantalla input"
+}
+
+prueba_verificar_usuario_por_defecto_es_pantalla() {
+    preparar_hp
+    sed -i '/^PANTALLA_USUARIO=/d' "${CAJA}/repo/config/servidor.env"
+    verificar_hp
+    dice "pantalla sin grupos sudo, docker, adm ni input."
 }
 
 # ===========================================================================

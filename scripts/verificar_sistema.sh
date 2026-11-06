@@ -579,13 +579,36 @@ verificar_pantalla() {
     fi
 
     local dir="/opt/nomad-pantalla/moonlight"
-    local usuario="${PANTALLA_USUARIO:-nomad-pantalla}"
+    local usuario="${PANTALLA_USUARIO:-pantalla}"
 
-    # Moonlight: ejecutable y de la versión fijada.
-    if [[ -x "${dir}/AppRun" ]]; then
-        log_ok "Moonlight instalado en ${dir}."
+    # Los paquetes no piden privilegios: dpkg-query lo ve cualquiera.
+    if command -v dpkg-query >/dev/null 2>&1; then
+        local paquete faltan=()
+        for paquete in "${PAQUETES_PANTALLA[@]}"; do
+            if ! dpkg-query -W -f='${Status}' "${paquete}" 2>/dev/null | contiene "ok installed"; then
+                faltan+=("${paquete}")
+            fi
+        done
+        if (( ${#faltan[@]} == 0 )); then
+            log_ok "Paquetes de la pantalla instalados."
+        else
+            fallo "Faltan paquetes: ${faltan[*]}. Ejecuta sudo ./scripts/18_pantalla.sh"
+        fi
     else
-        fallo "No existe ${dir}/AppRun ejecutable: sudo ./scripts/18_pantalla.sh"
+        aviso "No puedo comprobar los paquetes sin dpkg-query."
+    fi
+
+    # Moonlight: ejecutable por SU usuario, que es quien lo lanza. Que lo pueda
+    # ejecutar quien verifica no prueba nada: la extracción hereda modos 700. Si
+    # sudo no puede actuar como él, es «no puedo mirar», no «está mal».
+    if puede_sudo && sudo -n -u "${usuario}" true 2>/dev/null; then
+        if sudo -n -u "${usuario}" test -x "${dir}/AppRun" 2>/dev/null; then
+            log_ok "Moonlight instalado en ${dir}, ejecutable por ${usuario}."
+        else
+            fallo "${usuario} no puede ejecutar ${dir}/AppRun: sudo ./scripts/18_pantalla.sh"
+        fi
+    else
+        aviso "No puedo comprobar sin sudo que ${usuario} ejecute ${dir}/AppRun."
     fi
 
     local version
@@ -602,14 +625,14 @@ verificar_pantalla() {
     if id -u "${usuario}" >/dev/null 2>&1; then
         local grupos grupo malo=0
         grupos="$(id -nG "${usuario}")"
-        for grupo in sudo docker adm; do
+        for grupo in sudo docker adm input; do
             if tr ' ' '\n' <<<"${grupos}" | contiene -x "${grupo}"; then
                 fallo "El usuario '${usuario}' pertenece a '${grupo}': sudo gpasswd -d ${usuario} ${grupo}"
                 malo=1
             fi
         done
         if (( malo == 0 )); then
-            log_ok "${usuario} sin grupos sudo, docker ni adm."
+            log_ok "${usuario} sin grupos sudo, docker, adm ni input."
         fi
     else
         fallo "No existe el usuario '${usuario}': sudo ./scripts/18_pantalla.sh"
@@ -637,7 +660,7 @@ verificar_pantalla() {
     # "no puedo mirar", no "está mal".
     local regla_unica="${ADMIN_USUARIO} ALL=(root) NOPASSWD: /usr/bin/systemctl start nomad-pantalla.service, /usr/bin/systemctl stop nomad-pantalla.service"
     if puede_sudo; then
-        local contenido
+        local contenido reglas
         if ! contenido="$(sudo -n cat /etc/sudoers.d/nomad-pantalla 2>/dev/null)" || [[ -z "${contenido}" ]]; then
             # Que 'cat' falle no prueba que el archivo falte: puede ser sudo.
             if sudo -n test ! -e /etc/sudoers.d/nomad-pantalla 2>/dev/null; then
@@ -645,10 +668,15 @@ verificar_pantalla() {
             else
                 aviso "No puedo leer /etc/sudoers.d/nomad-pantalla (existe, o sudo falló)."
             fi
-        elif contiene -Fx "${regla_unica}" <<<"${contenido}"; then
-            log_ok "sudoers con las dos reglas exactas (start y stop)."
         else
-            fallo "/etc/sudoers.d/nomad-pantalla no contiene las reglas esperadas (start y stop de nomad-pantalla.service)."
+            # Todo lo que no sea comentario debe ser esa línea y nada más: una
+            # regla de más también es un fallo, por eso no basta con buscarla.
+            reglas="$(grep -vE '^[[:space:]]*(#|$)' <<<"${contenido}" || true)"
+            if [[ "${reglas}" == "${regla_unica}" ]]; then
+                log_ok "sudoers con las dos reglas exactas (start y stop)."
+            else
+                fallo "/etc/sudoers.d/nomad-pantalla no contiene exactamente las reglas esperadas (start y stop de nomad-pantalla.service)."
+            fi
         fi
     else
         aviso "No puedo comprobar /etc/sudoers.d/nomad-pantalla sin sudo (es 440 root)."

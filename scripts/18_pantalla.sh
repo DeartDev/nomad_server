@@ -20,10 +20,11 @@ Uso: sudo ./scripts/18_pantalla.sh [opciones]
 
 Prepara el HP como cliente de la pantalla extendida:
 
-  1. Instala cage y los controladores de vídeo y audio
+  1. Instala cage, Xwayland y los controladores de vídeo y audio
   2. Crea el usuario del sistema que ejecuta el cliente
   3. Descarga Moonlight, verifica su SHA-256 y lo extrae en /opt/nomad-pantalla
-  4. Instala el lanzador, las unidades de systemd y el permiso de sudo
+  4. Instala el lanzador, las unidades, los límites del usuario y el permiso
+     de sudo
   5. Comprueba que no hay gestor de pantalla en el equipo
 
 Opciones:
@@ -50,16 +51,19 @@ procesar_argumentos_comunes "$@"
 log_paso "Comprobaciones previas"
 requerir_root
 cargar_entorno
-requerir_variables ADMIN_USUARIO PANTALLA_HABILITADA PANTALLA_USUARIO \
-                   PANTALLA_BITRATE MOONLIGHT_VERSION MOONLIGHT_SHA256
 
-# El capítulo 18 es opcional y ningún otro depende de él.
-if [[ "${PANTALLA_HABILITADA}" != "si" ]]; then
+# El capítulo 18 es opcional y ningún otro depende de él. Va antes de exigir el
+# resto de las variables: con 'no' no hacen falta, y un servidor.env anterior a
+# este capítulo ni siquiera las tiene.
+if [[ "${PANTALLA_HABILITADA:-no}" != "si" ]]; then
     log_sinca "PANTALLA_HABILITADA no es 'si'. No hay nada que instalar."
     log_info  "Para activarlo: ./scripts/variables.sh --fijar PANTALLA_HABILITADA=si"
     resumen_final "18_pantalla.sh"
     exit 0
 fi
+
+requerir_variables ADMIN_USUARIO PANTALLA_USUARIO PANTALLA_BITRATE \
+                   MOONLIGHT_VERSION MOONLIGHT_SHA256
 
 # Sin IP el lanzador quedaría con un argumento menos: 'stream Desktop ...' en
 # lugar de 'stream <ip> Desktop ...', y Moonlight interpretaría 'Desktop' como
@@ -75,9 +79,7 @@ URL_MOONLIGHT="https://github.com/moonlight-stream/moonlight-qt/releases/downloa
 log_paso "Paquetes"
 # libfuse2t64 NO está en la lista: el AppImage se extrae y se ejecuta con
 # AppRun, sin FUSE.
-instalar_paquetes cage intel-media-va-driver mesa-va-drivers vainfo \
-                  libgl1-mesa-dri libegl-mesa0 alsa-utils libopengl0 \
-                  libfontconfig1 libva-x11-2
+instalar_paquetes "${PAQUETES_PANTALLA[@]}"
 
 if dpkg-query -W -f='${Status}' libfuse2t64 2>/dev/null | contiene "ok installed"; then
     log_aviso "libfuse2t64 está instalado (de una prueba anterior). Nada lo necesita ya."
@@ -87,16 +89,22 @@ fi
 # --- Paso 2: el usuario ------------------------------------------------------
 log_paso "Usuario del sistema '${PANTALLA_USUARIO}'"
 
-# Si ya existe NO se recrea ni se toca: guarda el vínculo con el emisor en su
-# directorio personal, y perderlo obliga a repetir el PIN.
+# Si ya existe NO se recrea: guarda el vínculo con el emisor en su directorio
+# personal, y perderlo obliga a repetir el PIN. Solo se corrigen sus grupos.
+# 'input' daría acceso a todos los teclados del equipo, no solo a los de 'cage'.
 if id -u "${PANTALLA_USUARIO}" >/dev/null 2>&1; then
-    log_sinca "Usuario ${PANTALLA_USUARIO} ya existe; no se toca."
-    for GRUPO in sudo docker adm; do
+    log_sinca "Usuario ${PANTALLA_USUARIO} ya existe; no se recrea."
+    for GRUPO in sudo docker adm input; do
         if id -nG "${PANTALLA_USUARIO}" 2>/dev/null | tr ' ' '\n' | contiene -x "${GRUPO}"; then
             die "El usuario '${PANTALLA_USUARIO}' pertenece al grupo '${GRUPO}'. Quítalo con: sudo gpasswd -d ${PANTALLA_USUARIO} ${GRUPO}"
         fi
     done
     log_ok "El usuario no pertenece a ningún grupo con privilegios."
+    for GRUPO in video render audio; do
+        if ! id -nG "${PANTALLA_USUARIO}" 2>/dev/null | tr ' ' '\n' | contiene -x "${GRUPO}"; then
+            ejecutar usermod -aG "${GRUPO}" "${PANTALLA_USUARIO}"
+        fi
+    done
 else
     ejecutar useradd --system --create-home --shell /usr/sbin/nologin \
                      --groups video,render,audio \
@@ -156,6 +164,18 @@ ANTES="$(cambios)"
 instalar_plantilla etc/nomad-pantalla-lanzar.sh /opt/nomad-pantalla/lanzar.sh 755 root:root
 instalar_plantilla systemd/nomad-pantalla.service            /etc/systemd/system/nomad-pantalla.service
 instalar_plantilla systemd/nomad-pantalla-vincular@.service  /etc/systemd/system/nomad-pantalla-vincular@.service
+
+# Los límites van en la porción del usuario, no en la unidad: PAMName mueve los
+# procesos a session-N.scope, fuera de ella. El nombre lleva su uid, que no está
+# en servidor.env: por eso la ruta se calcula aquí y no en la plantilla.
+if UID_PANTALLA="$(id -u "${PANTALLA_USUARIO}" 2>/dev/null)"; then
+    instalar_plantilla systemd/nomad-pantalla-usuario.conf \
+        "/etc/systemd/system/user-${UID_PANTALLA}.slice.d/50-nomad-pantalla.conf"
+else
+    # Solo con --check: al aplicar, el paso 2 ya ha creado el usuario.
+    log_check "escribiría /etc/systemd/system/user-<uid>.slice.d/50-nomad-pantalla.conf"
+    marcar_cambio
+fi
 if hubo_cambios_desde "${ANTES}"; then
     ejecutar systemctl daemon-reload
 fi
