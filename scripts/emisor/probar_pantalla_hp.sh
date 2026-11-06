@@ -122,6 +122,10 @@ for a in "$@"; do
         priority.*) echo "${ajuste#priority.}" > "${P}/${s}.prioridad" ;;
     esac
 done
+# Una señal justo después de apagar la interna: el peor momento.
+if [[ -e "${CAJA}/senal_tras_apagar" && " $* " == *" output.eDP-1.disable "* ]]; then
+    kill -TERM "${PPID}"
+fi
 exit 0
 DOBLE
 
@@ -385,7 +389,7 @@ prueba_extender_enciende_interna_apagada() {
 prueba_orden_completo_del_arranque() {
     lanzar extender
     rc_es 0
-    antes "--unit=pantalla-hp-monitor" "--unit=pantalla-restaurar"
+    antes "--unit=pantalla-restaurar" "--unit=pantalla-hp-monitor"
     antes "--unit=pantalla-hp-sunshine" "--unit=pantalla-hp-vigilante"
     antes "--unit=pantalla-hp-vigilante" "sudo -n systemctl start nomad-pantalla.service"
     unidad_activa pantalla-hp-vigilante
@@ -591,6 +595,7 @@ prueba_sin_temporizador_no_se_toca_nada_mas() {
     touch "${CAJA}/falla_pantalla-restaurar.timer"
     lanzar principal
     rc_no_es_cero
+    no_hay "--unit=pantalla-hp-monitor"
     no_hay "output.${I}.disable"
     unidad_parada pantalla-hp-monitor
 }
@@ -604,6 +609,16 @@ GUION
     chmod +x "${CAJA}/guion"
     lanzar principal
     rc_no_es_cero
+    interna_restaurada
+    pila_retirada
+}
+
+prueba_interrupcion_con_interna_apagada_restaura() {
+    touch "${CAJA}/senal_tras_apagar"
+    lanzar principal
+    rc_no_es_cero
+    hay "output.${I}.disable"
+    no_hay "--unit=pantalla-hp-sunshine"
     interna_restaurada
     pila_retirada
 }
@@ -679,6 +694,47 @@ prueba_off_si_la_interna_no_vuelve_conserva_temporizador() {
     unidad_activa pantalla-restaurar.timer
 }
 
+# En 'off' el único sleep sin fallos es la pausa entre los dos sondeos: el primer
+# tic es el momento en que KDE reaplica y apaga la interna.
+apagar_interna_en_primer_tic() {
+    cat > "${CAJA}/guion" <<'GUION'
+#!/bin/bash
+if (( $1 == 1 )); then echo disabled > "${CAJA}/pantallas/eDP-1.estado"; fi
+GUION
+    chmod +x "${CAJA}/guion"
+}
+
+prueba_off_asienta_antes_de_retirar_temporizador() {
+    sesion_montada
+    ENTORNO_EXTRA=(PANTALLA_HP_PAUSA_ASENTAR=7)
+    lanzar off
+    rc_es 0
+    hay "sleep 7"
+    antes "stop pantalla-hp-monitor" "sleep 7"
+    antes "sleep 7" "stop pantalla-restaurar.timer"
+    unidad_parada pantalla-restaurar.timer
+}
+
+prueba_off_interna_que_se_apaga_al_asentar_conserva_temporizador() {
+    sesion_montada
+    apagar_interna_en_primer_tic
+    lanzar off
+    rc_no_es_cero
+    dice "${I}"
+    unidad_activa pantalla-restaurar.timer
+    # El temporizador se conserva, pero no se le espera para reintentar.
+    interna_restaurada
+}
+
+prueba_off_interna_rebelde_al_asentar_conserva_temporizador() {
+    sesion_montada
+    apagar_interna_en_primer_tic
+    echo 9999 > "${CAJA}/interna_rebelde"
+    lanzar off
+    rc_no_es_cero
+    unidad_activa pantalla-restaurar.timer
+}
+
 prueba_off_sin_sesion_no_falla() {
     lanzar off
     rc_es 0
@@ -733,6 +789,36 @@ prueba_vigilante_restaura_sin_cliente_60s() {
     pila_retirada
 }
 
+prueba_vigilante_ping_timeout_cuenta_como_fin() {
+    # Sin CLIENT DISCONNECTED: la última línea que cuenta es el Ping Timeout.
+    sesion_montada
+    fijar_pantalla "${I}" disabled 0,0 2
+    log_sunshine 'CLIENT CONNECTED'
+    cat > "${CAJA}/guion" <<'GUION'
+#!/bin/bash
+if (( $1 == 3 )); then
+    printf '%s\n' 'Info: CLIENT CONNECTED' '[2026-11-05 21:39:12]: Warning: 192.0.2.1: Ping Timeout' \
+        > "${CAJA}/home/.config/sunshine/sunshine.log"
+fi
+GUION
+    chmod +x "${CAJA}/guion"
+    lanzar --vigilar
+    rc_es 0
+    local s
+    s="$(segundos)"
+    (( s >= 70 && s <= 83 )) || fallar "paró a los ${s} s, se esperaban 60 tras el corte a los 15"
+    interna_restaurada
+    pila_retirada
+}
+
+prueba_cliente_que_vuelve_tras_ping_timeout_cuenta() {
+    sesion_montada
+    log_sunshine 'CLIENT CONNECTED' 'x: Ping Timeout' 'CLIENT DISCONNECTED' 'CLIENT CONNECTED'
+    lanzar estado
+    rc_es 0
+    dice "conectado"
+}
+
 prueba_vigilante_da_120s_a_la_primera_conexion() {
     sesion_montada
     fijar_pantalla "${I}" disabled 0,0 2
@@ -776,6 +862,27 @@ prueba_vigilante_rearma_restauracion_con_cliente() {
     no_hay "stop pantalla-hp-vigilante"
     (( $(ultima_linea "stop pantalla-restaurar") > $(linea "--on-active=600") )) \
         || fallar "el rearme no retira el temporizador anterior"
+}
+
+prueba_vigilante_reintenta_rearme_fallido_en_el_siguiente_sondeo() {
+    sesion_montada
+    log_sunshine 'CLIENT CONNECTED'
+    # El temporizador no existe en el doble: el rearme crea uno, y falla en el
+    # minuto 1. Se arregla en el tic siguiente y el cliente se va a los 100 s.
+    grep -vxF pantalla-restaurar.timer "${CAJA}/activas" > "${CAJA}/activas.tmp" || true
+    mv "${CAJA}/activas.tmp" "${CAJA}/activas"
+    touch "${CAJA}/falla_pantalla-restaurar.timer"
+    cat > "${CAJA}/guion" <<'GUION'
+#!/bin/bash
+L="${CAJA}/home/.config/sunshine/sunshine.log"
+if (( $1 == 13 )); then rm -f "${CAJA}/falla_pantalla-restaurar.timer"; fi
+if (( $1 == 20 )); then printf '%s\n' 'CLIENT CONNECTED' 'CLIENT DISCONNECTED' > "${L}"; fi
+GUION
+    chmod +x "${CAJA}/guion"
+    lanzar --vigilar
+    rc_es 0
+    (( $(veces "--on-active=600") == 2 )) \
+        || fallar "hubo $(veces "--on-active=600") intentos de rearme, se esperaban 2 (a los 60 y 65 s)"
 }
 
 prueba_vigilante_reconexion_no_corta() {
@@ -856,7 +963,7 @@ prueba_intervalo_se_puede_cambiar() {
     lanzar --vigilar
     rc_es 0
     hay "sleep 30"
-    (( $(veces "sleep ") == 4 )) || fallar "hizo $(veces "sleep ") sondeos, se esperaban 4"
+    (( $(veces "sleep 30") == 4 )) || fallar "hizo $(veces "sleep 30") sondeos, se esperaban 4"
 }
 
 # ===========================================================================

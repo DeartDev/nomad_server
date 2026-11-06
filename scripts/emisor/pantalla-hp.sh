@@ -80,6 +80,8 @@ SSH_SIN_PREGUNTAS=(-o BatchMode=yes -o ConnectTimeout=5)
 # Enteros en segundos. Las pruebas los cambian; el vigilante cuenta sumándolos.
 INTERVALO_VIGILANTE="${PANTALLA_HP_INTERVALO_VIGILANTE:-5}"
 INTERVALO_ESPERA="${PANTALLA_HP_INTERVALO_ESPERA:-1}"
+# Entre los dos sondeos que confirman la interna, antes de retirar el temporizador.
+PAUSA_ASENTAR="${PANTALLA_HP_PAUSA_ASENTAR:-3}"
 
 REGISTRO_SUNSHINE="${HOME}/.config/sunshine/sunshine.log"
 
@@ -140,11 +142,13 @@ unidad_activa() { systemctl --user is-active --quiet "$1" >/dev/null 2>&1; }
 # Sunshine solo no basta: un monitor huérfano también impide crear otro.
 sesion_activa() { unidad_activa "${U_SUNSHINE}" || unidad_activa "${U_MONITOR}"; }
 
-# La última línea de las dos decide. El registro se vacía en cada arranque de
+# La última línea que coincide decide. 'Ping Timeout' cuenta como fin de sesión:
+# en los cortes de cable medidos, CLIENT DISCONNECTED llegó unos 5 segundos después,
+# pero no hay que depender de ello. El registro se vacía en cada arranque de
 # Sunshine; si no existe, no hay cliente.
 cliente_conectado() {
     local ultima
-    ultima="$(grep -E 'CLIENT (CONNECTED|DISCONNECTED)' "${REGISTRO_SUNSHINE}" 2>/dev/null | tail -n 1 || true)"
+    ultima="$(grep -E 'CLIENT (CONNECTED|DISCONNECTED)|Ping Timeout' "${REGISTRO_SUNSHINE}" 2>/dev/null | tail -n 1 || true)"
     [[ "${ultima}" == *"CLIENT CONNECTED"* ]]
 }
 
@@ -245,12 +249,26 @@ restaurar() {
     asegurar_interna
 }
 
+# La interna debe seguir encendida en dos sondeos separados: KDE reaplica su
+# disposición un momento después de desaparecer la virtual, y un solo sondeo
+# pasaría justo antes.
+interna_estable() {
+    asegurar_interna || return 1
+    sleep "${PAUSA_ASENTAR}"
+    interna_encendida
+}
+
 # ===========================================================================
 #  ARRANQUE Y PARADA
 # ===========================================================================
 
-# Monitor, restauración programada, disposición y Sunshine, en ese orden. El
-# modo se aplica ANTES de Sunshine: al revés, Sunshine calcula el ratón con la
+# Restauración programada, monitor, disposición y Sunshine, en ese orden.
+#
+# La restauración va antes del monitor porque crearlo ya mueve las pantallas: KDE
+# puede reaplicar una disposición guardada en cuanto aparece la virtual. La orden
+# programada funciona aunque la virtual todavía no exista.
+#
+# El modo se aplica ANTES de Sunshine: al revés, Sunshine calcula el ratón con la
 # geometría antigua y este solo alcanza media pantalla.
 #
 # Se llama dentro de un 'if', donde 'set -e' no actúa: cada paso devuelve su
@@ -262,14 +280,14 @@ levantar_pila() {
     retirar_unidad "${U_SUNSHINE}"
     retirar_unidad "${U_MONITOR}"
 
+    armar_restauracion || { log_error "No se pudo programar la restauración."; return 1; }
+
     log_paso "Monitor virtual"
     crear_monitor || { log_error "No se pudo crear el monitor virtual."; return 1; }
     if ! esperar "${PLAZO_SALIDA}" salida_existe "${V}"; then
         log_error "La salida ${V} no ha aparecido en ${PLAZO_SALIDA} segundos."
         return 1
     fi
-
-    armar_restauracion || { log_error "No se pudo programar la restauración."; return 1; }
 
     log_paso "Disposición: ${modo}"
     disposicion "${modo}" || { log_error "kscreen-doctor ha fallado."; return 1; }
@@ -296,8 +314,9 @@ parar_hp() {
         log_aviso "Sin PANTALLA_HP_SSH: no se ha podido parar la unidad del HP."
         return 0
     fi
-    # El tope no es opcional: es tiempo con la interna apagada. Y '-k' tampoco:
-    # 'detener' ignora SIGTERM, ssh lo hereda y respeta ese ignorar.
+    # El tope no es opcional: es tiempo con la interna apagada. Funciona aunque
+    # 'detener' ignore SIGTERM, porque el hijo de 'timeout' no hereda ese ignorar
+    # (medido). '-k' solo cubre un ssh que no salga con SIGTERM.
     if ! timeout -k 2 "${LIMITE_SSH}" ssh "${SSH_SIN_PREGUNTAS[@]}" "${PANTALLA_HP_SSH}" \
             sudo -n systemctl stop nomad-pantalla.service < /dev/null; then
         log_aviso "${PANTALLA_HP_SSH} no ha respondido: su unidad puede seguir en marcha."
@@ -323,15 +342,17 @@ detener() {
     retirar_unidad "${U_MONITOR}"
 
     # Se comprueba otra vez: KDE reaplica disposiciones al desaparecer la virtual.
-    if asegurar_interna; then
+    if interna_estable; then
         retirar_unidad "${U_RESTAURAR}.timer"
         retirar_unidad "${U_RESTAURAR}.service"
         log_ok "Pantalla interna restaurada."
         return 0
     fi
 
-    # El temporizador se conserva: es otro intento, cuando ya no haya virtual.
-    log_error "La pantalla ${I} no ha vuelto. A mano: kscreen-doctor ${ORDEN_INTERNA[*]}"
+    # Un último intento, sin esperar al temporizador. Este se conserva pase lo que
+    # pase: la interna ya ha demostrado que no se queda encendida.
+    asegurar_interna
+    log_error "La pantalla ${I} no se ha mantenido encendida. A mano: kscreen-doctor ${ORDEN_INTERNA[*]}"
     return 1
 }
 
@@ -387,8 +408,13 @@ vigilar() {
             limite="${PLAZO_SIN_CLIENTE}"
             sin_cliente=0
             if (( desde_rearme >= CADENCIA_REARME )); then
-                armar_restauracion || log_aviso "No se pudo aplazar la restauración; se reintenta."
-                desde_rearme=0
+                # Si falla no se reinicia la cuenta: se reintenta en el próximo
+                # sondeo, porque ahora mismo puede no haber temporizador.
+                if armar_restauracion; then
+                    desde_rearme=0
+                else
+                    log_aviso "No se pudo aplazar la restauración; se reintenta."
+                fi
             fi
             continue
         fi
