@@ -151,6 +151,18 @@ un solo obstáculo.
 La contraseña de `sudo` es la última barrera, y se teclea pocas veces por sesión porque `sudo` la
 recuerda durante 15 minutos.
 
+**Una excepción, limitada y aprobada (capítulo [18](18_pantalla_extendida.md)).** Si activas la
+pantalla extendida, `/etc/sudoers.d/nomad-pantalla` permite a `${ADMIN_USUARIO}` ejecutar sin
+contraseña **exactamente** `systemctl start nomad-pantalla.service` y
+`systemctl stop nomad-pantalla.service`, y nada más. El portátil las lanza por SSH y no hay nadie
+para teclearla.
+
+Es aceptable porque con esas dos órdenes solo se puede abrir o cerrar una unidad que ejecuta un
+usuario sin privilegios y que no se habilita al arranque: no da shell, ni lectura de archivos, ni
+acceso a otras unidades. Cualquier otro uso de `sudo` sigue pidiendo la contraseña. El script
+valida el archivo con `visudo -cf` antes de instalarlo, y `verificar_sistema.sh --seccion pantalla`
+comprueba que contiene esas dos reglas exactas.
+
 ### 3.7 fail2ban con backend systemd y acción nftables
 
 **Decisión: instalar `fail2ban` configurado explícitamente para journald y para nftables.**

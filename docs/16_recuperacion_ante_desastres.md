@@ -724,6 +724,21 @@ cd ~/nomad_server
 ./scripts/deploy.sh <proyecto>
 ```
 
+**Solo si usabas la pantalla extendida** (capítulo [18](18_pantalla_extendida.md)): el vínculo entre
+el HP y el portátil vive en el directorio personal del usuario `pantalla`, que **no** está en el
+respaldo. Tras reconstruir el HP hay que vincular de nuevo. Con `PANTALLA_HABILITADA=si` y
+`PANTALLA_EMISOR_IP` fijadas en el `servidor.env` restaurado:
+
+```bash
+# [servidor]
+sudo ./scripts/18_pantalla.sh
+```
+
+```bash
+# [portátil] — y a continuación, desde el portátil
+pantalla-hp vincular
+```
+
 #### Fase 7 — Respaldos y verificación (15 min)
 
 ```bash
@@ -931,6 +946,11 @@ sudo ./scripts/08_tailscale.sh && sudo ./scripts/09_docker.sh
 ```bash
 # [servidor] — respaldos
 sudo ./scripts/14_restic.sh --instalar
+```
+
+```bash
+# [servidor] — solo si usas la pantalla extendida; después, 'pantalla-hp vincular' en el portátil
+sudo ./scripts/18_pantalla.sh
 ```
 
 El encadenado con `&&` es deliberado: si uno falla, los siguientes no se ejecutan sobre un estado

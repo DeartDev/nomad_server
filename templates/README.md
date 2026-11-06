@@ -60,6 +60,8 @@ el script.
 | `docker-daemon.json` | `/etc/docker/daemon.json` | 644 | `09_docker.sh` | [09](../docs/09_docker.md) |
 | `restic-excluir.txt` | `/etc/nomad/restic-excluir.txt` | 644 | `14_restic.sh` | [14](../docs/14_respaldos_restic.md) |
 | `nomad-respaldo.sh` | `/usr/local/bin/nomad-respaldo.sh` | **700** | `14_restic.sh` | [14](../docs/14_respaldos_restic.md) |
+| `nomad-pantalla-lanzar.sh` | `/opt/nomad-pantalla/lanzar.sh` | 755 | `18_pantalla.sh` | [18](../docs/18_pantalla_extendida.md) |
+| `sudoers-nomad-pantalla` | `/etc/sudoers.d/nomad-pantalla` | **440** | `18_pantalla.sh` | [18](../docs/18_pantalla_extendida.md) |
 
 ### Unidades de systemd — `templates/systemd/`
 
@@ -67,6 +69,8 @@ el script.
 |---|---|---|---|---|
 | `nomad-respaldo.service` | `/etc/systemd/system/nomad-respaldo.service` | 644 | `14_restic.sh` | [14](../docs/14_respaldos_restic.md) |
 | `nomad-respaldo.timer` | `/etc/systemd/system/nomad-respaldo.timer` | 644 | `14_restic.sh` | [14](../docs/14_respaldos_restic.md) |
+| `nomad-pantalla.service` | `/etc/systemd/system/nomad-pantalla.service` | 644 | `18_pantalla.sh` | [18](../docs/18_pantalla_extendida.md) |
+| `nomad-pantalla-vincular@.service` | `/etc/systemd/system/nomad-pantalla-vincular@.service` | 644 | `18_pantalla.sh` | [18](../docs/18_pantalla_extendida.md) |
 
 ### Contenedores — `templates/compose/`
 

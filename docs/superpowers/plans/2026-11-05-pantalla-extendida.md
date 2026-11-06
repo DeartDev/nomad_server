@@ -203,18 +203,18 @@ Expected: sin fallos de plantilla, variables ni enlaces.
 
 Pasos con `sudo`: los ejecuta el usuario en una terminal real. Método acordado: `--check`, revisar, aplicar, `--check`.
 
-- [ ] **Step 1: Aplicar.** En el HP, `git pull`, `./scripts/variables.sh --fijar PANTALLA_HABILITADA=si`, `./scripts/variables.sh --fijar PANTALLA_EMISOR_IP=100.113.63.57`, `sudo ./scripts/18_pantalla.sh --check`, aplicar y repetir.
+- [ ] **Step 1: Aplicar.** En el HP, `git pull`, `./scripts/variables.sh --fijar PANTALLA_HABILITADA=si`, `./scripts/variables.sh --fijar PANTALLA_EMISOR_IP=100.113.63.57`, `sudo ./scripts/18_pantalla.sh --check`, aplicar y repetir. En el portátil, además: `PANTALLA_EMISOR_IP`, `PANTALLA_HABILITADA` y el resto de `PANTALLA_*` en su propio `config/servidor.env` (el archivo no viaja por git), y ejecutar `scripts/emisor/preparar_fedora.sh` **sin** `--check`.
 Expected: `Cambios que se aplicarían: 0`, y `verificar_sistema.sh --seccion pantalla` y `--seccion seguridad` pasan.
 
 - [ ] **Step 2: Vínculo.** Comprobar que el vínculo con `hp-pantalla` sobrevivió. Si no, `pantalla-hp vincular`.
 
 - [ ] **Step 3: Modos.** `pantalla-hp extender`, `off`, `pantalla-hp principal` con tapa cerrada, `off`.
-Expected: sin contraseña salvo la clave SSH; criterios 1, 2 y 4 del diseño. Con los periféricos del HP, comprobar que desde el kiosco no se llega a un shell: `cage -s` permite cambiar de consola, y `tty1` debe pedir usuario y contraseña.
+Expected: sin contraseña salvo la clave SSH; criterios 1, 2 y 4 del diseño. Con los periféricos del HP, comprobar que desde el kiosco no se llega a un shell: `cage -s` permite cambiar de consola, y `tty1` debe pedir usuario y contraseña. Medir también con `kscreen-doctor -o` cómo aparece una salida deshabilitada (la interna en `principal`), y que `output.<interna>.priority.2` junto con `output.<interna>.disable` en una sola llamada se aplican las dos.
 
 - [ ] **Step 4: Sonido tras reinicio.** `sudo reboot` del HP y una sesión.
 Expected: criterio 3.
 
-- [ ] **Step 5: Fallos.** Durante una sesión en modo principal, desconectar el cable; en otra, `pkill -x sunshine`.
+- [ ] **Step 5: Fallos.** Durante una sesión en modo principal, desconectar el cable; en otra, `pkill -x sunshine`; y en otra, cortar el HP a mitad de sesión en `principal` (por ejemplo, `sudo systemctl stop nomad-pantalla.service` en el HP desde otra máquina), con un camino de vuelta disponible: otra máquina con SSH al portátil para ejecutar `pantalla-hp off`, o el portátil con la tapa abierta para ver qué pasa.
 Expected: criterio 7, antes de 90 segundos. Anotar si el corte de 15 s del cable reaparece.
 
 - [ ] **Step 6: Wi-Fi.** Sin cable durante toda la sesión, con `PANTALLA_BITRATE=15000`, dos minutos de vídeo.

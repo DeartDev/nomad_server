@@ -130,7 +130,8 @@ La AppImage solo trae el plugin Qt `xcb`, por lo que Moonlight corre sobre Xwayl
 `moonlight pair` no se llama desde el lanzador: tras vincular se queda abierto esperando un clic.
 
 **Variables nuevas** en `config/servidor.env.example`: `PANTALLA_HABILITADA`, `PANTALLA_USUARIO`,
-`PANTALLA_EMISOR_IP`, `PANTALLA_BITRATE`, `MOONLIGHT_VERSION` y `MOONLIGHT_SHA256`.
+`PANTALLA_EMISOR_IP`, `PANTALLA_BITRATE`, `PANTALLA_HP_SSH` (el alias con el que el portátil llega al HP
+por SSH, que se lee en el `servidor.env` del portátil), `MOONLIGHT_VERSION` y `MOONLIGHT_SHA256`.
 
 **Versión probada:** Moonlight `6.2.0`, `Moonlight-6.2.0-x86_64.AppImage`, SHA-256
 `787b0dcbd42ae90620e76fb8d77d7c441ba6473a91c2d7fc3a0fc2466f992437`. Las mediciones de la § 3 y el
@@ -160,8 +161,8 @@ descuidada dejó las dos en `0,0` y la pantalla interna sin imagen 20 minutos.
 | `extender` | `1920,0`, prioridad 2 | encendida, `0,0`, prioridad 1 |
 | `principal` | `0,0`, prioridad 1 | apagada, prioridad 2 |
 
-**Restauración:** en ambos modos se programa una restauración con `systemd-run --user` antes de tocar
-las pantallas, y `extender` aborta si la interna no queda encendida. La restauración mueve la virtual
+**Restauración:** en ambos modos se programa una restauración con `systemd-run --user` antes de crear
+el monitor virtual, porque crearlo ya mueve las pantallas, y `extender` aborta si la interna no queda encendida. La restauración mueve la virtual
 a `1920,0` antes de encender la interna.
 
 **Tapa:** la sesión mantiene `systemd-inhibit --what=handle-lid-switch:sleep:idle`, que se libera al
@@ -198,9 +199,13 @@ El vínculo es un paso único y **documentado, no automático** (decisión del d
 ### 6.3.1 Fin de sesión sin `off`
 
 Cada arranque deja en el portátil un vigilante local (decisión del diseñador). Si no hay cliente
-conectado durante 60 segundos, restaura la pantalla interna y retira el monitor virtual y Sunshine,
+conectado durante 60 segundos, o durante 120 en la primera conexión tras arrancar, restaura la pantalla interna y retira el monitor virtual y Sunshine,
 para que las ventanas vuelvan a ella. No mantiene ninguna sesión SSH abierta en el HP, porque `who`
 la contaría y bloquearía el reinicio automático. Tras un corte, se relanza el modo.
+
+El vigilante lee el registro de Sunshine y toma como fin de sesión tanto `CLIENT DISCONNECTED` como
+`Ping Timeout`: en los cortes de cable medidos el primero llegó unos 5 segundos después, y no se
+depende de ello.
 
 ### 6.4 Comprobación
 
