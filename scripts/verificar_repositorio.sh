@@ -281,7 +281,7 @@ comprobar_scripts() {
                 printf "%s:%d: %s\n", FILENAME, linea, texto
             esperando = 0
         }
-    ' scripts/*.sh scripts/lib/*.sh || true)"
+    ' scripts/*.sh scripts/lib/*.sh scripts/emisor/*.sh || true)"
     if [[ -z "${colgantes}" ]]; then
         log_ok "ninguna función termina en 'condición && acción'"
     else
