@@ -24,8 +24,14 @@
 [Unit]
 Description=Vincular la pantalla extendida con el emisor (PIN %i)
 Documentation=file:///home/${ADMIN_USUARIO}/nomad_server/docs/18_pantalla_extendida.md
-After=network-online.target tailscaled.service
+# Las dos unidades usan tty7 y el mismo usuario. 'Conflicts' no ordena por sí solo,
+# y sin 'After' la parada de una coincidiría con el arranque de la otra: el pkill
+# de su ExecStopPost mataría a la que entra. Vale en los dos sentidos.
+Conflicts=nomad-pantalla.service
+After=nomad-pantalla.service network-online.target tailscaled.service
 Wants=network-online.target
+# Sin esto, cada PIN dejaría su instancia cargada: acaba siempre por tiempo.
+CollectMode=inactive-or-failed
 
 [Service]
 User=${PANTALLA_USUARIO}
@@ -51,5 +57,10 @@ Environment=SDL_AUDIODRIVER=alsa
 Environment=LIBVA_DRIVER_NAME=iHD
 
 ExecStartPre=+/usr/bin/chvt 7
-ExecStart=/usr/bin/cage -s -- /opt/nomad-pantalla/moonlight/AppRun pair ${PANTALLA_EMISOR_IP} --pin %i
+ExecStart=/usr/bin/cage -- /opt/nomad-pantalla/moonlight/AppRun pair ${PANTALLA_EMISOR_IP} --pin %i
+# Lo que PAMName dejó en session-N.scope no está en el cgroup de la unidad y la
+# parada no lo alcanza. Las órdenes de ExecStopPost van una tras otra, así que el
+# panel cambia de consola con 'cage' ya muerto. '-': pkill sale con 1 si no quedaba
+# nada. '+': como root.
+ExecStopPost=-+/usr/bin/pkill -KILL -u ${PANTALLA_USUARIO}
 ExecStopPost=+/usr/bin/chvt 1

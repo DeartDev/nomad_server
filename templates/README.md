@@ -71,6 +71,7 @@ el script.
 | `nomad-respaldo.timer` | `/etc/systemd/system/nomad-respaldo.timer` | 644 | `14_restic.sh` | [14](../docs/14_respaldos_restic.md) |
 | `nomad-pantalla.service` | `/etc/systemd/system/nomad-pantalla.service` | 644 | `18_pantalla.sh` | [18](../docs/18_pantalla_extendida.md) |
 | `nomad-pantalla-vincular@.service` | `/etc/systemd/system/nomad-pantalla-vincular@.service` | 644 | `18_pantalla.sh` | [18](../docs/18_pantalla_extendida.md) |
+| `nomad-pantalla-usuario.conf` | `/etc/systemd/system/user-<uid>.slice.d/50-nomad-pantalla.conf` | 644 | `18_pantalla.sh` | [18](../docs/18_pantalla_extendida.md) |
 
 ### Contenedores — `templates/compose/`
 

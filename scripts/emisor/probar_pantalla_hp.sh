@@ -16,6 +16,9 @@
 #  El doble de sleep no duerme: suma tiempo simulado, así que los 600 segundos
 #  de una sesión se prueban en milisegundos. El doble de ssh imita un agente: con
 #  BatchMode falla mientras la clave no se haya cargado con AddKeysToAgent.
+#
+#  Las últimas secciones prueban el lado del HP: el lanzador, ya renderizado, con
+#  un Moonlight de mentira, y las plantillas de las unidades.
 # ===========================================================================
 set -euo pipefail
 
@@ -27,8 +30,8 @@ mostrar_ayuda() {
 Uso: bash scripts/emisor/probar_pantalla_hp.sh [--help]
 
 Ejecuta las pruebas de pantalla-hp.sh con dobles de kscreen-doctor, systemd-run,
-systemctl, ssh, ip, curl y sleep. No toca las pantallas ni se conecta a nada.
-Termina con 0 si todas pasan.
+systemctl, ssh, ip, curl y sleep, y las del lanzador y las unidades del HP. No toca
+las pantallas ni se conecta a nada. Termina con 0 si todas pasan.
 AYUDA
 }
 
@@ -1175,6 +1178,213 @@ prueba_no_usa_rutas_absolutas_que_salten_los_dobles() {
         fallar "ruta absoluta en pantalla-hp.sh: estas pruebas tocarían el sistema real"
     fi
     [[ -f "${RAIZ}/scripts/emisor/pantalla-hp.sh" ]] || fallar "no existe pantalla-hp.sh"
+}
+
+# ===========================================================================
+#  EL LANZADOR DEL HP
+# ===========================================================================
+
+# Renderiza el lanzador igual que instalar_plantilla, con un Moonlight de mentira
+# que anota su PID y sus argumentos y hace lo que indique $1. El doble de 'timeout'
+# hace de sondeo: consume un resultado de 'sondeos' por llamada, y 0 si no quedan.
+# El doble de 'sleep' duerme de verdad, poco: el sondeo no debe ir a toda velocidad.
+preparar_lanzador() {
+    local d="${CAJA}/dobles_lanzador"
+    mkdir -p "${d}"
+    (
+        export PANTALLA_EMISOR_IP="${IP_EMISOR}" PANTALLA_BITRATE=15000
+        envsubst "$(formato_envsubst)" < "${RAIZ}/templates/etc/nomad-pantalla-lanzar.sh"
+    ) | sed "s|^MOONLIGHT=.*|MOONLIGHT=${CAJA}/moonlight|" > "${CAJA}/lanzar.sh"
+    chmod +x "${CAJA}/lanzar.sh"
+
+    cat > "${CAJA}/moonlight" <<DOBLE
+#!/bin/bash
+echo "\$\$" > "${CAJA}/pid_moonlight"
+echo "\$*" > "${CAJA}/args_moonlight"
+$1
+DOBLE
+    chmod +x "${CAJA}/moonlight"
+
+    cat > "${d}/timeout" <<'DOBLE'
+#!/bin/bash
+. "${CAJA}/dobles/_comun"
+registrar timeout "$@"
+rc=0
+if [[ -s "${CAJA}/sondeos" ]]; then
+    rc="$(head -n 1 "${CAJA}/sondeos")"
+    sed -i 1d "${CAJA}/sondeos"
+fi
+exit "${rc}"
+DOBLE
+    cat > "${d}/sleep" <<'DOBLE'
+#!/bin/bash
+. "${CAJA}/dobles/_comun"
+registrar sleep "$@"
+exec /usr/bin/sleep 0.01
+DOBLE
+    chmod +x "${d}"/*
+}
+
+ejecutar_lanzador() {
+    RC=0
+    env -i "PATH=${CAJA}/dobles_lanzador:${CAJA}/dobles:/usr/bin:/bin" "CAJA=${CAJA}" \
+        /usr/bin/timeout 15 "${CAJA}/lanzar.sh" > "${CAJA}/salida" 2>&1 < /dev/null || RC=$?
+}
+
+moonlight_muerto() {
+    if kill -0 "$(cat "${CAJA}/pid_moonlight")" 2>/dev/null; then
+        fallar "Moonlight sigue vivo"
+        kill -KILL "$(cat "${CAJA}/pid_moonlight")" 2>/dev/null || true
+    fi
+}
+
+prueba_lanzador_pasa_sus_argumentos_a_moonlight() {
+    preparar_lanzador 'exit 0'
+    ejecutar_lanzador
+    rc_es 0
+    local args
+    args="$(cat "${CAJA}/args_moonlight")"
+    [[ "${args}" == "stream ${IP_EMISOR} Desktop --1080 --fps 60 --bitrate 15000 "* ]] \
+        || fallar "argumentos inesperados: ${args}"
+    [[ "${args}" == *"--absolute-mouse" ]] || fallar "faltan argumentos: ${args}"
+    if grep -nE '\$\{(PANTALLA|MOONLIGHT_V)[A-Z_]*\}' "${CAJA}/lanzar.sh"; then
+        fallar "quedan variables sin sustituir"
+    fi
+}
+
+prueba_lanzador_cierra_moonlight_tras_tres_sondeos_fallidos() {
+    preparar_lanzador 'exec /usr/bin/sleep 30'
+    printf '%s\n' 1 1 1 > "${CAJA}/sondeos"
+    ejecutar_lanzador
+    rc_no_es_cero
+    (( RC != 124 )) || fallar "nadie cerró Moonlight: venció el tope de la prueba"
+    (( $(veces "timeout ") == 3 )) || fallar "hizo $(veces "timeout ") sondeos, se esperaban 3"
+    dice "${IP_EMISOR}:47989"
+    moonlight_muerto
+}
+
+prueba_lanzador_sondea_cada_5_segundos_tras_la_espera_inicial() {
+    preparar_lanzador 'exec /usr/bin/sleep 30'
+    printf '%s\n' 1 1 1 > "${CAJA}/sondeos"
+    ejecutar_lanzador
+    # La primera línea es la espera: un sondeo antes competiría con Sunshine.
+    [[ "$(sed -n 1p "${CAJA}/llamadas")" == "sleep 10" ]] \
+        || fallar "lo primero no es la espera inicial: $(sed -n 1p "${CAJA}/llamadas")"
+    [[ "$(sed -n 3p "${CAJA}/llamadas")" == "sleep 5" ]] || fallar "entre sondeos no hay 5 s"
+    [[ "$(sed -n 5p "${CAJA}/llamadas")" == "sleep 5" ]] || fallar "entre sondeos no hay 5 s"
+    hay "timeout 3 "
+}
+
+prueba_lanzador_solo_cuenta_fallos_seguidos() {
+    preparar_lanzador 'exec /usr/bin/sleep 30'
+    printf '%s\n' 1 1 0 1 1 0 1 1 1 > "${CAJA}/sondeos"
+    ejecutar_lanzador
+    (( $(veces "timeout ") == 9 )) || fallar "hizo $(veces "timeout ") sondeos, se esperaban 9"
+    moonlight_muerto
+}
+
+prueba_lanzador_sale_con_el_codigo_de_moonlight() {
+    preparar_lanzador 'exit 7'
+    ejecutar_lanzador
+    rc_es 7
+}
+
+prueba_lanzador_mata_a_moonlight_si_ignora_sigterm() {
+    preparar_lanzador "trap '' TERM; exec /usr/bin/sleep 30"
+    printf '%s\n' 1 1 1 > "${CAJA}/sondeos"
+    ejecutar_lanzador
+    rc_es 137
+    moonlight_muerto
+}
+
+prueba_lanzador_pasa_sigterm_a_moonlight() {
+    # Al parar la unidad, 'cage' espera a que el lanzador termine.
+    preparar_lanzador 'exec /usr/bin/sleep 30'
+    env -i "PATH=${CAJA}/dobles_lanzador:${CAJA}/dobles:/usr/bin:/bin" "CAJA=${CAJA}" \
+        "${CAJA}/lanzar.sh" > "${CAJA}/salida" 2>&1 < /dev/null &
+    local pid=$! i
+    for (( i = 0; i < 300; i++ )); do
+        if [[ -s "${CAJA}/pid_moonlight" ]]; then break; fi
+        /usr/bin/sleep 0.01
+    done
+    kill -TERM "${pid}"
+    RC=0
+    wait "${pid}" || RC=$?
+    rc_es 143
+    moonlight_muerto
+}
+
+prueba_lanzador_sondeo_real_contra_un_puerto_cerrado() {
+    # Sin doble de 'timeout': la línea del sondeo debe funcionar de verdad.
+    preparar_lanzador 'exec /usr/bin/sleep 30'
+    rm "${CAJA}/dobles_lanzador/timeout"
+    sed -i 's/^EMISOR=.*/EMISOR=127.0.0.1/; s/^PUERTO_SONDEO=[0-9]*/PUERTO_SONDEO=1/' "${CAJA}/lanzar.sh"
+    ejecutar_lanzador
+    rc_no_es_cero
+    (( RC != 124 )) || fallar "nadie cerró Moonlight: venció el tope de la prueba"
+    dice "127.0.0.1:1"
+    moonlight_muerto
+}
+
+# ===========================================================================
+#  LAS UNIDADES DEL HP
+# ===========================================================================
+
+UNIDADES=(nomad-pantalla.service nomad-pantalla-vincular@.service)
+
+# Número de la línea de la plantilla que contiene el texto (0 si ninguna).
+linea_de() { awk -v t="$2" 'index($0, t) { print NR; f = 1; exit } END { if (!f) print 0 }' "$1"; }
+
+prueba_unidades_sin_cambio_de_consola_en_cage() {
+    local u
+    for u in "${UNIDADES[@]}"; do
+        if grep -nE '^ExecStart=.*cage -s' "${RAIZ}/templates/systemd/${u}"; then
+            fallar "${u}: 'cage -s' deja cambiar de consola desde el kiosco"
+        fi
+        grep -qE '^ExecStart=/usr/bin/cage -- ' "${RAIZ}/templates/systemd/${u}" \
+            || fallar "${u}: falta el ExecStart de cage"
+    done
+}
+
+prueba_unidades_limpian_al_usuario_antes_de_volver_a_tty1() {
+    local u f pkill chvt
+    for u in "${UNIDADES[@]}"; do
+        f="${RAIZ}/templates/systemd/${u}"
+        # shellcheck disable=SC2016  # la plantilla lleva la variable sin expandir
+        pkill="$(linea_de "${f}" 'ExecStopPost=-+/usr/bin/pkill -KILL -u ${PANTALLA_USUARIO}')"
+        chvt="$(linea_de "${f}" 'ExecStopPost=+/usr/bin/chvt 1')"
+        (( pkill > 0 && chvt > pkill )) || fallar "${u}: pkill (línea ${pkill}) debe ir antes de chvt (línea ${chvt})"
+    done
+}
+
+prueba_unidades_se_descargan_al_fallar() {
+    # Va en [Unit]: en [Service], systemd la ignora con solo un aviso.
+    local u
+    for u in "${UNIDADES[@]}"; do
+        sed -n '/^\[Unit\]/,/^\[Service\]/p' "${RAIZ}/templates/systemd/${u}" \
+            | contiene -x 'CollectMode=inactive-or-failed' \
+            || fallar "${u}: falta CollectMode en [Unit]"
+    done
+}
+
+prueba_unidad_de_vinculo_y_de_sesion_no_coinciden() {
+    local f="${RAIZ}/templates/systemd/nomad-pantalla-vincular@.service"
+    grep -qx 'Conflicts=nomad-pantalla.service' "${f}" || fallar "falta Conflicts"
+    # Sin orden, el pkill de la que para mataría a la que arranca.
+    grep -qE '^After=.*nomad-pantalla\.service' "${f}" || fallar "falta After"
+}
+
+prueba_unidad_el_sonido_no_impide_la_imagen() {
+    local f="${RAIZ}/templates/systemd/nomad-pantalla.service"
+    (( $(grep -c '^ExecStartPre=-/usr/bin/amixer' "${f}") == 2 )) || fallar "amixer sin '-'"
+    if grep -n '^ExecStartPre=/usr/bin/amixer' "${f}"; then fallar "queda un amixer sin '-'"; fi
+}
+
+prueba_limites_en_la_porcion_del_usuario() {
+    local f="${RAIZ}/templates/systemd/nomad-pantalla-usuario.conf"
+    grep -qx '\[Slice\]' "${f}" || fallar "falta [Slice]"
+    grep -qx 'CPUWeight=50' "${f}" || fallar "falta CPUWeight"
+    grep -qx 'MemoryMax=2G' "${f}" || fallar "falta MemoryMax"
 }
 
 # ===========================================================================
