@@ -30,7 +30,7 @@ Opciones:
                       Es la rutina semanal (unos 30 segundos).
   --seccion <nombre>  Ejecuta solo un bloque:
                         sistema | seguridad | red | docker |
-                        publicacion | respaldos | auditoria
+                        publicacion | respaldos | auditoria | pantalla
   -h, --help          Muestra esta ayuda.
 
 Código de salida:
@@ -567,6 +567,98 @@ verificar_auditoria() {
 }
 
 # ===========================================================================
+#  PANTALLA EXTENDIDA (capítulo 18, opcional)
+# ===========================================================================
+verificar_pantalla() {
+    log_paso "Pantalla extendida"
+
+    # El capítulo 18 es opcional. Que no esté instalado no es un fallo.
+    if [[ "${PANTALLA_HABILITADA:-no}" != "si" ]]; then
+        log_sinca "PANTALLA_HABILITADA no es 'si': el capítulo 18 no está instalado."
+        return
+    fi
+
+    local dir="/opt/nomad-pantalla/moonlight"
+    local usuario="${PANTALLA_USUARIO:-nomad-pantalla}"
+
+    # Moonlight: ejecutable y de la versión fijada.
+    if [[ -x "${dir}/AppRun" ]]; then
+        log_ok "Moonlight instalado en ${dir}."
+    else
+        fallo "No existe ${dir}/AppRun ejecutable: sudo ./scripts/18_pantalla.sh"
+    fi
+
+    local version
+    version="$(cat "${dir}/.version" 2>/dev/null || true)"
+    if [[ -z "${MOONLIGHT_VERSION:-}" ]]; then
+        fallo "MOONLIGHT_VERSION está vacía: no hay versión contra la que comparar."
+    elif [[ "${version}" == "${MOONLIGHT_VERSION}" ]]; then
+        log_ok "Moonlight ${version}, la versión fijada."
+    else
+        fallo "Moonlight instalado: '${version:-ninguna}'; fijado: '${MOONLIGHT_VERSION:-?}'. Ejecuta sudo ./scripts/18_pantalla.sh"
+    fi
+
+    # El usuario de la pantalla no debe poder administrar nada.
+    if id -u "${usuario}" >/dev/null 2>&1; then
+        local grupos grupo malo=0
+        grupos="$(id -nG "${usuario}")"
+        for grupo in sudo docker adm; do
+            if tr ' ' '\n' <<<"${grupos}" | contiene -x "${grupo}"; then
+                fallo "El usuario '${usuario}' pertenece a '${grupo}': sudo gpasswd -d ${usuario} ${grupo}"
+                malo=1
+            fi
+        done
+        if (( malo == 0 )); then
+            log_ok "${usuario} sin grupos sudo, docker ni adm."
+        fi
+    else
+        fallo "No existe el usuario '${usuario}': sudo ./scripts/18_pantalla.sh"
+    fi
+
+    # Se lanza a demanda: habilitada al arranque no es lo diseñado.
+    if systemctl is-enabled --quiet nomad-pantalla.service 2>/dev/null; then
+        fallo "nomad-pantalla.service está habilitado al arranque; debe lanzarse a demanda: sudo systemctl disable nomad-pantalla.service"
+    else
+        log_ok "nomad-pantalla.service no se habilita al arranque."
+    fi
+
+    # Un gestor de pantalla competiría con 'cage' por la GPU.
+    if systemctl cat display-manager.service >/dev/null 2>&1; then
+        fallo "Hay un display-manager.service: competiría con 'cage' por la GPU."
+    else
+        log_ok "No hay gestor de pantalla."
+    fi
+
+    # El sudoers es 440 root: sin privilegios no se puede LEER, y eso es
+    # "no puedo mirar", no "está mal".
+    local regla_unica="${ADMIN_USUARIO} ALL=(root) NOPASSWD: /usr/bin/systemctl start nomad-pantalla.service, /usr/bin/systemctl stop nomad-pantalla.service"
+    if puede_sudo; then
+        local contenido
+        contenido="$(sudo -n cat /etc/sudoers.d/nomad-pantalla 2>/dev/null || true)"
+        if [[ -z "${contenido}" ]]; then
+            fallo "No existe /etc/sudoers.d/nomad-pantalla: sudo ./scripts/18_pantalla.sh"
+        elif contiene -Fx "${regla_unica}" <<<"${contenido}"; then
+            log_ok "sudoers con las dos reglas exactas (start y stop)."
+        else
+            fallo "/etc/sudoers.d/nomad-pantalla no contiene las reglas esperadas (start y stop de nomad-pantalla.service)."
+        fi
+    else
+        aviso "No puedo comprobar /etc/sudoers.d/nomad-pantalla sin sudo (es 440 root)."
+    fi
+
+    # vainfo necesita el nodo de render del usuario de la pantalla.
+    if puede_sudo; then
+        if sudo -n -u "${usuario}" vainfo 2>/dev/null | contiene "VAEntrypointVLD"; then
+            log_ok "VA-API: decodificación por hardware disponible."
+        else
+            fallo "vainfo no muestra decodificación (VAEntrypointVLD) para ${usuario}."
+        fi
+    else
+        aviso "No puedo comprobar VA-API sin sudo."
+    fi
+}
+
+# ===========================================================================
 #  EJECUCIÓN
 # ===========================================================================
 echo
@@ -581,7 +673,7 @@ else
     case "${SECCION}" in
         todo)        verificar_sistema; verificar_seguridad; verificar_red
                      verificar_docker; verificar_publicacion; verificar_respaldos
-                     verificar_auditoria ;;
+                     verificar_auditoria; verificar_pantalla ;;
         sistema)     verificar_sistema ;;
         seguridad)   verificar_seguridad ;;
         red)         verificar_red ;;
@@ -589,6 +681,7 @@ else
         publicacion) verificar_publicacion ;;
         respaldos)   verificar_respaldos ;;
         auditoria)   verificar_auditoria ;;
+        pantalla)    verificar_pantalla ;;
         *) die "Sección desconocida: '${SECCION}'. Usa --help." ;;
     esac
 fi
