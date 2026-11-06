@@ -1,0 +1,54 @@
+# ===========================================================================
+#  nomad_server — pantalla extendida en el panel del HP
+#  Destino  : /etc/systemd/system/nomad-pantalla.service
+#  Generado por scripts/18_pantalla.sh
+#  Capítulo : docs/18_pantalla_extendida.md
+#
+#  SIN sección [Install], a propósito: la unidad no se puede habilitar por
+#  error. Solo arranca cuando alguien la pide ('systemctl start'), y nunca
+#  vuelve sola tras un reinicio.
+#
+#  CÓMO APLICARLA A MANO (equivalente a lo que hace el script)
+#
+#      cd ~/nomad_server
+#      source scripts/lib/entorno.sh
+#      nomad_diff systemd/nomad-pantalla.service /etc/systemd/system/nomad-pantalla.service
+#      nomad_plantilla systemd/nomad-pantalla.service \
+#          | sudo tee /etc/systemd/system/nomad-pantalla.service >/dev/null
+#      sudo chmod 644 /etc/systemd/system/nomad-pantalla.service
+#
+#  Y después, para que tenga efecto:
+#      sudo systemctl daemon-reload
+# ===========================================================================
+
+[Unit]
+Description=Pantalla extendida en el panel del HP
+Documentation=file:///home/${ADMIN_USUARIO}/nomad_server/docs/18_pantalla_extendida.md
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+User=${PANTALLA_USUARIO}
+PAMName=login
+TTYPath=/dev/tty7
+TTYReset=yes
+TTYVHangup=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+WorkingDirectory=/home/${PANTALLA_USUARIO}
+
+# El HP sigue siendo un servidor: la pantalla no le quita recursos a Docker.
+CPUWeight=50
+MemoryMax=2G
+
+# Si algo falla no se reintenta solo: se mira el journal y se vuelve a pedir.
+TimeoutStopSec=10
+Restart=no
+
+# '+' = se ejecuta como root, fuera del usuario de la pantalla.
+ExecStartPre=+/usr/bin/chvt 7
+ExecStartPre=/usr/bin/amixer -q -c 0 sset Master 100% unmute
+ExecStartPre=/usr/bin/amixer -q -c 0 sset Speaker 100% unmute
+ExecStart=/usr/bin/cage -s -- /opt/nomad-pantalla/lanzar.sh
+ExecStopPost=+/usr/bin/chvt 1

@@ -1,0 +1,19 @@
+# ===========================================================================
+#  nomad_server — permiso para arrancar y parar la pantalla extendida
+#  Destino  : /etc/sudoers.d/nomad-pantalla
+#  Generado por scripts/18_pantalla.sh
+#  Capítulo : docs/18_pantalla_extendida.md
+#
+#  Solo esos dos comandos, sin contraseña: el portátil los lanza por SSH y no
+#  hay nadie para teclearla. Cualquier otro uso de sudo sigue pidiéndola.
+#
+#  CÓMO APLICARLA A MANO (equivalente a lo que hace el script)
+#
+#      cd ~/nomad_server
+#      source scripts/lib/entorno.sh
+#      nomad_plantilla etc/sudoers-nomad-pantalla | sudo tee /etc/sudoers.d/nomad-pantalla.nuevo >/dev/null
+#      sudo visudo -cf /etc/sudoers.d/nomad-pantalla.nuevo
+#      sudo install -m 440 /etc/sudoers.d/nomad-pantalla.nuevo /etc/sudoers.d/nomad-pantalla
+#      sudo rm /etc/sudoers.d/nomad-pantalla.nuevo
+# ===========================================================================
+${ADMIN_USUARIO} ALL=(root) NOPASSWD: /usr/bin/systemctl start nomad-pantalla.service, /usr/bin/systemctl stop nomad-pantalla.service

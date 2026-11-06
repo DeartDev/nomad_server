@@ -1,0 +1,55 @@
+# ===========================================================================
+#  nomad_server — vinculación única con el emisor (Sunshine)
+#  Destino  : /etc/systemd/system/nomad-pantalla-vincular@.service
+#  Generado por scripts/18_pantalla.sh
+#  Capítulo : docs/18_pantalla_extendida.md
+#
+#  Plantilla de unidad: lo que va tras la '@' al arrancarla es el PIN que
+#  enseña Sunshine ('systemctl start nomad-pantalla-vincular@1234').
+#  SIN sección [Install], igual que nomad-pantalla.service.
+#
+#  CÓMO APLICARLA A MANO (equivalente a lo que hace el script)
+#
+#      cd ~/nomad_server
+#      source scripts/lib/entorno.sh
+#      nomad_diff systemd/nomad-pantalla-vincular@.service /etc/systemd/system/nomad-pantalla-vincular@.service
+#      nomad_plantilla systemd/nomad-pantalla-vincular@.service \
+#          | sudo tee /etc/systemd/system/nomad-pantalla-vincular@.service >/dev/null
+#      sudo chmod 644 /etc/systemd/system/nomad-pantalla-vincular@.service
+#
+#  Y después, para que tenga efecto:
+#      sudo systemctl daemon-reload
+# ===========================================================================
+
+[Unit]
+Description=Vincular la pantalla extendida con el emisor (PIN %i)
+Documentation=file:///home/${ADMIN_USUARIO}/nomad_server/docs/18_pantalla_extendida.md
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+User=${PANTALLA_USUARIO}
+PAMName=login
+TTYPath=/dev/tty7
+TTYReset=yes
+TTYVHangup=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+WorkingDirectory=/home/${PANTALLA_USUARIO}
+CPUWeight=50
+MemoryMax=2G
+TimeoutStopSec=10
+Restart=no
+
+# 'pair' se queda abierto tras vincular y no termina solo: este límite es lo
+# que lo cierra.
+RuntimeMaxSec=90
+
+Environment=QT_QPA_PLATFORM=xcb
+Environment=SDL_AUDIODRIVER=alsa
+Environment=LIBVA_DRIVER_NAME=iHD
+
+ExecStartPre=+/usr/bin/chvt 7
+ExecStart=/usr/bin/cage -s -- /opt/nomad-pantalla/moonlight/AppRun pair ${PANTALLA_EMISOR_IP} --pin %i
+ExecStopPost=+/usr/bin/chvt 1
