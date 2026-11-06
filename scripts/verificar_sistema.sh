@@ -616,8 +616,12 @@ verificar_pantalla() {
     fi
 
     # Se lanza a demanda: habilitada al arranque no es lo diseñado.
-    if systemctl is-enabled --quiet nomad-pantalla.service 2>/dev/null; then
-        fallo "nomad-pantalla.service está habilitado al arranque; debe lanzarse a demanda: sudo systemctl disable nomad-pantalla.service"
+    # La unidad no tiene [Install] a propósito: 'is-enabled' dice 'static' y
+    # sale con 0, así que se compara el estado impreso, no el código de salida.
+    local estado_unidad
+    estado_unidad="$(systemctl is-enabled nomad-pantalla.service 2>/dev/null || true)"
+    if [[ "${estado_unidad}" == "enabled" || "${estado_unidad}" == "enabled-runtime" ]]; then
+        fallo "nomad-pantalla.service está habilitado al arranque (${estado_unidad}); debe lanzarse a demanda: sudo systemctl disable nomad-pantalla.service"
     else
         log_ok "nomad-pantalla.service no se habilita al arranque."
     fi
@@ -634,9 +638,13 @@ verificar_pantalla() {
     local regla_unica="${ADMIN_USUARIO} ALL=(root) NOPASSWD: /usr/bin/systemctl start nomad-pantalla.service, /usr/bin/systemctl stop nomad-pantalla.service"
     if puede_sudo; then
         local contenido
-        contenido="$(sudo -n cat /etc/sudoers.d/nomad-pantalla 2>/dev/null || true)"
-        if [[ -z "${contenido}" ]]; then
-            fallo "No existe /etc/sudoers.d/nomad-pantalla: sudo ./scripts/18_pantalla.sh"
+        if ! contenido="$(sudo -n cat /etc/sudoers.d/nomad-pantalla 2>/dev/null)" || [[ -z "${contenido}" ]]; then
+            # Que 'cat' falle no prueba que el archivo falte: puede ser sudo.
+            if sudo -n test ! -e /etc/sudoers.d/nomad-pantalla 2>/dev/null; then
+                fallo "No existe /etc/sudoers.d/nomad-pantalla: sudo ./scripts/18_pantalla.sh"
+            else
+                aviso "No puedo leer /etc/sudoers.d/nomad-pantalla (existe, o sudo falló)."
+            fi
         elif contiene -Fx "${regla_unica}" <<<"${contenido}"; then
             log_ok "sudoers con las dos reglas exactas (start y stop)."
         else
