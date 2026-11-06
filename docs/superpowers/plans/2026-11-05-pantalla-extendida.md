@@ -208,14 +208,31 @@ Expected: `Cambios que se aplicarían: 0`, y `verificar_sistema.sh --seccion pan
 
 - [ ] **Step 2: Vínculo.** Comprobar que el vínculo con `hp-pantalla` sobrevivió. Si no, `pantalla-hp vincular`.
 
+- [ ] **Step 2b: Comprobaciones tempranas.** Parten de suposiciones que las pruebas con dobles no pueden confirmar. Con el usuario creado:
+  - `id pantalla`: el grupo propio, `video`, `render` y `audio`, y nada más.
+  - `stat -c '%a %U' /home/pantalla`: el modo real del directorio que guarda el vínculo. Si lo leen otros usuarios, corregirlo y documentarlo.
+  - `apt-cache depends cage`: qué trae con `--no-install-recommends`, y si `xwayland` es dependencia o recomendación.
+  - Desde el portátil, `ssh -o BatchMode=yes <alias> sudo -n -l /usr/bin/systemctl start nomad-pantalla.service`: devuelve 0 con la clave en el agente y sin pedir contraseña.
+
+  Con una sesión abierta (`pantalla-hp extender`), en el HP:
+  - `who` y `users`, y `ldd /usr/bin/who | grep systemd`: si `who` está enlazado con systemd lee las sesiones de logind, no utmp, y podría mostrar a `pantalla`. Decide el criterio 6 y lo que el capítulo afirma en § 3.8.
+  - `cat /proc/$(pgrep -u pantalla -f moonlight | head -n 1)/cgroup`: debe decir `session-N.scope` dentro de `user-<uid>.slice`. Si dice `nomad-pantalla.service`, lo que limita es la unidad, y el añadido sobra: corregir § 3.5 y el diseño.
+  - `systemctl show user-$(id -u pantalla).slice -p CPUWeight -p MemoryMax` y `cat /sys/fs/cgroup/user.slice/user-$(id -u pantalla).slice/memory.max`: los límites se aplican de verdad.
+  - `sudo chvt 1`, `sudo fgconsole` y `sudo chvt 7`: `chvt` funciona como root con `cage` sin `-s`, igual que lo usan `ExecStartPre` y `ExecStopPost`.
+
+  Tras `pantalla-hp off`, en el HP:
+  - `pgrep -u pantalla`: sin salida. El `pkill` de `ExecStopPost` no deja nada.
+  - `sudo fgconsole`: `1`.
+  - `systemctl --failed`: `pkill` también alcanza a `user@<uid>.service` si sigue vivo. Si aparece como fallida, ajustar el `pkill` o la unidad, y repasar `verificar_sistema.sh`.
+
 - [ ] **Step 3: Modos.** `pantalla-hp extender`, `off`, `pantalla-hp principal` con tapa cerrada, `off`.
-Expected: sin contraseña salvo la clave SSH; criterios 1, 2 y 4 del diseño. Con los periféricos del HP, comprobar que desde el kiosco no se llega a un shell: `cage -s` permite cambiar de consola, y `tty1` debe pedir usuario y contraseña. Medir también con `kscreen-doctor -o` cómo aparece una salida deshabilitada (la interna en `principal`), y que `output.<interna>.priority.2` junto con `output.<interna>.disable` en una sola llamada se aplican las dos.
+Expected: sin contraseña salvo la clave SSH; criterios 1, 2 y 4 del diseño. Con los periféricos del HP, comprobar que desde el kiosco no se llega a un shell: `cage` va sin `-s`, así que `Ctrl+Alt+F1` no debe cambiar de consola, y `tty1` debe pedir usuario y contraseña. Medir también con `kscreen-doctor -o` cómo aparece una salida deshabilitada (la interna en `principal`), y que `output.<interna>.priority.2` junto con `output.<interna>.disable` en una sola llamada se aplican las dos.
 
 - [ ] **Step 4: Sonido tras reinicio.** `sudo reboot` del HP y una sesión.
 Expected: criterio 3.
 
 - [ ] **Step 5: Fallos.** Durante una sesión en modo principal, desconectar el cable; en otra, `pkill -x sunshine`; y en otra, cortar el HP a mitad de sesión en `principal` (por ejemplo, `sudo systemctl stop nomad-pantalla.service` en el HP desde otra máquina), con un camino de vuelta disponible: otra máquina con SSH al portátil para ejecutar `pantalla-hp off`, o el portátil con la tapa abierta para ver qué pasa.
-Expected: criterio 7, antes de 90 segundos. Anotar si el corte de 15 s del cable reaparece.
+Expected: criterio 7, antes de 90 segundos. Anotar si el corte de 15 s del cable reaparece. En el corte de cable, y apagando el portátil de golpe, la unidad del HP debe terminar sola: `journalctl -u nomad-pantalla.service` dice `Sin respuesta de` y `sudo fgconsole` dice `1`. Comprobar también que un sondeo de `lanzar.sh` a `47989` no aparece como cliente en el registro de Sunshine.
 
 - [ ] **Step 6: Wi-Fi.** Sin cable durante toda la sesión, con `PANTALLA_BITRATE=15000`, dos minutos de vídeo.
 Expected: anotar FPS, latencia y pérdida. Si va mal con `vaapi_rc = vbr`, comparar con el valor automático y documentar el perfil Wi-Fi.

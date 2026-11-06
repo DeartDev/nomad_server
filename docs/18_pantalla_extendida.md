@@ -42,8 +42,8 @@ tocar el sistema.
 
 - El portátil Fedora 44 con KDE Plasma, en sesión Wayland, con Tailscale conectado.
 - Una vez, el teclado del HP (o un SSH con sudo): el vínculo pide la contraseña de `sudo` del HP.
-- La contraseña del panel web de Sunshine (usuario `nomad`), que se crea la primera vez que se abre
-  `https://<IP-de-Tailscale-del-portátil>:47990`. No se guarda en el repositorio.
+- La contraseña del panel web de Sunshine (usuario `nomad`), que se crea con `sunshine --creds`
+  (§ 5 paso 9). No se guarda en el repositorio.
 - Teclado y ratón conectados al HP si vas a usar el modo principal.
 
 **Preparar la sesión.** Este capítulo trabaja en **dos máquinas**. Cada bloque dice en cuál va
@@ -56,13 +56,13 @@ source scripts/lib/entorno.sh
 ```
 
 ```bash
-# [portátil]
-cd ~/nomad_server
+# [portátil] — desde la raíz de tu copia del repositorio, esté donde esté
 source scripts/lib/entorno.sh
 ```
 
 El portátil tiene su **propio** `config/servidor.env` (§ 4.1). El repositorio es el mismo en las dos
-máquinas; el archivo de configuración no viaja por git.
+máquinas; el archivo de configuración no viaja por git. Su copia no tiene por qué estar en
+`~/nomad_server`: en el portátil, los bloques de este capítulo se ejecutan desde la raíz de esa copia.
 
 ---
 
@@ -79,7 +79,12 @@ a pantalla completa, sin barra, sin menús y sin gestor de sesión.
 | `krdp` + FreeRDP | Funciona, pero `krdp` no parece enviar audio |
 
 La AppImage de Moonlight solo trae el plugin Qt `xcb`, así que corre sobre Xwayland dentro de `cage`
-(`QT_QPA_PLATFORM=xcb`).
+(`QT_QPA_PLATFORM=xcb`). Por eso `xwayland` va en la lista de paquetes, y no se confía en que llegue
+como recomendación de `cage`: se instala con `--no-install-recommends`.
+
+`cage` se lanza **sin `-s`**, la opción que permite cambiar de consola con el teclado. Desde el
+kiosco no se sale a una consola. Si el panel se queda colgado, se recupera por SSH. Las unidades
+cambian de consola con `chvt`, como root, y eso no pasa por `cage`.
 
 ### 3.2 Sunshine y Moonlight, y por Tailscale
 
@@ -98,21 +103,41 @@ virtuales. La salida se llama `Virtual-hp-pantalla`; la interna es `eDP-1`.
 ### 3.4 El usuario `pantalla`, sin privilegios
 
 Es un usuario de sistema con `nologin` y los grupos `video`, `render` y `audio`, y nada más. El
-script se niega a seguir si pertenece a `sudo`, `docker` o `adm`.
+script se niega a seguir si pertenece a `sudo`, `docker`, `adm` o `input`: este último daría acceso a
+todos los dispositivos de entrada del equipo.
 
 **Su directorio personal guarda el vínculo con el portátil** (certificado de Moonlight). Por eso el
-script **nunca recrea** el usuario si ya existe: recrearlo obligaría a repetir el vínculo.
+script **nunca recrea** el usuario si ya existe: recrearlo obligaría a repetir el vínculo. Solo le
+añade `video`, `render` o `audio` si le falta alguno.
 
 ### 3.5 La unidad no se habilita, y tampoco se lanza al arrancar
 
 `nomad-pantalla.service` no tiene sección `[Install]`: no se puede habilitar por error. Arranca solo
 cuando el portátil lo pide y nunca vuelve sola tras un reinicio.
 
-Límites: `CPUWeight=50` y `MemoryMax=2G`, para que la pantalla no le quite recursos a Docker. Al
-arrancar cambia el panel a `tty7`; al terminar, **por cualquier causa**, vuelve a `tty1`
-(`ExecStopPost`). `Restart=no`: si algo falla se mira el registro y se vuelve a pedir.
+**Límites:** `CPUWeight=50` y `MemoryMax=2G`, para que la pantalla no le quite recursos a Docker.
+Van en la porción del usuario (`user-<uid>.slice`), con un añadido que instala el script, y no en la
+unidad: `PAMName=login` abre una sesión, y eso mueve el cliente a `session-N.scope`, dentro de esa
+porción y fuera de `nomad-pantalla.service`. La unidad conserva las dos líneas porque no estorban,
+pero no son ellas las que limitan a Moonlight. Esto sale de cómo funciona `PAMName`, no de una
+medición; se comprueba en el servidor.
+
+**Parada:** por la misma razón, parar la unidad no alcanza lo que está en la sesión. `ExecStopPost`
+mata primero todo lo que quede del usuario `pantalla` (`pkill -KILL`) y después devuelve el panel a
+`tty1`. Las órdenes de `ExecStopPost` van una tras otra, así que `chvt` no compite con `pkill`, y
+se ejecutan al terminar **por cualquier causa**. Al arrancar, el panel cambia a `tty7`.
+
+`Restart=no`: si algo falla se mira el registro y se vuelve a pedir. Una unidad fallida se descarga
+sola (`CollectMode=inactive-or-failed`): `systemctl status` no la encontrará, y lo que pasó está en
+`journalctl -u nomad-pantalla.service`.
+
+Pedir una sesión es siempre `stop` y `start` en la misma llamada: `start` sobre una unidad activa no
+hace nada, y seguiría el Moonlight de la sesión anterior. La unidad de vínculo y esta usan el mismo
+`tty7` y el mismo usuario, así que se excluyen (`Conflicts=`), y una no arranca hasta que la otra ha
+parado del todo: si no, su `pkill` mataría a la que entra.
 
 La unidad pone `Master` y `Speaker` al 100 %. Esos controles se suman: al 80 % atenúan unos 25,5 dB.
+Si uno de ellos falta, la sesión arranca igual: mejor imagen sin sonido que nada.
 
 ### 3.6 Una excepción limitada a `NOPASSWD`
 
@@ -125,7 +150,8 @@ systemctl stop  nomad-pantalla.service
 ```
 
 Es la única excepción a la decisión del capítulo [05](05_usuarios_y_acceso_ssh.md) § 3.6, y está
-documentada allí. La frase de la clave SSH se sigue pidiendo una vez por sesión del portátil.
+documentada allí. La frase de la clave SSH se sigue pidiendo una vez por sesión del portátil:
+`pantalla-hp` la deja en el agente (`AddKeysToAgent`), porque después ya no puede preguntar.
 
 ### 3.7 Lo que protege `pantalla-hp`: un fallo no deja el portátil a oscuras
 
@@ -133,6 +159,9 @@ Una restauración descuidada ya dejó la pantalla interna sin imagen 20 minutos.
 evitan están escritas en la cabecera de `scripts/emisor/pantalla-hp.sh`:
 
 - **Nada se toca** hasta comprobar la red, que no hay otra sesión y que el HP responde por SSH.
+  Se prueba además, antes de mover nada, el mismo camino que se usará con las pantallas movidas: un
+  `ssh` que no pregunta y un `sudo -n -l`. Sin la clave en el agente o sin la regla de `sudo`, se
+  aborta ahí.
 - **Restauración programada antes de crear el monitor.** `systemd-run --user` deja un temporizador
   de 600 segundos que devuelve las pantallas a su sitio. Se arma *antes* de crear la pantalla
   virtual, porque crearla ya mueve las pantallas: KDE puede reaplicar una disposición guardada en
@@ -153,6 +182,8 @@ evitan están escritas en la cabecera de `scripts/emisor/pantalla-hp.sh`:
   geometría antigua y este solo alcanza media pantalla.
 - **La interna se mueve en el orden correcto:** la virtual a `1920,0` *antes* de encender la interna,
   o las dos coinciden en `0,0` y la interna se queda sin imagen.
+- **`off` restaura primero:** la interna vuelve antes de hablar con el HP y con la virtual aún
+  viva. Después para la unidad del HP, Sunshine y el monitor, y comprueba otra vez la interna.
 - **`off` nunca aborta a medias:** un paso que falla no impide el siguiente, y las señales se
   ignoran mientras restaura.
 - **Tras tocar las pantallas, el `ssh` no pregunta nada** y tiene tiempo límite: con la interna
@@ -177,6 +208,13 @@ no se depende de ello.
 **No mantiene ninguna sesión SSH abierta en el HP**, porque `who` la contaría y bloquearía el
 reinicio automático de `unattended-upgrades`. El receptor tampoco aparece en `who`.
 
+**El HP se cuida solo.** Si el portátil cae, nadie puede pedir el `stop` por SSH, y Moonlight se
+quedaría en su diálogo de error con el panel ocupado. Por eso `lanzar.sh` no hace `exec` de Moonlight:
+lo deja en segundo plano y sondea por TCP el puerto `47989` de Sunshine cada 5 segundos, con un límite
+de 3 segundos por conexión. Tras 3 sondeos fallidos seguidos cierra Moonlight, y la unidad termina y
+devuelve el panel a `tty1`. Empieza 10 segundos después de arrancar, porque Sunshine puede estar
+arrancando todavía. Los sondeos salen del HP, como la sesión: el cortafuegos no cambia.
+
 Al reconectar tras un corte hay que relanzar el modo.
 
 ### 3.9 Riesgo aceptado: quien está frente al HP controla el portátil
@@ -187,7 +225,7 @@ que el usuario aceptó: la sesión solo se abre con él presente, y se cierra co
 vigilante.
 
 Lo que sí se garantiza es lo contrario: desde `cage` no se llega a una consola ni a la cuenta
-`compass` del propio HP. Se verifica en la validación (§ 7).
+`compass` del propio HP (`cage` va sin `-s`, § 3.1). Se verifica en la validación (§ 7).
 
 Pero lleva una consecuencia práctica: **no dejes una sesión abierta con el HP a la vista de
 terceros** y no cargues la clave SSH del servidor en un portátil que va a estar en un sitio público.
@@ -272,8 +310,7 @@ source scripts/lib/entorno.sh
 ```
 
 ```bash
-# [portátil]
-cd ~/nomad_server
+# [portátil] — desde la raíz de tu copia del repositorio
 source scripts/lib/entorno.sh
 ```
 
@@ -286,6 +323,11 @@ ssh ${PANTALLA_HP_SSH} true && echo "CORRECTO"
 ```
 
 ### Paso 1 — Decide y activa
+
+**Las dos máquinas necesitan las variables**, cada una en su `config/servidor.env` (§ 4.1). Si tu
+archivo es anterior a este capítulo, copia antes en cada una el bloque 10 de
+`config/servidor.env.example`: con `PANTALLA_HABILITADA=si`, `18_pantalla.sh` se niega a seguir si
+falta alguna.
 
 ```bash
 # [servidor]
@@ -304,19 +346,20 @@ source scripts/lib/entorno.sh
 ```
 
 `PANTALLA_BITRATE`, `PANTALLA_USUARIO`, `MOONLIGHT_VERSION` y `MOONLIGHT_SHA256` vienen con valor en
-la plantilla. Si el portátil no tiene los demás `PANTALLA_*` en su `servidor.env`, copia el bloque
-10 de `config/servidor.env.example`.
+la plantilla.
 
 ### Paso 2 — HP: paquetes
 
 ```bash
 # [servidor]
-sudo apt-get install -y --no-install-recommends cage intel-media-va-driver mesa-va-drivers \
-    vainfo libgl1-mesa-dri libegl-mesa0 alsa-utils libopengl0 libfontconfig1 libva-x11-2
+sudo apt-get install -y --no-install-recommends cage xwayland kbd intel-media-va-driver \
+    mesa-va-drivers vainfo libgl1-mesa-dri libegl-mesa0 alsa-utils libopengl0 libfontconfig1 \
+    libva-x11-2
 ```
 
-`--no-install-recommends` es deliberado: evita arrastrar un escritorio. `libfuse2t64` **no** está en
-la lista, porque la AppImage se extrae y no usa FUSE.
+`--no-install-recommends` es deliberado: evita arrastrar un escritorio. Por eso `xwayland` se nombra
+aquí, y `kbd` también: de él sale `chvt`, y las unidades lo llaman. `libfuse2t64` **no** está en la
+lista, porque la AppImage se extrae y no usa FUSE.
 
 > Si hiciste la prueba manual y `libfuse2t64` quedó instalado, **el script no lo retira**: solo lo
 > avisa. Quítalo a mano, si quieres: `sudo apt-get remove libfuse2t64`. Nada depende de él.
@@ -332,7 +375,12 @@ id -u ${PANTALLA_USUARIO} || sudo useradd --system --create-home --shell /usr/sb
 ```
 
 ```bash
-# [servidor] — comprobación: ni sudo, ni docker, ni adm
+# [servidor] — si ya existía: le añade los que le falten y no le quita nada
+sudo usermod -aG video,render,audio ${PANTALLA_USUARIO}
+```
+
+```bash
+# [servidor] — comprobación: ni sudo, ni docker, ni adm, ni input
 id -nG ${PANTALLA_USUARIO}
 ```
 
@@ -373,6 +421,8 @@ usuario `pantalla` no podría ejecutarla.
 nomad_diff etc/nomad-pantalla-lanzar.sh /opt/nomad-pantalla/lanzar.sh
 nomad_diff systemd/nomad-pantalla.service /etc/systemd/system/nomad-pantalla.service
 nomad_diff systemd/nomad-pantalla-vincular@.service /etc/systemd/system/nomad-pantalla-vincular@.service
+nomad_diff systemd/nomad-pantalla-usuario.conf \
+    "/etc/systemd/system/user-$(id -u ${PANTALLA_USUARIO}).slice.d/50-nomad-pantalla.conf"
 ```
 
 ```bash
@@ -383,8 +433,13 @@ for u in nomad-pantalla.service nomad-pantalla-vincular@.service; do
     nomad_plantilla "systemd/${u}" | sudo tee "/etc/systemd/system/${u}" >/dev/null
     sudo chmod 644 "/etc/systemd/system/${u}"
 done
+limites="/etc/systemd/system/user-$(id -u ${PANTALLA_USUARIO}).slice.d"
+sudo install -d -m 755 "${limites}"
+nomad_plantilla systemd/nomad-pantalla-usuario.conf | sudo tee "${limites}/50-nomad-pantalla.conf" >/dev/null
 sudo systemctl daemon-reload
 ```
+
+El último archivo son los límites de recursos del usuario, y lleva su `uid` en la ruta (§ 3.5).
 
 ```bash
 # [servidor] — comprobación obligatoria: ninguna variable sin sustituir
@@ -456,9 +511,9 @@ sudo firewall-cmd --zone="${zona}" --add-rich-rule='rule port port="15905" proto
 ```
 
 ```bash
-# [portátil] — la orden en el PATH
+# [portátil] — la orden en el PATH, desde la raíz de tu copia del repositorio
 mkdir -p ~/.local/bin
-ln -sfn ~/nomad_server/scripts/emisor/pantalla-hp.sh ~/.local/bin/pantalla-hp
+ln -sfn "$(pwd)/scripts/emisor/pantalla-hp.sh" ~/.local/bin/pantalla-hp
 ```
 
 ```bash
@@ -476,8 +531,14 @@ ese grupo daría acceso a todos los dispositivos de entrada.
 Es un paso **único** y **manual a propósito**. Hay que repetirlo tras reconstruir el HP o el
 portátil, o si borras el directorio personal del usuario `pantalla`.
 
-Antes, abre el panel de Sunshine del portátil una vez (`https://<PANTALLA_EMISOR_IP>:47990`) y crea
-el usuario `nomad` con su contraseña.
+Antes, crea el usuario `nomad` del panel de Sunshine. El panel no se puede abrir ahora: solo funciona
+con Sunshine en marcha, y Sunshine solo arranca dentro de una sesión. Por eso se crea desde la línea
+de órdenes, una vez:
+
+```bash
+# [portátil] — sin eco y sin que la contraseña quede en el historial
+sunshine --creds nomad "$(systemd-ask-password 'Contraseña del panel de Sunshine:')"
+```
 
 ```bash
 # [portátil]
@@ -494,8 +555,8 @@ Lo que hace por dentro:
    petición viene de `TS_IP` (el HP), y se confirma con `POST /api/pin`.
 4. Cierra la sesión (`detener`).
 
-> **Espera 90 segundos antes de abrir una sesión.** La unidad de vínculo del HP sigue viva ese
-> tiempo, ocupando `tty7`.
+> La unidad de vínculo del HP sigue viva hasta 90 segundos, ocupando `tty7`. No hace falta esperar:
+> abrir una sesión la para antes de arrancar (`Conflicts=`, § 3.5).
 
 ### Paso 10 — Abrir y cerrar una sesión
 
@@ -552,9 +613,9 @@ bash scripts/emisor/probar_pantalla_hp.sh
 |---|---|
 | 1 — activar y fijar variables | No. Es una decisión tuya. `18_pantalla.sh` exige `PANTALLA_EMISOR_IP` |
 | 2 — paquetes | `18_pantalla.sh`. Avisa de `libfuse2t64`, no lo retira |
-| 3 — usuario | `18_pantalla.sh`. Si existe, no lo toca y comprueba sus grupos |
+| 3 — usuario | `18_pantalla.sh`. Si existe, no lo recrea: comprueba sus grupos y añade los que falten |
 | 4 — Moonlight | `18_pantalla.sh`: versión fijada, SHA-256 comprobado, permisos corregidos |
-| 5 — lanzador y unidades | `18_pantalla.sh`, con diff en `--check`; recarga systemd solo si algo cambió |
+| 5 — lanzador, unidades y límites | `18_pantalla.sh`, con diff en `--check`; recarga systemd solo si algo cambió |
 | 6 — `sudoers` | `18_pantalla.sh`, validando una copia con `visudo -cf` antes de instalar |
 | 7 — salvaguarda | `18_pantalla.sh`: se niega a seguir si hay `display-manager` |
 | 8 — Sunshine, cortafuegos, enlace | `preparar_fedora.sh`: además comprueba que `vainfo` ofrece HEVC |
@@ -564,7 +625,7 @@ bash scripts/emisor/probar_pantalla_hp.sh
 
 ### 6.3 Si prefieres la vía manual
 
-Los pasos 2 a 8 de § 5 son la equivalencia completa. Los scripts no hacen nada que no esté ahí
+Los pasos 2 a 9 de § 5 son la equivalencia completa. Los scripts no hacen nada que no esté ahí
 escrito.
 
 ---
@@ -580,18 +641,20 @@ Se omite si `PANTALLA_HABILITADA` no es `si`. Comprueba:
 
 ```
 ==> Pantalla extendida
-[OK]    Moonlight instalado en /opt/nomad-pantalla/moonlight.
+[OK]    Paquetes de la pantalla instalados.
+[OK]    Moonlight instalado en /opt/nomad-pantalla/moonlight, ejecutable por pantalla.
 [OK]    Moonlight 6.2.0, la versión fijada.
-[OK]    pantalla sin grupos sudo, docker ni adm.
+[OK]    pantalla sin grupos sudo, docker, adm ni input.
 [OK]    nomad-pantalla.service no se habilita al arranque.
 [OK]    No hay gestor de pantalla.
 [OK]    sudoers con las dos reglas exactas (start y stop).
 [OK]    VA-API: decodificación por hardware disponible.
 ```
 
-Sin `sudo` en la sesión, las dos últimas salen como **aviso**, no como fallo: el `sudoers` es `440`
-de root, y `vainfo` necesita el nodo de render del usuario `pantalla`. Eso es «no puedo mirar», no
-«está mal».
+Sin `sudo` en la sesión, las dos últimas y la de `AppRun` salen como **aviso**, no como fallo: el
+`sudoers` es `440` de root, y tanto `vainfo` como `AppRun` hay que probarlos como el usuario
+`pantalla`. Eso es «no puedo mirar», no «está mal». El `sudoers` debe tener esa regla y ninguna más:
+una línea de más también es un fallo.
 
 `nomad-pantalla.service` figura como `static` en `systemctl is-enabled`, porque no tiene `[Install]`:
 es lo esperado.
@@ -608,8 +671,15 @@ Con una sesión abierta, `pantalla` no debe aparecer.
 sudo fgconsole
 ```
 
-Esperado: `1`. Y, con los periféricos del HP, `tty1` debe pedir usuario y contraseña. `cage -s`
-permite cambiar de consola: se comprueba que no se llega a nada sin credenciales.
+Esperado: `1`. Y, con los periféricos del HP, `tty1` debe pedir usuario y contraseña.
+
+Con una sesión abierta y los periféricos del HP, `Ctrl+Alt+F1` **no** debe cambiar de consola: `cage`
+va sin `-s`. Si el panel se queda colgado, la recuperación es por SSH, no desde su teclado:
+
+```bash
+# [servidor] — por SSH, si el panel no responde
+sudo systemctl stop nomad-pantalla.service
+```
 
 ```bash
 # [portátil]
@@ -651,6 +721,8 @@ sudo systemctl stop nomad-pantalla.service
 sudo systemctl stop nomad-pantalla.service
 sudo rm -f /etc/systemd/system/nomad-pantalla.service
 sudo rm -f /etc/systemd/system/nomad-pantalla-vincular@.service
+sudo rm -f "/etc/systemd/system/user-$(id -u ${PANTALLA_USUARIO}).slice.d/50-nomad-pantalla.conf"
+sudo rmdir --ignore-fail-on-non-empty "/etc/systemd/system/user-$(id -u ${PANTALLA_USUARIO}).slice.d"
 sudo rm -f /etc/sudoers.d/nomad-pantalla
 sudo rm -rf /opt/nomad-pantalla
 sudo systemctl daemon-reload
@@ -670,7 +742,7 @@ sudo userdel -r ${PANTALLA_USUARIO}
 `-r` borra su directorio personal, **con el vínculo**: si más adelante lo reinstalas, hay que repetir
 `pantalla-hp vincular`.
 
-Los paquetes (`cage`, `vainfo`, controladores) no se quitan: son inocuos y otros programas los usan.
+Los paquetes (`cage`, `xwayland`, `kbd`, `vainfo`, controladores) no se quitan: son inocuos y otros programas los usan.
 `libfuse2t64`, si lo instalaste en una prueba, se quita a mano con `sudo apt-get remove libfuse2t64`.
 
 ```bash
@@ -690,21 +762,23 @@ este**.
 
 | Síntoma | Causa | Solución |
 |---|---|---|
-| Tras `pantalla-hp vincular` exitoso, `systemctl status nomad-pantalla-vincular@<PIN>` dice `Result: timeout` | **No es un error.** `moonlight pair` no termina solo tras vincular: la unidad tiene `RuntimeMaxSec=90`, y es ese límite el que la cierra | Nada. Comprueba que el vínculo funciona con `pantalla-hp extender` |
+| Tras `pantalla-hp vincular` exitoso, `journalctl -u nomad-pantalla-vincular@<PIN>` dice `Failed with result 'timeout'` | **No es un error.** `moonlight pair` no termina solo tras vincular: la unidad tiene `RuntimeMaxSec=90`, y es ese límite el que la cierra | Nada. Comprueba que el vínculo funciona con `pantalla-hp extender` |
 | El ratón del HP solo alcanza media pantalla | Sunshine arrancó antes que el modo, y calculó el ratón con la geometría antigua | `pantalla-hp off` y abre de nuevo. `pantalla-hp` aplica el modo antes de Sunshine; si lo has hecho a mano, invierte el orden |
 | La pantalla interna queda **negra** al abrir o cerrar | KDE reaplicó una disposición guardada: las dos pantallas coinciden en `0,0` | Espera, la restauración programada actúa en 10 minutos como mucho. A mano: `kscreen-doctor output.Virtual-hp-pantalla.position.1920,0 output.eDP-1.enable output.eDP-1.position.0,0 output.eDP-1.priority.1` |
 | `kscreen-doctor` devuelve 0 pero no cambia nada | La salida que nombra no existe (la virtual murió): no aplica ninguna orden de esa llamada | Repite la llamada **sin** nombrar la virtual. Comprueba el resultado con `kscreen-doctor -o`, nunca con el código de salida |
 | En modo extensor, el panel del HP no tiene barra | Plasma tiene su panel en la pantalla interna | § 5 paso 11: añade un panel en la pantalla virtual |
 | `No se llega a ... por ssh. No se ha tocado nada.` | El alias de `PANTALLA_HP_SSH` no resuelve o el HP está apagado | `ssh ${PANTALLA_HP_SSH} true`. No se ha cambiado nada |
+| `... no responde sin preguntas: revisa 'ssh-add -l' ...` | El `ssh` entra preguntando, pero la clave no quedó en el agente, o falta la regla de `sudo` del HP | `ssh-add -l` y, si sale vacío, comprueba que el portátil tiene un agente en marcha. En el HP, `sudo ./scripts/18_pantalla.sh`. No se ha cambiado nada |
 | `Este equipo no tiene la IP ...: ¿Tailscale está conectado?` | `PANTALLA_EMISOR_IP` no es la del portátil, o Tailscale está caído | `tailscale ip -4` en el portátil y compáralo con la variable |
 | `Ya hay una sesión activa` | Quedó Sunshine o el monitor de una sesión anterior | `pantalla-hp off` |
 | El HP muestra un error y vuelve a `tty1` enseguida | Falló `cage` o Moonlight | `sudo journalctl -u nomad-pantalla.service -n 50` |
+| La sesión del HP termina sola, y el registro dice `Sin respuesta de ...:47989` | El HP perdió de vista a Sunshine durante 3 sondeos seguidos: el portátil cayó, o se cortó la red | Es lo previsto (§ 3.8). Vuelve a abrir la sesión desde el portátil |
 | `18_pantalla.sh`: «PANTALLA_EMISOR_IP está vacía» | El lanzador quedaría sin anfitrión | `./scripts/variables.sh --fijar PANTALLA_EMISOR_IP=<ip>` |
 | `18_pantalla.sh`: «El SHA-256 de Moonlight no coincide» | Descarga corrupta o `MOONLIGHT_SHA256` no es de esa versión | No se instala. Revisa la versión y la huella; no relajes la comprobación |
 | `El usuario 'pantalla' pertenece al grupo ...` | Alguien lo metió en un grupo con privilegios | `sudo gpasswd -d ${PANTALLA_USUARIO} <grupo>` |
 | `libfuse2t64 está instalado` (aviso) | Resto de una prueba manual | No hace falta. Si quieres quitarlo: `sudo apt-get remove libfuse2t64`. El script **no** lo hace |
 | Hay un `segfault` de Moonlight en el registro al parar | Un cierre por tiempo deja el hilo de audio a medias (Moonlight 6.2.0) | No afecta al servidor. La unidad termina y el panel vuelve a `tty1` |
-| Sesión entrecortada por Wi-Fi | El Wi-Fi no se ha medido y es de calidad menor | Usa el cable. Si insistes, baja `PANTALLA_BITRATE` (15000) |
+| Sesión entrecortada por Wi-Fi | El Wi-Fi no se ha medido y es de calidad menor | Usa el cable. Si insistes, baja `PANTALLA_BITRATE` (15000, un valor sin medir). El valor se escribe en `lanzar.sh`: tras cambiarlo, ejecuta otra vez `sudo ./scripts/18_pantalla.sh` en el HP |
 | Unas veces 60 FPS, otras 27–45 | Aceptado. Hay `Atomic commit failed` en `eDP-1`, unos 6 por minuto, con y sin V-Sync. Causa sin confirmar | Ninguna conocida. `--no-vsync` se mantiene porque fue la última configuración probada |
 | Una **franja inferior** del panel (unos 150–200 px) se pixela cada 2 segundos, incluso con el escritorio quieto | **Causa desconocida**, abierta | Ver más abajo |
 

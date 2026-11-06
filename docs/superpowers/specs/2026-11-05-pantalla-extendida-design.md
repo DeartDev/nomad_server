@@ -111,20 +111,34 @@ La sesión la inicia el HP hacia el portátil, así que el cortafuegos del HP no
 Capítulo `docs/18_pantalla_extendida.md` con las 10 secciones obligatorias y las dos vías de montaje,
 y script `scripts/18_pantalla.sh`, idempotente y con `--check`. Hace lo siguiente:
 
-- **Paquetes**, con `--no-install-recommends`: `cage`, `intel-media-va-driver`, `mesa-va-drivers`,
-  `vainfo`, `libgl1-mesa-dri`, `libegl-mesa0`, `alsa-utils`, `libopengl0`, `libfontconfig1`,
-  `libva-x11-2`. Se quita `libfuse2t64`, que deja de hacer falta al usar la AppImage extraída.
-- **Usuario** `pantalla`, de sistema, con grupos `video`, `render` y `audio`.
+- **Paquetes**, con `--no-install-recommends`: `cage`, `xwayland`, `kbd` (trae `chvt`),
+  `intel-media-va-driver`, `mesa-va-drivers`, `vainfo`, `libgl1-mesa-dri`, `libegl-mesa0`,
+  `alsa-utils`, `libopengl0`, `libfontconfig1`, `libva-x11-2`. Se quita `libfuse2t64`, que deja de
+  hacer falta al usar la AppImage extraída.
+- **Usuario** `pantalla`, de sistema, con grupos `video`, `render` y `audio`. Si ya existe se le
+  añaden los que falten, y se rechaza si pertenece a `sudo`, `docker`, `adm` o `input`.
 - **Moonlight**: versión fijada y huella SHA-256 comprobada antes de extraer. Permisos de lectura y
   ejecución para todos: la extracción hereda `700` y `pantalla` no podría ejecutarla.
 - **Unidad** `nomad-pantalla.service`, instalada y **sin habilitar**, con esta base probada:
   `User=pantalla`, `PAMName=login`, `TTYPath=/dev/tty7`, `TTYReset=yes`, `TTYVHangup=yes`,
-  `StandardInput=tty-fail`, `CPUWeight=50`, `MemoryMax=2G`. Sin `UtmpMode`.
-- **Panel**: cambia a `tty7` al arrancar y vuelve a `tty1` al terminar por cualquier causa.
+  `StandardInput=tty-fail`, `CollectMode=inactive-or-failed`. Sin `UtmpMode`. `cage` va sin `-s`: el
+  antiobjetivo de la § 2 no admite cambiar de consola desde el kiosco, y la recuperación es por SSH.
+- **Límites**: `CPUWeight=50` y `MemoryMax=2G` en un añadido de `user-<uid>.slice`
+  (`50-nomad-pantalla.conf`), no en la unidad: `PAMName` mueve el cliente a `session-N.scope`, fuera de
+  ella. La unidad conserva las dos líneas, que no estorban pero no limitan a Moonlight. Se comprueba
+  en la Tarea 7.
+- **Panel**: cambia a `tty7` al arrancar y vuelve a `tty1` al terminar por cualquier causa. Antes de
+  volver, `ExecStopPost` hace `pkill -KILL` de lo que quede del usuario: la parada no alcanza lo que
+  está en `session-N.scope`.
+- **Unidad de vínculo**: `Conflicts=` y `After=` con `nomad-pantalla.service`, porque comparten
+  `tty7` y usuario, y el `pkill` de la que para no debe alcanzar a la que arranca.
 - **Volumen**: `Master` y `Speaker` al 100 %. Esos controles se suman: al 80 % atenúan unos 25,5 dB.
+  Si un control falta, la sesión arranca igual.
 - **Lanzador**: `stream <emisor> Desktop --1080 --fps 60 --bitrate 40000 --no-vsync --packet-size 1024
   --display-mode fullscreen --video-decoder hardware --video-codec HEVC --audio-config stereo --absolute-mouse`,
   con `QT_QPA_PLATFORM=xcb`, `SDL_AUDIODRIVER=alsa` y `LIBVA_DRIVER_NAME=iHD`. Sin `--performance-overlay`.
+  No hace `exec`: deja Moonlight en segundo plano y lo cierra tras 3 sondeos TCP fallidos seguidos, con
+  5 segundos entre ellos, al puerto `47989` del emisor (§ 6.3.1). Termina cuando termina Moonlight.
 
 La AppImage solo trae el plugin Qt `xcb`, por lo que Moonlight corre sobre Xwayland dentro de `cage`.
 `moonlight pair` no se llama desde el lanzador: tras vincular se queda abierto esperando un clic.
@@ -147,7 +161,13 @@ Una orden `pantalla-hp extender|principal|off|estado|vincular`, en `scripts/emis
 
 - `extender` y `principal`: crean el monitor virtual, fijan la disposición, arrancan Sunshine y piden
   al HP que arranque la unidad por SSH.
-- `off`: para la unidad del HP, Sunshine y el monitor virtual, y restaura la pantalla interna.
+- `off`: restaura la pantalla interna, que es local y aún tiene viva la virtual, y después para la
+  unidad del HP, Sunshine y el monitor virtual, y comprueba otra vez que la interna sigue encendida.
+
+**Antes de tocar nada**, `extender`, `principal` y `vincular` cargan la clave en el agente
+(`AddKeysToAgent`) y prueban el mismo camino que usarán con las pantallas movidas: `ssh` con `BatchMode`
+y `sudo -n -l`. **Pedir una sesión** es `stop` y `start` en una sola llamada, porque `start` sobre una
+unidad activa no hace nada.
 
 **Orden obligatorio:** el modo se aplica **antes** de arrancar Sunshine. Al revés, Sunshine calcula el
 ratón con la geometría antigua y este solo alcanza media pantalla.
@@ -194,7 +214,8 @@ El vínculo es un paso único y **documentado, no automático** (decisión del d
    queda abierto esperando un clic y no debe depender de un ratón en el panel.
 2. Sunshine 2026.914 exige `pairing_id`: se obtiene con `GET /api/pin` y se confirma con
    `POST /api/pin`, comprobando que la petición viene del HP.
-3. La contraseña del panel de Sunshine se pide en ese momento y no se guarda en el repositorio.
+3. La contraseña del panel de Sunshine se pide en ese momento y no se guarda en el repositorio. El
+   usuario del panel se crea antes con `sunshine --creds`: fuera de una sesión Sunshine no corre.
 
 ### 6.3.1 Fin de sesión sin `off`
 
@@ -207,11 +228,17 @@ El vigilante lee el registro de Sunshine y toma como fin de sesión tanto `CLIEN
 `Ping Timeout`: en los cortes de cable medidos el primero llegó unos 5 segundos después, y no se
 depende de ello.
 
+El vigilante no cubre al HP: si el portátil cae, nadie pide el `stop`. Por eso el lanzador del HP sondea
+por TCP el puerto `47989` de Sunshine cada 5 segundos, con conexión acotada, y tras 3 fallos seguidos
+cierra Moonlight, con lo que la unidad termina y el panel vuelve a `tty1` (criterio 7). Empieza tras
+una espera breve, porque Sunshine puede estar arrancando. Los sondeos salen del HP: el cortafuegos no
+cambia.
+
 ### 6.4 Comprobación
 
 Nueva sección `verificar_sistema.sh --seccion pantalla`, que se omite si `PANTALLA_HABILITADA` no es
-`si`. Comprueba paquetes, permisos de Moonlight, usuario sin grupos con privilegios, unidad sin
-habilitar y que `display-manager` no existe.
+`si`. Comprueba paquetes, que `pantalla` puede ejecutar Moonlight, usuario sin grupos con privilegios,
+unidad sin habilitar, que `display-manager` no existe y que `sudoers` tiene esa regla y ninguna más.
 
 Debe distinguir «no puedo mirar» de «está mal»: `compass` no pertenece a `render`, así que `vainfo`
 ejecutado por él falla por permisos, no porque falte VA-API.
