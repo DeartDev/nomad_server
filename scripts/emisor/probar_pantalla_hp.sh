@@ -14,7 +14,8 @@
 #  aplica nada; y la virtual reaparece en 0,0, encima de la interna.
 #
 #  El doble de sleep no duerme: suma tiempo simulado, así que los 600 segundos
-#  de una sesión se prueban en milisegundos.
+#  de una sesión se prueban en milisegundos. El doble de ssh imita un agente: con
+#  BatchMode falla mientras la clave no se haya cargado con AddKeysToAgent.
 # ===========================================================================
 set -euo pipefail
 
@@ -196,13 +197,22 @@ esac
 exit 0
 DOBLE
 
-    # 'falla_ssh' guarda el trozo de la orden con el que ssh debe fallar.
+    # 'falla_ssh' guarda el trozo de la orden con el que ssh debe fallar. El agente
+    # empieza vacío, como en el portátil: 'AddKeysToAgent' carga la clave, salvo
+    # con 'agente_sin_clave', y BatchMode falla sin ella, porque no puede preguntar.
     cat > "${d}/ssh" <<'DOBLE'
 #!/bin/bash
 . "${CAJA}/dobles/_comun"
 registrar ssh "$@"
 if [[ -e "${CAJA}/falla_ssh" && "$*" == *"$(cat "${CAJA}/falla_ssh")"* ]]; then
     echo "ssh: connect to host: Connection timed out" >&2
+    exit 255
+fi
+if [[ " $* " == *" AddKeysToAgent=yes "* && ! -e "${CAJA}/agente_sin_clave" ]]; then
+    touch "${CAJA}/clave_en_agente"
+fi
+if [[ " $* " == *" BatchMode=yes "* && ! -e "${CAJA}/clave_en_agente" ]]; then
+    echo "hp-prueba: Permission denied (publickey)." >&2
     exit 255
 fi
 exit 0
@@ -292,7 +302,9 @@ lanzar() {
 }
 
 activa() { echo "$1" >> "${CAJA}/activas"; }
+# Quien abrió la sesión ya cargó la clave en el agente.
 sesion_montada() {
+    touch "${CAJA}/clave_en_agente"
     activa pantalla-hp-monitor; activa pantalla-hp-sunshine
     activa pantalla-hp-vigilante; activa pantalla-restaurar.timer
 }
@@ -494,8 +506,44 @@ prueba_hp_sin_ruta_antes_de_empezar_no_toca_pantallas() {
     pantallas_intactas
 }
 
+prueba_clave_se_carga_y_se_prueba_antes_de_tocar_nada() {
+    lanzar principal
+    rc_es 0
+    antes "AddKeysToAgent=yes" "sudo -n -l"
+    antes "sudo -n -l /usr/bin/systemctl start nomad-pantalla.service" "--unit=pantalla-restaurar"
+    local llamada
+    llamada="$(sed -n "$(linea "sudo -n -l")p" "${CAJA}/llamadas")"
+    [[ "${llamada}" == *BatchMode=yes* ]] || fallar "la prueba previa no va por BatchMode: ${llamada}"
+}
+
+prueba_clave_que_no_llega_al_agente_no_toca_pantallas() {
+    # Lo que pasaba: ssh preguntaba la frase, pero el agente seguía vacío.
+    touch "${CAJA}/agente_sin_clave"
+    lanzar principal
+    rc_no_es_cero
+    dice "ssh-add"
+    pantallas_intactas
+    no_hay "sudo -n systemctl start"
+}
+
+prueba_sudo_que_pide_contrasena_no_toca_pantallas() {
+    echo "sudo -n -l" > "${CAJA}/falla_ssh"
+    lanzar principal
+    rc_no_es_cero
+    dice "sudo"
+    pantallas_intactas
+}
+
+prueba_arranque_para_la_unidad_del_hp_en_la_misma_llamada() {
+    # 'start' sobre una unidad activa no hace nada: seguiría la sesión anterior.
+    lanzar principal
+    rc_es 0
+    hay "sudo -n systemctl stop nomad-pantalla.service ; sudo -n systemctl start nomad-pantalla.service"
+    (( $(veces "sudo -n systemctl") == 1 )) || fallar "'stop' y 'start' no van en una sola llamada"
+}
+
 prueba_hp_inaccesible_restaura_interna() {
-    echo "systemctl start nomad-pantalla" > "${CAJA}/falla_ssh"
+    echo "sudo -n systemctl start nomad-pantalla" > "${CAJA}/falla_ssh"
     lanzar principal
     rc_no_es_cero
     hay "sudo -n systemctl start nomad-pantalla.service"
@@ -553,7 +601,7 @@ prueba_extender_aborta_si_interna_apagada() {
     rc_no_es_cero
     dice "${I}"
     no_hay "--unit=pantalla-hp-sunshine"
-    no_hay "systemctl start nomad-pantalla"
+    no_hay "sudo -n systemctl start nomad-pantalla"
     interna_restaurada
     pila_retirada
 }
@@ -586,7 +634,7 @@ prueba_sunshine_que_no_se_crea_restaura() {
     touch "${CAJA}/falla_pantalla-hp-sunshine"
     lanzar principal
     rc_no_es_cero
-    no_hay "systemctl start nomad-pantalla"
+    no_hay "sudo -n systemctl start nomad-pantalla"
     interna_restaurada
     pila_retirada
 }
@@ -641,16 +689,32 @@ prueba_off_para_vigilante_primero() {
     sesion_montada
     lanzar off
     rc_es 0
+    antes "stop pantalla-hp-vigilante" "${ORDEN_RESTAURAR}"
     antes "stop pantalla-hp-vigilante" "sudo -n systemctl stop nomad-pantalla.service"
     unidad_parada pantalla-hp-vigilante
 }
 
-prueba_off_restaura_tras_sunshine_y_antes_del_monitor() {
+prueba_off_restaura_antes_que_nada_de_lo_demas() {
+    # Es local y la virtual sigue viva: la interna no espera a un ssh de 20 s.
     sesion_montada
     lanzar off
     rc_es 0
-    antes "stop pantalla-hp-sunshine" "${ORDEN_RESTAURAR}"
-    antes "${ORDEN_RESTAURAR}" "stop pantalla-hp-monitor"
+    antes "${ORDEN_RESTAURAR}" "sudo -n systemctl stop nomad-pantalla.service"
+    antes "${ORDEN_RESTAURAR}" "stop pantalla-hp-sunshine"
+    antes "stop pantalla-hp-sunshine" "stop pantalla-hp-monitor"
+}
+
+prueba_off_con_interna_apagada_la_enciende_antes_de_llamar_al_hp() {
+    # La llamada a ssh ve ya el resultado: se comprueba con el estado, no solo
+    # con el orden de las líneas.
+    sesion_montada
+    fijar_pantalla "${V}" enabled 0,0 1
+    fijar_pantalla "${I}" disabled 0,0 2
+    sed -i '/^registrar ssh/a cp "${CAJA}/pantallas/eDP-1.estado" "${CAJA}/interna_al_llamar_al_hp"' "${CAJA}/dobles/ssh"
+    lanzar off
+    rc_es 0
+    [[ "$(cat "${CAJA}/interna_al_llamar_al_hp")" == enabled ]] \
+        || fallar "el ssh salió con la interna apagada"
 }
 
 prueba_off_sigue_si_ssh_falla() {
@@ -1026,6 +1090,26 @@ prueba_vincular_rechaza_direccion_ajena() {
     pila_retirada
 }
 
+prueba_vincular_comprueba_el_hp_antes_de_montar_nada() {
+    preparar_vinculo "${IP_HP}"
+    lanzar vincular
+    ENTRADA=""
+    rc_es 0
+    antes "AddKeysToAgent=yes" "--unit=pantalla-restaurar"
+    antes "sudo -n -l /usr/bin/systemctl start nomad-pantalla.service" "--unit=pantalla-restaurar"
+}
+
+prueba_vincular_sin_agente_no_toca_pantallas() {
+    # Sin esto, el 'stop' de 'detener' no podría entrar en el HP.
+    touch "${CAJA}/agente_sin_clave"
+    preparar_vinculo "${IP_HP}"
+    lanzar vincular
+    ENTRADA=""
+    rc_no_es_cero
+    pantallas_intactas
+    no_hay "nomad-pantalla-vincular@"
+}
+
 prueba_vincular_se_rechaza_con_sesion_activa() {
     sesion_montada
     preparar_vinculo "${IP_HP}"
@@ -1085,8 +1169,9 @@ prueba_estado_solo_consulta() {
 }
 
 prueba_no_usa_rutas_absolutas_que_salten_los_dobles() {
-    if grep -nE '(^|[[:space:]])/(usr/)?bin/(kscreen-doctor|systemctl|systemd-run|ssh|ip|sleep|curl)\b' \
-        "${RAIZ}/scripts/emisor/pantalla-hp.sh"; then
+    # 'sudo -l' es la excepción: esa ruta es un argumento para el HP.
+    if grep -vF 'sudo -n -l /usr/bin/systemctl' "${RAIZ}/scripts/emisor/pantalla-hp.sh" \
+        | grep -nE '(^|[[:space:]])/(usr/)?bin/(kscreen-doctor|systemctl|systemd-run|ssh|ip|sleep|curl)\b'; then
         fallar "ruta absoluta en pantalla-hp.sh: estas pruebas tocarían el sistema real"
     fi
     [[ -f "${RAIZ}/scripts/emisor/pantalla-hp.sh" ]] || fallar "no existe pantalla-hp.sh"

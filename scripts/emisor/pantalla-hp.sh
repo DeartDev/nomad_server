@@ -16,7 +16,8 @@
 #  Un fallo aquí deja el portátil con la pantalla negra, y ya pasó una vez. Las
 #  reglas que lo evitan, y que no se deben relajar:
 #
-#  - Nada se toca hasta comprobar la red, que no hay sesión y que el HP responde.
+#  - Nada se toca hasta comprobar la red, que no hay sesión y que el HP responde
+#    por el mismo camino, sin preguntas, que se usará con las pantallas movidas.
 #  - Antes de mover una pantalla hay una restauración programada en systemd, que
 #    no depende de este proceso ni de este repositorio.
 #  - 'kscreen-doctor' devuelve 0 aunque la salida no exista, y entonces no aplica
@@ -40,7 +41,7 @@ Uso: pantalla-hp <orden>
 Órdenes:
   extender    El panel del HP es un segundo monitor, a la derecha de la interna.
   principal   El panel del HP es la pantalla principal; la interna se apaga.
-  off         Para el HP, Sunshine y el monitor virtual y restaura la interna.
+  off         Restaura la interna y para el HP, Sunshine y el monitor virtual.
   estado      Muestra la sesión, sin cambiar nada.
   vincular    Vincula Moonlight con Sunshine. Paso único; pide dos contraseñas.
 
@@ -171,11 +172,20 @@ comprobar_previo() {
     fi
 }
 
-# Este ssh sí puede preguntar la frase de la clave: es el último momento en que
-# la terminal se ve seguro. Si el HP no responde, tampoco se ha tocado nada.
+# El primer ssh sí puede preguntar la frase de la clave: es el último momento en
+# que la terminal se ve seguro. 'AddKeysToAgent' la deja en el agente, porque
+# todo lo que viene después va con BatchMode y no puede preguntar nada.
+#
+# El segundo recorre ese camino exacto antes de tocar nada: sin la clave en el
+# agente o sin la regla de sudo, fallaría ya con las pantallas movidas. 'sudo -l'
+# solo consulta, no arranca la unidad. Necesita la ruta completa de la orden.
 comprobar_hp() {
-    if ! ssh -o ConnectTimeout=5 "${PANTALLA_HP_SSH}" true; then
+    if ! ssh -o AddKeysToAgent=yes -o ConnectTimeout=5 "${PANTALLA_HP_SSH}" true; then
         die "No se llega a ${PANTALLA_HP_SSH} por ssh. No se ha tocado nada."
+    fi
+    if ! timeout -k 2 "${LIMITE_SSH}" ssh "${SSH_SIN_PREGUNTAS[@]}" "${PANTALLA_HP_SSH}" \
+            sudo -n -l /usr/bin/systemctl start nomad-pantalla.service < /dev/null > /dev/null; then
+        die "${PANTALLA_HP_SSH} no responde sin preguntas: revisa 'ssh-add -l' y la regla de sudo del HP. No se ha tocado nada."
     fi
 }
 
@@ -300,9 +310,13 @@ levantar_pila() {
     arrancar_sunshine || { log_error "No se pudo arrancar Sunshine."; return 1; }
 }
 
+# 'start' sobre una unidad ya activa no hace nada y devuelve 0: seguiría el
+# Moonlight de una sesión anterior, ya sin conexión. Se para antes, en la misma
+# llamada, y el 'stop' puede fallar sin más: decide el 'start'.
 pedir_hp() {
     log_paso "Unidad del HP"
     if ! timeout -k 2 "${LIMITE_SSH}" ssh "${SSH_SIN_PREGUNTAS[@]}" "${PANTALLA_HP_SSH}" \
+            sudo -n systemctl stop nomad-pantalla.service ';' \
             sudo -n systemctl start nomad-pantalla.service < /dev/null; then
         log_error "${PANTALLA_HP_SSH} no ha arrancado nomad-pantalla.service."
         return 1
@@ -329,6 +343,9 @@ parar_hp() {
 #
 # El vigilante va primero: vería caer Sunshine y haría otro 'detener' a la vez.
 # Pero el propio vigilante no se para a sí mismo, o moriría a mitad de esto.
+# Restaurar va justo después, antes que nada que pueda tardar o fallar: es local,
+# y con la virtual aún viva la llamada que la nombra se aplica entera. Parar antes
+# el HP costaría hasta LIMITE_SSH segundos con la interna apagada.
 # El monitor se para después de restaurar: si la virtual desaparece con la interna
 # apagada, no queda ninguna pantalla.
 detener() {
@@ -336,9 +353,9 @@ detener() {
     trap '' INT TERM HUP PIPE
 
     if (( SOY_VIGILANTE == 0 )); then retirar_unidad "${U_VIGILANTE}"; fi
+    restaurar
     parar_hp
     retirar_unidad "${U_SUNSHINE}"
-    restaurar
     retirar_unidad "${U_MONITOR}"
 
     # Se comprueba otra vez: KDE reaplica disposiciones al desaparecer la virtual.
@@ -479,6 +496,7 @@ vincular() {
     comprobar_previo
     requerir_variables TS_IP
     requerir_comandos curl jq
+    comprobar_hp
 
     local pin
     pin="$(printf '%04d' "$(( RANDOM % 10000 ))")"
@@ -497,8 +515,8 @@ vincular() {
     trap - INT TERM HUP
 
     detener
-    log_ok "Vínculo hecho. La unidad de vínculo del HP se cierra sola en 90 segundos:"
-    log_ok "espera ese tiempo y abre la sesión con: pantalla-hp extender"
+    log_ok "Vínculo hecho. Abre la sesión con: pantalla-hp extender"
+    log_ok "La unidad de vínculo del HP se cierra sola en 90 segundos, o al abrir la sesión."
 }
 
 # ===========================================================================
