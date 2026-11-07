@@ -260,6 +260,7 @@ Medido en el HP con Moonlight 6.2.0 (el HP All-in-One 22-dd2xxx; panel `eDP-1` d
 | Corte de cable en modo principal | Pantalla interna de vuelta a los 62 segundos |
 | Portátil sin red en plena sesión | El HP cierra solo: `tty1` a los 29 segundos |
 | Wi-Fi | Fluido a unos 11 Mbit/s negociados; por cable, 31 Mbit/s |
+| Sesión larga con respaldo | 69 minutos por cable sin reinicios: 17/17 contenedores sanos en las 66 muestras, CPU libre media del 69 % (mínimo 39 %, durante los 25 s del respaldo), memoria del receptor entre 246 y 276 MB, sin crecimiento sostenido |
 | Con sesión abierta | `who` muestra a `pantalla`; el reinicio automático se aplaza |
 
 Las cifras de cortes y de Wi-Fi son del servidor real con `pantalla-hp`; las de CPU y FPS, de las
@@ -803,6 +804,8 @@ escritorio quieto. **Se desconoce la causa.** Lo descartado:
 - **El control de tasa `cqp`:** ocurre también con él.
 - **Los fotogramas completos periódicos (IDR):** Sunshine no los emite periódicamente, así que esa
   explicación queda descartada.
+- **Avisos del emisor:** en una sesión de 69 minutos, el registro de Sunshine no anota nada entre el
+  arranque y el cierre, y las renegociaciones de PipeWire ocurren solo al arrancar.
 
 `vaapi_rc = vbr` la **redujo**, pero no la eliminó, y por eso es el valor de la configuración de
 Sunshine. Falta revisar la captura (`Virtual-hp-pantalla` en el portátil) y la salida al panel. El

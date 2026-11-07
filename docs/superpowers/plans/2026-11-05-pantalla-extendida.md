@@ -240,7 +240,7 @@ Expected: anotar FPS, latencia y pérdida. Si va mal con `vaapi_rc = vbr`, compa
 - [ ] **Step 7: Sesión larga.** 60 minutos con vídeo, lanzando `sudo systemctl start nomad-respaldo.service` a mitad.
 Expected: criterio 5, y `who` sin `pantalla` (criterio 6).
 
-- [ ] **Step 8: Limpiar.** Borrar `~compass/pantalla-prueba` en el HP tras revisarlo.
+- [x] **Step 8: Limpiar.** Borrar `~compass/pantalla-prueba` en el HP tras revisarlo.
 
 - [ ] **Step 9: Franja inferior.** Investigarla ahora, con el resto cerrado: captura de `Virtual-hp-pantalla` en el portátil para separar el emisor del receptor, y errores `Atomic commit failed` en el HP. Documentar la causa o la limitación.
 
