@@ -66,6 +66,8 @@ U_VIGILANTE=pantalla-hp-vigilante
 U_RESTAURAR=pantalla-restaurar
 
 PUERTO_MONITOR=15905
+BITRATE_WIFI=15000           # Kbps: tope de Sunshine si la salida a la red es Wi-Fi
+SYS_NET="${SYS_NET:-/sys/class/net}"
 PLAZO_RESTAURACION=600       # s: la restauración programada, si todo lo demás falla
 PLAZO_PRIMERA_CONEXION=120   # s: lo que tiene el HP para conectar al arrancar
 PLAZO_SIN_CLIENTE=60         # s: sin cliente tras haberlo tenido
@@ -221,12 +223,26 @@ armar_restauracion() {
 }
 
 # La ruta debe ser /usr/bin/sunshine: KWin concede la captura por ruta ejecutable.
+# El HP pide siempre el mismo bitrate. El tope va en Sunshine, en este equipo,
+# para pasar del cable al Wi-Fi sin tocar el HP ni usar sudo.
+tope_bitrate() {
+    local dev
+    dev="$(ip route get 1.1.1.1 2>/dev/null \
+        | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')"
+    if [[ -n "${dev}" && -d "${SYS_NET}/${dev}/wireless" ]]; then
+        log_info "Salida por Wi-Fi (${dev}): bitrate limitado a ${BITRATE_WIFI} Kbps." >&2
+        echo "max_bitrate=${BITRATE_WIFI}"
+    fi
+}
+
 arrancar_sunshine() {
+    local tope
+    tope="$(tope_bitrate)"
     systemd-run --user --quiet --unit="${U_SUNSHINE}" \
         --property=StandardInput=null \
         --property=TimeoutStopSec="${LIMITE_PARADA_SUNSHINE}" \
         systemd-inhibit --what=handle-lid-switch:sleep:idle --who=pantalla-hp \
-        --why="Pantalla extendida en el HP" --mode=block /usr/bin/sunshine
+        --why="Pantalla extendida en el HP" --mode=block /usr/bin/sunshine ${tope:+"${tope}"}
 }
 
 lanzar_vigilante() {

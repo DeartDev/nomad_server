@@ -228,6 +228,10 @@ DOBLE
 #!/bin/bash
 . "${CAJA}/dobles/_comun"
 registrar ip "$@"
+if [[ "${1:-}" == route ]]; then
+    echo "1.1.1.1 via 192.168.1.1 dev $(cat "${CAJA}/ruta" 2>/dev/null || echo enp1s0) src 192.168.1.20 uid 1000"
+    exit 0
+fi
 echo "lo               UNKNOWN        127.0.0.1/8"
 echo "wlp2s0           UP             192.168.1.20/24"
 [[ -e "${CAJA}/sin_tailscale" ]] || echo "tailscale0       UNKNOWN        100.64.0.7/32"
@@ -402,6 +406,24 @@ prueba_extender_enciende_interna_apagada() {
     lanzar extender
     rc_es 0
     pantalla_es "${I}" estado enabled
+}
+
+prueba_wifi_limita_el_bitrate() {
+    mkdir -p "${CAJA}/sys/wlp2s0/wireless"
+    echo wlp2s0 > "${CAJA}/ruta"
+    ENTORNO_EXTRA=("SYS_NET=${CAJA}/sys")
+    lanzar extender
+    rc_es 0
+    hay "max_bitrate=15000"
+}
+
+prueba_cable_no_limita_el_bitrate() {
+    mkdir -p "${CAJA}/sys/enp1s0"
+    echo enp1s0 > "${CAJA}/ruta"
+    ENTORNO_EXTRA=("SYS_NET=${CAJA}/sys")
+    lanzar extender
+    rc_es 0
+    no_hay "max_bitrate"
 }
 
 prueba_orden_completo_del_arranque() {
