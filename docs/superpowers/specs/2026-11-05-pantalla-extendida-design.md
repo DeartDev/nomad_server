@@ -1,6 +1,6 @@
 # Pantalla extendida en nomadservernw — especificación de diseño
 
-> **Estado: CONSTRUIDO para Fedora, en validación final.** Aplicado en el HP y probado con
+> **Estado: CONSTRUIDO y validado para Fedora.** Aplicado en el HP y probado con
 > `pantalla-hp` en noviembre de 2026; Windows y Ubuntu no se han probado. Sustituye a la propuesta técnica de
 > `docs/new_specs/nomad-server-mw-display-extension-spec.md`, que queda como antecedente.
 >
@@ -279,11 +279,10 @@ seleccionar el cliente solo en el caso de Ubuntu.
 
 ## 9. Riesgos abiertos
 
-- **Franja inferior:** detalle pendiente, por decisión del usuario, para el final del proyecto. En el
-  panel aparece una franja de unos 150–200 px abajo que se pixela cada 2 segundos, incluso con el
-  escritorio quieto. Sigue con HEVC y H.264 y con `cqp`; `vbr` la redujo. Sunshine no emite fotogramas
-  completos periódicos, así que esa explicación queda descartada, y su registro no anota nada durante
-  una sesión de 69 minutos. Falta revisar la captura y la salida al panel.
+- **Franja inferior:** limitación aceptada por el usuario el 2026-11-07, con causa desconocida. Unos
+  150–200 px abajo, y menos arriba, se pixelan cada 2 segundos con ritmo fijo; vídeo y sonido estables.
+  Descartados códec, codificador Intel, `cqp`, picos de tráfico, FBC y vsync. Detalle en el capítulo 18,
+  § 9.
 - **Wi-Fi:** fluido a unos 11 Mbit/s con el cable fuera toda la sesión. `pantalla-hp` limita Sunshine a
   15 Mbit/s (`max_bitrate`) cuando la salida a la red es Wi-Fi, sin tocar el HP.
 - **Corte del cable:** el enlace del ThinkPad cayó 15 segundos a las 21:39 del 2026-11-05 sin causa

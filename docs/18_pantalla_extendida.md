@@ -260,7 +260,7 @@ Medido en el HP con Moonlight 6.2.0 (el HP All-in-One 22-dd2xxx; panel `eDP-1` d
 | Corte de cable en modo principal | Pantalla interna de vuelta a los 62 segundos |
 | Portátil sin red en plena sesión | El HP cierra solo: `tty1` a los 29 segundos |
 | Wi-Fi | Fluido a unos 11 Mbit/s negociados; por cable, 31 Mbit/s |
-| Sesión larga con respaldo | 69 minutos por cable sin reinicios: 17/17 contenedores sanos en las 66 muestras, CPU libre media del 69 % (mínimo 39 %, durante los 25 s del respaldo), memoria del receptor entre 246 y 276 MB, sin crecimiento sostenido |
+| Sesión larga con respaldo | 69 minutos por cable sin reinicios, cortes ni avisos de Uptime Kuma: 17/17 contenedores sanos en las 66 muestras, CPU libre media del 69 % (mínimo 39 %, durante los 25 s del respaldo), memoria del receptor entre 246 y 276 MB, sin crecimiento sostenido |
 | Con sesión abierta | `who` muestra a `pantalla`; el reinicio automático se aplaza |
 
 Las cifras de cortes y de Wi-Fi son del servidor real con `pantalla-hp`; las de CPU y FPS, de las
@@ -793,23 +793,32 @@ este**.
 | Sesión entrecortada por Wi-Fi | Red saturada o señal débil, aun con el tope de 15 Mbit/s | Acércate al router o usa el cable. Para bajar el tope, cambia `BITRATE_WIFI` en `pantalla-hp.sh` |
 | Tras apagar la red del portátil, `Este equipo no tiene la IP` | `nmcli networking off` le quita la dirección a `tailscale0` y Tailscale no la repone | `sudo systemctl restart tailscaled` |
 | Unas veces 60 FPS, otras 27–45 | Aceptado. Hay `Atomic commit failed` en `eDP-1`, unos 6 por minuto, con y sin V-Sync. Causa sin confirmar | Ninguna conocida. `--no-vsync` se mantiene porque fue la última configuración probada |
-| Una **franja inferior** del panel (unos 150–200 px) se pixela cada 2 segundos, incluso con el escritorio quieto | **Causa desconocida**, abierta | Ver más abajo |
+| Una **franja inferior** del panel (unos 150–200 px, y otra más fina arriba) se pixela cada 2 segundos | **Causa desconocida**, limitación aceptada | Ver más abajo |
 
-### La franja inferior: lo que se sabe y lo que no
+### La franja inferior: limitación aceptada
 
-Aparece una franja de unos 150–200 píxeles abajo que se pixela cada 2 segundos, incluso con el
-escritorio quieto. **Se desconoce la causa.** Lo descartado:
+Una franja de unos 150–200 píxeles abajo, y otra más fina arriba, se pixelan con un ritmo fijo de unos
+2 segundos, incluso con el escritorio quieto. **Se desconoce la causa.** El vídeo y el sonido llegan
+estables, y el usuario aceptó dejarla así (2026-11-07). Lo descartado, probando un cambio cada vez:
 
 - **El códec:** ocurre igual con HEVC y con H.264.
-- **El control de tasa `cqp`:** ocurre también con él.
-- **Los fotogramas completos periódicos (IDR):** Sunshine no los emite periódicamente, así que esa
-  explicación queda descartada.
-- **Avisos del emisor:** en una sesión de 69 minutos, el registro de Sunshine no anota nada entre el
-  arranque y el cierre, y las renegociaciones de PipeWire ocurren solo al arrancar.
+- **El codificador Intel:** sigue con `encoder = software` (`libx264`), y además el vídeo fluctúa. Por
+  eso se mantiene `vaapi`.
+- **El control de tasa `cqp`:** ocurre también con él. `vaapi_rc = vbr` la **redujo**, pero no la
+  eliminó, y por eso es el valor de la configuración de Sunshine.
+- **Un fotograma pesado periódico:** el tráfico que recibe el HP, medido cada 50 ms, no late a 2
+  segundos.
+- **La compresión del panel (FBC):** sigue igual apagándola en caliente.
+- **La sincronización vertical:** sigue igual con `--vsync`, y sin mejora apreciable, así que se
+  mantiene `--no-vsync`.
+- **`Atomic commit failed`:** `cage` lo anota unas 23 veces por minuto, pero a intervalos irregulares,
+  y la franja late con ritmo fijo. No se ha visto que afecte a la sesión.
+- **El ahorro de energía del panel (PSR):** el estado de PSR da `No such device`, señal de que este
+  panel no lo usa.
 
-`vaapi_rc = vbr` la **redujo**, pero no la eliminó, y por eso es el valor de la configuración de
-Sunshine. Falta revisar la captura (`Virtual-hp-pantalla` en el portátil) y la salida al panel. El
-usuario dejó esta investigación para el final del proyecto.
+Sin probar: la decodificación por software en el HP, porque un Celeron de 2 núcleos a 1080p60 pondría
+en riesgo el servidor, y la captura de la salida virtual en el portátil. Si se retoma, el siguiente
+paso es ver la misma sesión con un cliente Moonlight en otro equipo.
 
 ### Otros riesgos abiertos
 

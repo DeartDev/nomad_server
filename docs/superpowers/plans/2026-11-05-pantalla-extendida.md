@@ -237,11 +237,11 @@ Expected: criterio 7, antes de 90 segundos. Anotar si el corte de 15 s del cable
 - [ ] **Step 6: Wi-Fi.** Sin cable durante toda la sesión, con `PANTALLA_BITRATE=15000`, dos minutos de vídeo.
 Expected: anotar FPS, latencia y pérdida. Si va mal con `vaapi_rc = vbr`, comparar con el valor automático y documentar el perfil Wi-Fi.
 
-- [ ] **Step 7: Sesión larga.** 60 minutos con vídeo, lanzando `sudo systemctl start nomad-respaldo.service` a mitad.
+- [x] **Step 7: Sesión larga.** 60 minutos con vídeo, lanzando `sudo systemctl start nomad-respaldo.service` a mitad.
 Expected: criterio 5, y `who` sin `pantalla` (criterio 6).
 
 - [x] **Step 8: Limpiar.** Borrar `~compass/pantalla-prueba` en el HP tras revisarlo.
 
-- [ ] **Step 9: Franja inferior.** Investigarla ahora, con el resto cerrado: captura de `Virtual-hp-pantalla` en el portátil para separar el emisor del receptor, y errores `Atomic commit failed` en el HP. Documentar la causa o la limitación.
+- [x] **Step 9: Franja inferior.** Investigarla ahora, con el resto cerrado: captura de `Virtual-hp-pantalla` en el portátil para separar el emisor del receptor, y errores `Atomic commit failed` en el HP. Documentar la causa o la limitación.
 
-- [ ] **Step 10: Commit** de resultados y actualizar la memoria del proyecto.
+- [x] **Step 10: Commit** de resultados y actualizar la memoria del proyecto.
