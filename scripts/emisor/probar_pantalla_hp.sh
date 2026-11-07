@@ -1349,6 +1349,18 @@ prueba_unidades_sin_cambio_de_consola_en_cage() {
     done
 }
 
+prueba_audio_usa_la_tarjeta_por_nombre() {
+    local raiz
+    raiz="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    grep -q -- '-c PCH sset Master' "${raiz}/templates/systemd/nomad-pantalla.service" \
+        || fallar "la unidad debe ajustar el volumen en la tarjeta PCH"
+    grep -qE -- 'amixer .*-c [0-9]' "${raiz}/templates/systemd/nomad-pantalla.service" \
+        && fallar "un número de tarjeta cambia con los periféricos USB"
+    grep -q '^export ALSA_CARD=PCH$' "${raiz}/templates/etc/nomad-pantalla-lanzar.sh" \
+        || fallar "el lanzador debe fijar ALSA_CARD=PCH"
+    return 0
+}
+
 prueba_unidades_limpian_al_usuario_antes_de_volver_a_tty1() {
     local u f pkill chvt
     for u in "${UNIDADES[@]}"; do

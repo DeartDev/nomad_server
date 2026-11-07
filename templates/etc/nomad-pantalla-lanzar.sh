@@ -33,6 +33,8 @@
 set -uo pipefail
 
 export QT_QPA_PLATFORM=xcb
+# La tarjeta del HP por nombre: un audio USB en un hub le quita el número 0.
+export ALSA_CARD=PCH
 export SDL_AUDIODRIVER=alsa
 export LIBVA_DRIVER_NAME=iHD
 

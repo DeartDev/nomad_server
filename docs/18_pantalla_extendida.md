@@ -764,6 +764,7 @@ este**.
 | Síntoma | Causa | Solución |
 |---|---|---|
 | Tras `pantalla-hp vincular` exitoso, `journalctl -u nomad-pantalla-vincular@<PIN>` dice `Failed with result 'timeout'` | **No es un error.** `moonlight pair` no termina solo tras vincular: la unidad tiene `RuntimeMaxSec=90`, y es ese límite el que la cierra | Nada. Comprueba que el vínculo funciona con `pantalla-hp extender` |
+| Conecta pero no se oye nada por el HP | Un audio USB, por ejemplo en un hub con teclado, ocupa `card 0` y el sonido va allí | El lanzador fija `ALSA_CARD=PCH` y la unidad usa `amixer -c PCH`. Comprueba con `cat /proc/asound/cards` que el nombre de la tarjeta sigue siendo `PCH` |
 | `pantalla-hp vincular` falla justo después de otro intento | La instancia anterior sigue viva hasta 90 s, y al terminar devuelve el panel a `tty1` y mata lo que corra como `pantalla` | Espera 90 segundos entre intentos |
 | El ratón del HP solo alcanza media pantalla | Sunshine arrancó antes que el modo, y calculó el ratón con la geometría antigua | `pantalla-hp off` y abre de nuevo. `pantalla-hp` aplica el modo antes de Sunshine; si lo has hecho a mano, invierte el orden |
 | La pantalla interna queda **negra** al abrir o cerrar | KDE reaplicó una disposición guardada: las dos pantallas coinciden en `0,0` | Espera, la restauración programada actúa en 10 minutos como mucho. A mano: `kscreen-doctor output.Virtual-hp-pantalla.position.1920,0 output.eDP-1.enable output.eDP-1.position.0,0 output.eDP-1.priority.1` |
