@@ -111,7 +111,8 @@ esperar() {
     done
 }
 
-# 'kscreen-doctor -o' colorea la salida aunque vaya a una tubería.
+# 'kscreen-doctor -o' colorea la salida aunque vaya a una tubería. Una salida
+# virtual no imprime 'enabled' sino 'disable unsupported': no se puede apagar.
 salidas() { kscreen-doctor -o 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g'; }
 
 # Imprime "enabled 0,0" o "disabled 0,0", y nada si la salida no existe.
@@ -121,6 +122,7 @@ dato_salida() {
     awk -v n="$1" '
         $1 == "Output:" { en = ($3 == n) }
         en && ($1 == "enabled" || $1 == "disabled") { estado = $1 }
+        en && $1 == "disable" && $2 == "unsupported" { estado = "enabled" }
         en && $1 == "Geometry:" { posicion = $2 }
         END { if (estado != "") print estado, posicion }
     ' <<<"${texto}"
@@ -528,7 +530,7 @@ estado() {
     for unidad in "${U_SUNSHINE}" "${U_MONITOR}" "${U_VIGILANTE}" "${U_RESTAURAR}.timer"; do
         printf '%-28s %s\n' "${unidad}" "$(systemctl --user is-active "${unidad}" 2>/dev/null || true)"
     done
-    if cliente_conectado; then
+    if sesion_activa && cliente_conectado; then
         printf '%-28s %s\n' "cliente" "conectado"
     else
         printf '%-28s %s\n' "cliente" "ninguno"

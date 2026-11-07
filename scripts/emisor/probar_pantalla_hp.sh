@@ -94,8 +94,9 @@ if [[ "${1:-}" == "-o" ]]; then
     printf '\033[01;32mOutput: \033[0;0m1 eDP-1 aaaa\n\t%s\n\tconnected\n\tpriority %s\n\tGeometry: %s 1920x1080\n' \
         "$(cat "${P}/eDP-1.estado")" "$(cat "${P}/eDP-1.prioridad")" "$(cat "${P}/eDP-1.posicion")"
     if hay_virtual; then
-        printf '\033[01;32mOutput: \033[0;0m2 %s bbbb\n\t%s\n\tconnected\n\tpriority %s\n\tGeometry: %s 1920x1080\n' \
-            "${V}" "$(cat "${P}/${V}.estado")" "$(cat "${P}/${V}.prioridad")" "$(cat "${P}/${V}.posicion")"
+        # Una salida virtual real no imprime 'enabled': no se puede apagar.
+        printf '\033[01;32mOutput: \033[0;0m2 %s bbbb\n\tdisable unsupported\n\tconnected\n\tpriority %s\n\tGeometry: %s 1920x1080\n' \
+            "${V}" "$(cat "${P}/${V}.prioridad")" "$(cat "${P}/${V}.posicion")"
     fi
     exit 0
 fi
