@@ -1,0 +1,12 @@
+# El repositorio se clona también en Windows. Sin esto, Git puede convertir los
+# scripts a CRLF y romperlos en el servidor ('bad interpreter: ^M').
+* text=auto eol=lf
+
+# PowerShell y cmd se ejecutan en Windows, y cmd exige CRLF.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+*.png binary
+*.jpg binary
+*.pdf binary
