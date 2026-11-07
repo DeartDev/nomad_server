@@ -60,6 +60,11 @@ AYUDA
 V=Virtual-hp-pantalla
 I=eDP-1
 
+# Las unidades del HP: la de este emisor y la del otro sistema del portátil. El
+# portátil es uno solo, así que una sesión de Windows abierta es una huérfana.
+U_HP=nomad-pantalla@fedora.service
+U_HP_OTRA=nomad-pantalla@windows.service
+
 U_MONITOR=pantalla-hp-monitor
 U_SUNSHINE=pantalla-hp-sunshine
 U_VIGILANTE=pantalla-hp-vigilante
@@ -183,12 +188,20 @@ comprobar_previo() {
 # El segundo recorre ese camino exacto antes de tocar nada: sin la clave en el
 # agente o sin la regla de sudo, fallaría ya con las pantallas movidas. 'sudo -l'
 # solo consulta, no arranca la unidad. Necesita la ruta completa de la orden.
+#
+# Un 1 es de sudo, no de ssh (255) ni de 'timeout' (124): ssh ha entrado, pero la
+# regla no permite la instancia. Es lo que pasa con un HP de la versión anterior,
+# cuyo sudoers solo conoce nomad-pantalla.service.
 comprobar_hp() {
     if ! ssh -o AddKeysToAgent=yes -o ConnectTimeout=5 "${PANTALLA_HP_SSH}" true; then
         die "No se llega a ${PANTALLA_HP_SSH} por ssh. No se ha tocado nada."
     fi
-    if ! timeout -k 2 "${LIMITE_SSH}" ssh "${SSH_SIN_PREGUNTAS[@]}" "${PANTALLA_HP_SSH}" \
-            sudo -n -l /usr/bin/systemctl start nomad-pantalla.service < /dev/null > /dev/null; then
+    local rc=0
+    timeout -k 2 "${LIMITE_SSH}" ssh "${SSH_SIN_PREGUNTAS[@]}" "${PANTALLA_HP_SSH}" \
+        sudo -n -l /usr/bin/systemctl start "${U_HP}" < /dev/null > /dev/null || rc=$?
+    if (( rc == 1 )); then
+        die "El sudo de ${PANTALLA_HP_SSH} no permite arrancar ${U_HP} sin contraseña. Si el HP tiene la versión anterior, ejecuta allí: sudo ./scripts/18_pantalla.sh. No se ha tocado nada."
+    elif (( rc != 0 )); then
         die "${PANTALLA_HP_SSH} no responde sin preguntas: revisa 'ssh-add -l' y la regla de sudo del HP. No se ha tocado nada."
     fi
 }
@@ -330,13 +343,16 @@ levantar_pila() {
 
 # 'start' sobre una unidad ya activa no hace nada y devuelve 0: seguiría el
 # Moonlight de una sesión anterior, ya sin conexión. Se para antes, en la misma
-# llamada, y el 'stop' puede fallar sin más: decide el 'start'.
+# llamada, y el 'stop' puede fallar sin más: decide el 'start'. Se para también
+# la sesión de Windows, por si quedó huérfana. Cada 'stop' va aparte: sudo
+# compara la orden entera, y la regla nombra una unidad por orden.
 pedir_hp() {
     log_paso "Unidad del HP"
     if ! timeout -k 2 "${LIMITE_SSH}" ssh "${SSH_SIN_PREGUNTAS[@]}" "${PANTALLA_HP_SSH}" \
-            sudo -n systemctl stop nomad-pantalla.service ';' \
-            sudo -n systemctl start nomad-pantalla.service < /dev/null; then
-        log_error "${PANTALLA_HP_SSH} no ha arrancado nomad-pantalla.service."
+            sudo -n systemctl stop "${U_HP}" ';' \
+            sudo -n systemctl stop "${U_HP_OTRA}" ';' \
+            sudo -n systemctl start "${U_HP}" < /dev/null; then
+        log_error "${PANTALLA_HP_SSH} no ha arrancado ${U_HP}."
         return 1
     fi
 }
@@ -349,8 +365,12 @@ parar_hp() {
     # El tope no es opcional: es tiempo con la interna apagada. Funciona aunque
     # 'detener' ignore SIGTERM, porque el hijo de 'timeout' no hereda ese ignorar
     # (medido). '-k' solo cubre un ssh que no salga con SIGTERM.
+    # Las dos: un 'off' también recoge una sesión de Windows huérfana. El código
+    # es el del último 'stop', y parar una unidad ya parada da 0: el aviso de
+    # abajo cubre sobre todo un HP que no contesta.
     if ! timeout -k 2 "${LIMITE_SSH}" ssh "${SSH_SIN_PREGUNTAS[@]}" "${PANTALLA_HP_SSH}" \
-            sudo -n systemctl stop nomad-pantalla.service < /dev/null; then
+            sudo -n systemctl stop "${U_HP}" ';' \
+            sudo -n systemctl stop "${U_HP_OTRA}" < /dev/null; then
         log_aviso "${PANTALLA_HP_SSH} no ha respondido: su unidad puede seguir en marcha."
     fi
 }
@@ -497,7 +517,7 @@ vincular_con_hp() {
     local pin="$1"
     log_paso "Petición de vínculo en el HP"
     log_info "Te pedirá la contraseña de sudo del HP."
-    if ! ssh -t "${PANTALLA_HP_SSH}" sudo systemctl start "nomad-pantalla-vincular@${pin}.service"; then
+    if ! ssh -t "${PANTALLA_HP_SSH}" sudo systemctl start "nomad-pantalla-vincular@fedora-${pin}.service"; then
         log_error "El HP no ha arrancado la unidad de vínculo."
         return 1
     fi

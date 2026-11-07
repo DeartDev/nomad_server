@@ -1,12 +1,13 @@
 # ===========================================================================
-#  nomad_server — vinculación única con el emisor (Sunshine)
+#  nomad_server — vinculación única con el emisor (Sunshine o Apollo)
 #  Destino  : /etc/systemd/system/nomad-pantalla-vincular@.service
 #  Generado por scripts/18_pantalla.sh
 #  Capítulo : docs/18_pantalla_extendida.md
 #
-#  Plantilla de unidad: lo que va tras la '@' al arrancarla es el PIN que
-#  enseña Sunshine ('systemctl start nomad-pantalla-vincular@1234').
-#  SIN sección [Install], igual que nomad-pantalla.service.
+#  Plantilla de unidad: lo que va tras la '@' es el emisor y el PIN de 4 cifras,
+#  separados por un guion ('systemctl start nomad-pantalla-vincular@windows-1234').
+#  /opt/nomad-pantalla/emisor.sh los separa, valida y traduce el emisor a su IP.
+#  SIN sección [Install], igual que nomad-pantalla@.service.
 #
 #  CÓMO APLICARLA A MANO (equivalente a lo que hace el script)
 #
@@ -22,13 +23,15 @@
 # ===========================================================================
 
 [Unit]
-Description=Vincular la pantalla extendida con el emisor (PIN %i)
+Description=Vincular la pantalla extendida con el emisor (%i)
 Documentation=file:///home/${ADMIN_USUARIO}/nomad_server/docs/18_pantalla_extendida.md
-# Las dos unidades usan tty7 y el mismo usuario. 'Conflicts' no ordena por sí solo,
-# y sin 'After' la parada de una coincidiría con el arranque de la otra: el pkill
-# de su ExecStopPost mataría a la que entra. Vale en los dos sentidos.
-Conflicts=nomad-pantalla.service
-After=nomad-pantalla.service network-online.target tailscaled.service
+# Todas usan tty7 y el mismo usuario. 'Conflicts' no ordena por sí solo, y sin
+# 'After' la parada de una coincidiría con el arranque de la otra: el pkill de su
+# ExecStopPost mataría a la que entra. Vale en los dos sentidos. Se nombran las
+# dos instancias de la sesión: un vínculo con Windows también debe cerrar la de
+# Fedora.
+Conflicts=nomad-pantalla@fedora.service nomad-pantalla@windows.service
+After=nomad-pantalla@fedora.service nomad-pantalla@windows.service network-online.target tailscaled.service
 Wants=network-online.target
 # Sin esto, cada PIN dejaría su instancia cargada: acaba siempre por tiempo.
 CollectMode=inactive-or-failed
@@ -57,7 +60,9 @@ Environment=SDL_AUDIODRIVER=alsa
 Environment=LIBVA_DRIVER_NAME=iHD
 
 ExecStartPre=+/usr/bin/chvt 7
-ExecStart=/usr/bin/cage -- /opt/nomad-pantalla/moonlight/AppRun pair ${PANTALLA_EMISOR_IP} --pin %i
+# Un emisor desconocido o un PIN mal escrito terminan aquí con error, sin
+# arrancar Moonlight. El motivo queda en el journal.
+ExecStart=/usr/bin/cage -- /opt/nomad-pantalla/emisor.sh --vincular %i
 # Lo que PAMName dejó en session-N.scope no está en el cgroup de la unidad y la
 # parada no lo alcanza. Las órdenes de ExecStopPost van una tras otra, así que el
 # panel cambia de consola con 'cage' ya muerto. '-': loginctl falla si no quedaba

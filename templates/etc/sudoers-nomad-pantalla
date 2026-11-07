@@ -4,8 +4,11 @@
 #  Generado por scripts/18_pantalla.sh
 #  Capítulo : docs/18_pantalla_extendida.md
 #
-#  Solo esos dos comandos, sin contraseña: el portátil los lanza por SSH y no
-#  hay nadie para teclearla. Cualquier otro uso de sudo sigue pidiéndola.
+#  Solo esas cuatro órdenes, sin contraseña: arrancar y parar la sesión de cada
+#  emisor, Fedora y Windows. El portátil las lanza por SSH y no hay nadie para
+#  teclearla. Cualquier otro uso de sudo sigue pidiéndola, también la
+#  vinculación. sudo compara la orden entera: 'systemctl stop' con dos unidades
+#  no está permitido, hay que pedirlas una a una.
 #
 #  CÓMO APLICARLA A MANO (equivalente a lo que hace el script)
 #
@@ -16,4 +19,4 @@
 #      sudo install -m 440 /etc/sudoers.d/nomad-pantalla.nuevo /etc/sudoers.d/nomad-pantalla
 #      sudo rm /etc/sudoers.d/nomad-pantalla.nuevo
 # ===========================================================================
-${ADMIN_USUARIO} ALL=(root) NOPASSWD: /usr/bin/systemctl start nomad-pantalla.service, /usr/bin/systemctl stop nomad-pantalla.service
+${ADMIN_USUARIO} ALL=(root) NOPASSWD: /usr/bin/systemctl start nomad-pantalla@fedora.service, /usr/bin/systemctl stop nomad-pantalla@fedora.service, /usr/bin/systemctl start nomad-pantalla@windows.service, /usr/bin/systemctl stop nomad-pantalla@windows.service

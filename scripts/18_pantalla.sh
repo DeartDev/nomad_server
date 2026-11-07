@@ -23,8 +23,9 @@ Prepara el HP como cliente de la pantalla extendida:
   1. Instala cage, Xwayland y los controladores de vídeo y audio
   2. Crea el usuario del sistema que ejecuta el cliente
   3. Descarga Moonlight, verifica su SHA-256 y lo extrae en /opt/nomad-pantalla
-  4. Instala el lanzador, las unidades, los límites del usuario y el permiso
-     de sudo
+  4. Instala el lanzador, el traductor de emisores, las unidades, los límites
+     del usuario y el permiso de sudo, y retira la unidad sin instancia de la
+     versión anterior (nomad-pantalla.service)
   5. Comprueba que no hay gestor de pantalla en el equipo
 
 Opciones:
@@ -34,9 +35,11 @@ Opciones:
 
 LO QUE ESTE SCRIPT NO HACE:
   - No habilita nada al arranque: la pantalla se arranca a demanda con
-    'systemctl start nomad-pantalla.service', nunca con 'enable'.
+    'systemctl start nomad-pantalla@fedora.service' (o @windows), nunca
+    con 'enable'.
   - No vincula Moonlight con el emisor. Es un paso aparte, con un PIN
-    (nomad-pantalla-vincular@.service, capítulo 18).
+    (nomad-pantalla-vincular@<emisor>-<PIN>.service, capítulo 18).
+  - No exige PANTALLA_EMISOR_WINDOWS_IP: sin ella, solo funciona Fedora.
   - No retira libfuse2t64 si ya estaba instalado por una prueba anterior.
     Moonlight se extrae y no lo necesita; quítalo a mano con
     'sudo apt-get remove libfuse2t64'.
@@ -71,8 +74,15 @@ requerir_variables ADMIN_USUARIO PANTALLA_USUARIO PANTALLA_BITRATE \
 [[ -n "${PANTALLA_EMISOR_IP:-}" ]] \
     || die "PANTALLA_EMISOR_IP está vacía. Averigua la IP con 'tailscale ip -4' en el emisor y fíjala: ./scripts/variables.sh --fijar PANTALLA_EMISOR_IP=<ip>"
 
+if [[ -z "${PANTALLA_EMISOR_WINDOWS_IP:-}" ]]; then
+    log_info "PANTALLA_EMISOR_WINDOWS_IP está sin fijar: la sesión de Windows no arrancará. Fedora no se ve afectado."
+fi
+
 DIR_PANTALLA="/opt/nomad-pantalla"
 DIR_MOONLIGHT="${DIR_PANTALLA}/moonlight"
+# La unidad sin instancia de la versión anterior. Con las de ahora, seguiría
+# arrancable a mano contra una IP fija y fuera de la regla de sudo.
+UNIDAD_SIN_INSTANCIA=/etc/systemd/system/nomad-pantalla.service
 URL_MOONLIGHT="https://github.com/moonlight-stream/moonlight-qt/releases/download/v${MOONLIGHT_VERSION}/Moonlight-${MOONLIGHT_VERSION}-x86_64.AppImage"
 
 # --- Paso 1: paquetes --------------------------------------------------------
@@ -162,8 +172,19 @@ log_paso "Lanzador y unidades"
 
 ANTES="$(cambios)"
 instalar_plantilla etc/nomad-pantalla-lanzar.sh /opt/nomad-pantalla/lanzar.sh 755 root:root
-instalar_plantilla systemd/nomad-pantalla.service            /etc/systemd/system/nomad-pantalla.service
+instalar_plantilla etc/nomad-pantalla-emisor.sh /opt/nomad-pantalla/emisor.sh 755 root:root
+instalar_plantilla systemd/nomad-pantalla@.service           /etc/systemd/system/nomad-pantalla@.service
 instalar_plantilla systemd/nomad-pantalla-vincular@.service  /etc/systemd/system/nomad-pantalla-vincular@.service
+
+# Se retira solo si está parada: con una sesión abierta, borrarla dejaría una
+# unidad en marcha sin archivo. Se avisa y se sigue; la próxima ejecución la quita.
+if [[ -e "${UNIDAD_SIN_INSTANCIA}" ]]; then
+    if systemctl is-active --quiet nomad-pantalla.service; then
+        log_aviso "nomad-pantalla.service está en marcha: no se retira. Párala (sudo systemctl stop nomad-pantalla.service) y ejecuta este script otra vez."
+    else
+        ejecutar rm -f "${UNIDAD_SIN_INSTANCIA}"
+    fi
+fi
 
 # Los límites van en la porción del usuario, no en la unidad: PAMName mueve los
 # procesos a session-N.scope, fuera de ella. El nombre lleva su uid, que no está

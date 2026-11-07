@@ -1,8 +1,18 @@
 # ===========================================================================
 #  nomad_server — pantalla extendida en el panel del HP
-#  Destino  : /etc/systemd/system/nomad-pantalla.service
+#  Destino  : /etc/systemd/system/nomad-pantalla@.service
 #  Generado por scripts/18_pantalla.sh
 #  Capítulo : docs/18_pantalla_extendida.md
+#
+#  Plantilla de unidad: lo que va tras la '@' es el emisor, 'fedora' o
+#  'windows' ('systemctl start nomad-pantalla@windows.service'). El lanzador lo
+#  traduce a una IP con /opt/nomad-pantalla/emisor.sh. Sustituye a la antigua
+#  nomad-pantalla.service, que 18_pantalla.sh retira.
+#
+#  El portátil es uno solo, así que dos instancias a la vez no tienen sentido.
+#  No se declaran en conflicto aquí: una plantilla no puede nombrar «la otra»
+#  sin chocar consigo misma. Lo garantiza quien arranca: cada 'pantalla-hp' para
+#  las dos instancias antes de arrancar la suya.
 #
 #  SIN sección [Install], a propósito: la unidad no se puede habilitar por
 #  error. Solo arranca cuando alguien la pide ('systemctl start'), y nunca
@@ -12,17 +22,18 @@
 #
 #      cd ~/nomad_server
 #      source scripts/lib/entorno.sh
-#      nomad_diff systemd/nomad-pantalla.service /etc/systemd/system/nomad-pantalla.service
-#      nomad_plantilla systemd/nomad-pantalla.service \
-#          | sudo tee /etc/systemd/system/nomad-pantalla.service >/dev/null
-#      sudo chmod 644 /etc/systemd/system/nomad-pantalla.service
+#      nomad_diff systemd/nomad-pantalla@.service /etc/systemd/system/nomad-pantalla@.service
+#      nomad_plantilla systemd/nomad-pantalla@.service \
+#          | sudo tee /etc/systemd/system/nomad-pantalla@.service >/dev/null
+#      sudo chmod 644 /etc/systemd/system/nomad-pantalla@.service
+#      sudo rm -f /etc/systemd/system/nomad-pantalla.service
 #
 #  Y después, para que tenga efecto:
 #      sudo systemctl daemon-reload
 # ===========================================================================
 
 [Unit]
-Description=Pantalla extendida en el panel del HP
+Description=Pantalla extendida en el panel del HP (emisor %i)
 Documentation=file:///home/${ADMIN_USUARIO}/nomad_server/docs/18_pantalla_extendida.md
 After=network-online.target tailscaled.service
 Wants=network-online.target
@@ -58,7 +69,7 @@ ExecStartPre=+/usr/bin/chvt 7
 # '-': un control de sonido que falte no impide la imagen.
 ExecStartPre=-/usr/bin/amixer -q -c PCH sset Master 100% unmute
 ExecStartPre=-/usr/bin/amixer -q -c PCH sset Speaker 100% unmute
-ExecStart=/usr/bin/cage -- /opt/nomad-pantalla/lanzar.sh
+ExecStart=/usr/bin/cage -- /opt/nomad-pantalla/lanzar.sh %i
 # Lo que PAMName dejó en session-N.scope no está en el cgroup de la unidad y la
 # parada no lo alcanza. Las órdenes de ExecStopPost van una tras otra, así que el
 # panel cambia de consola con 'cage' ya muerto. '-': loginctl falla si no quedaba

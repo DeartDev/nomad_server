@@ -641,13 +641,17 @@ verificar_pantalla() {
     # Se lanza a demanda: habilitada al arranque no es lo diseñado.
     # La unidad no tiene [Install] a propósito: 'is-enabled' dice 'static' y
     # sale con 0, así que se compara el estado impreso, no el código de salida.
-    local estado_unidad
-    estado_unidad="$(systemctl is-enabled nomad-pantalla.service 2>/dev/null || true)"
-    if [[ "${estado_unidad}" == "enabled" || "${estado_unidad}" == "enabled-runtime" ]]; then
-        fallo "nomad-pantalla.service está habilitado al arranque (${estado_unidad}); debe lanzarse a demanda: sudo systemctl disable nomad-pantalla.service"
-    else
-        log_ok "nomad-pantalla.service no se habilita al arranque."
-    fi
+    # Una plantilla sin [Install] no se puede habilitar, pero una instancia sí
+    # podría estarlo por un enlace hecho a mano: se mira cada una.
+    local estado_unidad instancia
+    for instancia in nomad-pantalla@fedora.service nomad-pantalla@windows.service; do
+        estado_unidad="$(systemctl is-enabled "${instancia}" 2>/dev/null || true)"
+        if [[ "${estado_unidad}" == "enabled" || "${estado_unidad}" == "enabled-runtime" ]]; then
+            fallo "${instancia} está habilitado al arranque (${estado_unidad}); debe lanzarse a demanda: sudo systemctl disable ${instancia}"
+        else
+            log_ok "${instancia} no se habilita al arranque."
+        fi
+    done
 
     # Un gestor de pantalla competiría con 'cage' por la GPU.
     if systemctl cat display-manager.service >/dev/null 2>&1; then
@@ -658,7 +662,7 @@ verificar_pantalla() {
 
     # El sudoers es 440 root: sin privilegios no se puede LEER, y eso es
     # "no puedo mirar", no "está mal".
-    local regla_unica="${ADMIN_USUARIO} ALL=(root) NOPASSWD: /usr/bin/systemctl start nomad-pantalla.service, /usr/bin/systemctl stop nomad-pantalla.service"
+    local regla_unica="${ADMIN_USUARIO} ALL=(root) NOPASSWD: /usr/bin/systemctl start nomad-pantalla@fedora.service, /usr/bin/systemctl stop nomad-pantalla@fedora.service, /usr/bin/systemctl start nomad-pantalla@windows.service, /usr/bin/systemctl stop nomad-pantalla@windows.service"
     if puede_sudo; then
         local contenido reglas
         if ! contenido="$(sudo -n cat /etc/sudoers.d/nomad-pantalla 2>/dev/null)" || [[ -z "${contenido}" ]]; then
@@ -673,9 +677,9 @@ verificar_pantalla() {
             # regla de más también es un fallo, por eso no basta con buscarla.
             reglas="$(grep -vE '^[[:space:]]*(#|$)' <<<"${contenido}" || true)"
             if [[ "${reglas}" == "${regla_unica}" ]]; then
-                log_ok "sudoers con las dos reglas exactas (start y stop)."
+                log_ok "sudoers con las cuatro reglas exactas (start y stop de fedora y windows)."
             else
-                fallo "/etc/sudoers.d/nomad-pantalla no contiene exactamente las reglas esperadas (start y stop de nomad-pantalla.service)."
+                fallo "/etc/sudoers.d/nomad-pantalla no contiene exactamente las reglas esperadas (start y stop de nomad-pantalla@fedora y @windows). Si es de la versión anterior: sudo ./scripts/18_pantalla.sh"
             fi
         fi
     else

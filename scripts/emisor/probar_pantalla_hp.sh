@@ -47,6 +47,7 @@ RAIZ="${NOMAD_RAIZ}"
 V=Virtual-hp-pantalla
 I=eDP-1
 IP_EMISOR=100.64.0.7
+IP_WINDOWS=100.64.0.8
 IP_HP=100.64.0.9
 
 BASE="$(mktemp -d -t pantalla-hp-pruebas.XXXXXX)"
@@ -221,6 +222,12 @@ if [[ " $* " == *" BatchMode=yes "* && ! -e "${CAJA}/clave_en_agente" ]]; then
     echo "hp-prueba: Permission denied (publickey)." >&2
     exit 255
 fi
+# 'rechaza_sudo': ssh entra, pero el sudo del HP no permite la orden. Sale con 1,
+# el código de sudo, no con el 255 de ssh.
+if [[ -e "${CAJA}/rechaza_sudo" && "$*" == *"$(cat "${CAJA}/rechaza_sudo")"* ]]; then
+    echo "sudo: a password is required" >&2
+    exit 1
+fi
 exit 0
 DOBLE
 
@@ -370,6 +377,8 @@ pantallas_intactas() {
     no_hay "--unit=pantalla-restaurar"
 }
 
+SUDOERS_CUATRO="admin ALL=(root) NOPASSWD: /usr/bin/systemctl start nomad-pantalla@fedora.service, /usr/bin/systemctl stop nomad-pantalla@fedora.service, /usr/bin/systemctl start nomad-pantalla@windows.service, /usr/bin/systemctl stop nomad-pantalla@windows.service"
+
 MOSTRAR_V_PRINCIPAL="output.${V}.position.0,0"
 ORDEN_RESTAURAR="kscreen-doctor output.${V}.position.1920,0 output.${I}.enable output.${I}.position.0,0 output.${I}.priority.1"
 
@@ -431,7 +440,7 @@ prueba_orden_completo_del_arranque() {
     rc_es 0
     antes "--unit=pantalla-restaurar" "--unit=pantalla-hp-monitor"
     antes "--unit=pantalla-hp-sunshine" "--unit=pantalla-hp-vigilante"
-    antes "--unit=pantalla-hp-vigilante" "sudo -n systemctl start nomad-pantalla.service"
+    antes "--unit=pantalla-hp-vigilante" "sudo -n systemctl start nomad-pantalla@fedora.service"
     unidad_activa pantalla-hp-vigilante
     unidad_activa pantalla-restaurar.timer
 }
@@ -538,7 +547,7 @@ prueba_clave_se_carga_y_se_prueba_antes_de_tocar_nada() {
     lanzar principal
     rc_es 0
     antes "AddKeysToAgent=yes" "sudo -n -l"
-    antes "sudo -n -l /usr/bin/systemctl start nomad-pantalla.service" "--unit=pantalla-restaurar"
+    antes "sudo -n -l /usr/bin/systemctl start nomad-pantalla@fedora.service" "--unit=pantalla-restaurar"
     local llamada
     llamada="$(sed -n "$(linea "sudo -n -l")p" "${CAJA}/llamadas")"
     [[ "${llamada}" == *BatchMode=yes* ]] || fallar "la prueba previa no va por BatchMode: ${llamada}"
@@ -566,16 +575,46 @@ prueba_arranque_para_la_unidad_del_hp_en_la_misma_llamada() {
     # 'start' sobre una unidad activa no hace nada: seguiría la sesión anterior.
     lanzar principal
     rc_es 0
-    hay "sudo -n systemctl stop nomad-pantalla.service ; sudo -n systemctl start nomad-pantalla.service"
+    hay "sudo -n systemctl stop nomad-pantalla@fedora.service ; sudo -n systemctl stop nomad-pantalla@windows.service ; sudo -n systemctl start nomad-pantalla@fedora.service"
     (( $(veces "sudo -n systemctl") == 1 )) || fallar "'stop' y 'start' no van en una sola llamada"
+}
+
+prueba_arranque_para_la_sesion_huerfana_de_windows() {
+    # El portátil es uno: una sesión de Windows abierta es una que quedó colgada.
+    lanzar principal
+    rc_es 0
+    # Van en la misma llamada a ssh: el orden se mira dentro de esa línea.
+    local llamada
+    llamada="$(sed -n "$(linea "sudo -n systemctl start nomad-pantalla@fedora.service")p" "${CAJA}/llamadas")"
+    [[ "${llamada}" == *"stop nomad-pantalla@windows.service ; sudo -n systemctl start nomad-pantalla@fedora.service"* ]] \
+        || fallar "no para la instancia de Windows antes de arrancar: ${llamada}"
+    no_hay "sudo -n systemctl start nomad-pantalla@windows.service"
+}
+
+prueba_sudoers_antiguo_pide_ejecutar_18_pantalla_en_el_hp() {
+    # El HP con la versión anterior: ssh entra, pero sudo no conoce la instancia.
+    echo "sudo -n -l" > "${CAJA}/rechaza_sudo"
+    lanzar principal
+    rc_no_es_cero
+    dice "18_pantalla.sh"
+    dice "nomad-pantalla@fedora.service"
+    pantallas_intactas
+    no_hay "sudo -n systemctl start"
+}
+
+prueba_off_para_tambien_la_instancia_de_windows() {
+    sesion_montada
+    lanzar off
+    rc_es 0
+    hay "sudo -n systemctl stop nomad-pantalla@fedora.service ; sudo -n systemctl stop nomad-pantalla@windows.service"
 }
 
 prueba_hp_inaccesible_restaura_interna() {
     echo "sudo -n systemctl start nomad-pantalla" > "${CAJA}/falla_ssh"
     lanzar principal
     rc_no_es_cero
-    hay "sudo -n systemctl start nomad-pantalla.service"
-    antes "sudo -n systemctl start nomad-pantalla.service" "${ORDEN_RESTAURAR}"
+    hay "sudo -n systemctl start nomad-pantalla@fedora.service"
+    antes "sudo -n systemctl start nomad-pantalla@fedora.service" "${ORDEN_RESTAURAR}"
     interna_restaurada
     pila_retirada
     unidad_parada pantalla-hp-vigilante
@@ -586,7 +625,7 @@ prueba_ssh_de_arranque_no_pregunta_ni_se_cuelga() {
     lanzar principal
     rc_es 0
     local n
-    n="$(linea "sudo -n systemctl start nomad-pantalla.service")"
+    n="$(linea "sudo -n systemctl start nomad-pantalla@fedora.service")"
     if (( n == 0 )); then fallar "no se pidió arrancar la unidad"; return; fi
     local llamada
     llamada="$(sed -n "${n}p" "${CAJA}/llamadas")"
@@ -707,8 +746,8 @@ prueba_off_para_hp_antes_que_sunshine() {
     sesion_montada
     lanzar off
     rc_es 0
-    hay "sudo -n systemctl stop nomad-pantalla.service"
-    antes "sudo -n systemctl stop nomad-pantalla.service" "stop pantalla-hp-sunshine"
+    hay "sudo -n systemctl stop nomad-pantalla@fedora.service"
+    antes "sudo -n systemctl stop nomad-pantalla@fedora.service" "stop pantalla-hp-sunshine"
     pila_retirada
 }
 
@@ -718,7 +757,7 @@ prueba_off_para_vigilante_primero() {
     lanzar off
     rc_es 0
     antes "stop pantalla-hp-vigilante" "${ORDEN_RESTAURAR}"
-    antes "stop pantalla-hp-vigilante" "sudo -n systemctl stop nomad-pantalla.service"
+    antes "stop pantalla-hp-vigilante" "sudo -n systemctl stop nomad-pantalla@fedora.service"
     unidad_parada pantalla-hp-vigilante
 }
 
@@ -727,7 +766,7 @@ prueba_off_restaura_antes_que_nada_de_lo_demas() {
     sesion_montada
     lanzar off
     rc_es 0
-    antes "${ORDEN_RESTAURAR}" "sudo -n systemctl stop nomad-pantalla.service"
+    antes "${ORDEN_RESTAURAR}" "sudo -n systemctl stop nomad-pantalla@fedora.service"
     antes "${ORDEN_RESTAURAR}" "stop pantalla-hp-sunshine"
     antes "stop pantalla-hp-sunshine" "stop pantalla-hp-monitor"
 }
@@ -1038,7 +1077,7 @@ prueba_vigilante_solo_abre_ssh_para_parar() {
     lanzar --vigilar
     rc_es 0
     (( $(veces "ssh ") == 1 )) || fallar "abrió ssh $(veces "ssh ") veces"
-    hay "sudo -n systemctl stop nomad-pantalla.service"
+    hay "sudo -n systemctl stop nomad-pantalla@fedora.service"
 }
 
 prueba_vigilante_sin_registro_cuenta_como_sin_cliente() {
@@ -1073,12 +1112,12 @@ prueba_vincular_confirma_el_pin() {
     lanzar vincular
     ENTRADA=""
     rc_es 0
-    hay "ssh -t hp-prueba sudo systemctl start nomad-pantalla-vincular@"
+    hay "ssh -t hp-prueba sudo systemctl start nomad-pantalla-vincular@fedora-"
     antes "--unit=pantalla-hp-sunshine" "nomad-pantalla-vincular@"
     antes "nomad-pantalla-vincular@" "https://${IP_EMISOR}:47990/api/pin"
     hay "-X POST"
     local pin
-    pin="$(awk 'match($0, /vincular@[0-9]+/) { print substr($0, RSTART + 9, RLENGTH - 9); exit }' "${CAJA}/llamadas")"
+    pin="$(awk 'match($0, /vincular@fedora-[0-9]+/) { print substr($0, RSTART + 16, RLENGTH - 16); exit }' "${CAJA}/llamadas")"
     [[ "${pin}" =~ ^[0-9]{4}$ ]] || fallar "PIN no válido: '${pin}'"
     hay "\"pin\":\"${pin}\""
     hay '"pairing_id":"ab12"'
@@ -1124,7 +1163,7 @@ prueba_vincular_comprueba_el_hp_antes_de_montar_nada() {
     ENTRADA=""
     rc_es 0
     antes "AddKeysToAgent=yes" "--unit=pantalla-restaurar"
-    antes "sudo -n -l /usr/bin/systemctl start nomad-pantalla.service" "--unit=pantalla-restaurar"
+    antes "sudo -n -l /usr/bin/systemctl start nomad-pantalla@fedora.service" "--unit=pantalla-restaurar"
 }
 
 prueba_vincular_sin_agente_no_toca_pantallas() {
@@ -1213,14 +1252,32 @@ prueba_no_usa_rutas_absolutas_que_salten_los_dobles() {
 # que anota su PID y sus argumentos y hace lo que indique $1. El doble de 'timeout'
 # hace de sondeo: consume un resultado de 'sondeos' por llamada, y 0 si no quedan.
 # El doble de 'sleep' duerme de verdad, poco: el sondeo no debe ir a toda velocidad.
+# emisor.sh se renderiza también, de verdad: el lanzador le pregunta la IP.
+renderizar_hp() {
+    (
+        export PANTALLA_EMISOR_IP="${IP_EMISOR}" PANTALLA_EMISOR_WINDOWS_IP="${IP_WINDOWS-}" \
+               PANTALLA_BITRATE=15000
+        envsubst "$(formato_envsubst)" < "${RAIZ}/templates/etc/$1"
+    ) | sed "s|^MOONLIGHT=.*|MOONLIGHT=${CAJA}/moonlight|; s|^RESOLVER=.*|RESOLVER=${CAJA}/emisor.sh|" > "${CAJA}/$2"
+    chmod +x "${CAJA}/$2"
+}
+
+preparar_emisor() {
+    renderizar_hp nomad-pantalla-emisor.sh emisor.sh
+    cat > "${CAJA}/moonlight" <<DOBLE
+#!/bin/bash
+echo "\$\$" > "${CAJA}/pid_moonlight"
+echo "\$*" > "${CAJA}/args_moonlight"
+${1:-exit 0}
+DOBLE
+    chmod +x "${CAJA}/moonlight"
+}
+
 preparar_lanzador() {
     local d="${CAJA}/dobles_lanzador"
     mkdir -p "${d}"
-    (
-        export PANTALLA_EMISOR_IP="${IP_EMISOR}" PANTALLA_BITRATE=15000
-        envsubst "$(formato_envsubst)" < "${RAIZ}/templates/etc/nomad-pantalla-lanzar.sh"
-    ) | sed "s|^MOONLIGHT=.*|MOONLIGHT=${CAJA}/moonlight|" > "${CAJA}/lanzar.sh"
-    chmod +x "${CAJA}/lanzar.sh"
+    renderizar_hp nomad-pantalla-lanzar.sh lanzar.sh
+    renderizar_hp nomad-pantalla-emisor.sh emisor.sh
 
     cat > "${CAJA}/moonlight" <<DOBLE
 #!/bin/bash
@@ -1250,10 +1307,19 @@ DOBLE
     chmod +x "${d}"/*
 }
 
+# Sin argumentos, el emisor es 'fedora', como en nomad-pantalla@fedora.service.
 ejecutar_lanzador() {
+    local args=("$@")
+    (( $# > 0 )) || args=(fedora)
     RC=0
     env -i "PATH=${CAJA}/dobles_lanzador:${CAJA}/dobles:/usr/bin:/bin" "CAJA=${CAJA}" \
-        /usr/bin/timeout 15 "${CAJA}/lanzar.sh" > "${CAJA}/salida" 2>&1 < /dev/null || RC=$?
+        /usr/bin/timeout 15 "${CAJA}/lanzar.sh" "${args[@]}" > "${CAJA}/salida" 2>&1 < /dev/null || RC=$?
+}
+
+ejecutar_emisor() {
+    RC=0
+    env -i "PATH=/usr/bin:/bin" /usr/bin/timeout 10 "${CAJA}/emisor.sh" "$@" \
+        > "${CAJA}/salida" 2> "${CAJA}/errores" < /dev/null || RC=$?
 }
 
 moonlight_muerto() {
@@ -1271,10 +1337,86 @@ prueba_lanzador_pasa_sus_argumentos_a_moonlight() {
     args="$(cat "${CAJA}/args_moonlight")"
     [[ "${args}" == "stream ${IP_EMISOR} Desktop --1080 --fps 60 --bitrate 15000 "* ]] \
         || fallar "argumentos inesperados: ${args}"
-    [[ "${args}" == *"--absolute-mouse" ]] || fallar "faltan argumentos: ${args}"
-    if grep -nE '\$\{(PANTALLA|MOONLIGHT_V)[A-Z_]*\}' "${CAJA}/lanzar.sh"; then
+    # Sin capturar las teclas del sistema, Moonlight no envía la tecla Win.
+    [[ "${args}" == *"--absolute-mouse --capture-system-keys fullscreen" ]] \
+        || fallar "faltan argumentos: ${args}"
+    if grep -nE '\$\{(PANTALLA|MOONLIGHT_V)[A-Z_]*\}' "${CAJA}/lanzar.sh" "${CAJA}/emisor.sh"; then
         fallar "quedan variables sin sustituir"
     fi
+}
+
+prueba_lanzador_windows_usa_su_ip() {
+    preparar_lanzador 'exit 0'
+    ejecutar_lanzador windows
+    rc_es 0
+    [[ "$(cat "${CAJA}/args_moonlight")" == "stream ${IP_WINDOWS} Desktop "* ]] \
+        || fallar "no conecta con Windows: $(cat "${CAJA}/args_moonlight")"
+}
+
+prueba_lanzador_sin_emisor_no_arranca_moonlight() {
+    preparar_lanzador 'exit 0'
+    ejecutar_lanzador ""
+    rc_no_es_cero
+    [[ ! -e "${CAJA}/args_moonlight" ]] || fallar "arrancó Moonlight: $(cat "${CAJA}/args_moonlight")"
+    dice "fedora"
+}
+
+prueba_lanzador_con_emisor_desconocido_no_arranca_moonlight() {
+    preparar_lanzador 'exit 0'
+    ejecutar_lanzador ubuntu
+    rc_no_es_cero
+    [[ ! -e "${CAJA}/args_moonlight" ]] || fallar "arrancó Moonlight: $(cat "${CAJA}/args_moonlight")"
+    dice "ubuntu"
+}
+
+# ===========================================================================
+#  EL TRADUCTOR DE EMISORES DEL HP
+# ===========================================================================
+
+prueba_emisor_da_la_ip_de_cada_uno() {
+    preparar_emisor
+    ejecutar_emisor fedora
+    rc_es 0
+    [[ "$(cat "${CAJA}/salida")" == "${IP_EMISOR}" ]] || fallar "fedora: '$(cat "${CAJA}/salida")'"
+    ejecutar_emisor windows
+    rc_es 0
+    [[ "$(cat "${CAJA}/salida")" == "${IP_WINDOWS}" ]] || fallar "windows: '$(cat "${CAJA}/salida")'"
+}
+
+prueba_emisor_desconocido_sale_con_1_sin_imprimir_ip() {
+    preparar_emisor
+    ejecutar_emisor otro
+    rc_es 1
+    [[ ! -s "${CAJA}/salida" ]] || fallar "imprimió algo: $(cat "${CAJA}/salida")"
+    grep -qF "otro" "${CAJA}/errores" || fallar "el error no nombra al emisor: $(cat "${CAJA}/errores")"
+}
+
+prueba_emisor_sin_ip_de_windows_sale_con_1() {
+    # La IP de Windows es opcional: sin ella, 'windows' no debe dar una IP vacía.
+    IP_WINDOWS="" preparar_emisor
+    ejecutar_emisor windows
+    rc_es 1
+    [[ ! -s "${CAJA}/salida" ]] || fallar "imprimió algo: $(cat "${CAJA}/salida")"
+    grep -qF "PANTALLA_EMISOR_WINDOWS_IP" "${CAJA}/errores" \
+        || fallar "el error no dice qué variable falta: $(cat "${CAJA}/errores")"
+}
+
+prueba_emisor_vincula_con_el_pin_de_la_instancia() {
+    preparar_emisor
+    ejecutar_emisor --vincular windows-4827
+    rc_es 0
+    [[ "$(cat "${CAJA}/args_moonlight")" == "pair ${IP_WINDOWS} --pin 4827" ]] \
+        || fallar "vínculo inesperado: $(cat "${CAJA}/args_moonlight")"
+}
+
+prueba_emisor_rechaza_vinculos_mal_formados() {
+    local arg
+    for arg in windows-48a7 windows-48 windows 4827 otro-4827 ""; do
+        preparar_emisor
+        ejecutar_emisor --vincular "${arg}"
+        rc_es 1
+        [[ ! -e "${CAJA}/args_moonlight" ]] || fallar "'${arg}' arrancó Moonlight"
+    done
 }
 
 prueba_lanzador_cierra_moonlight_tras_tres_sondeos_fallidos() {
@@ -1326,7 +1468,7 @@ prueba_lanzador_pasa_sigterm_a_moonlight() {
     # Al parar la unidad, 'cage' espera a que el lanzador termine.
     preparar_lanzador 'exec /usr/bin/sleep 30'
     env -i "PATH=${CAJA}/dobles_lanzador:${CAJA}/dobles:/usr/bin:/bin" "CAJA=${CAJA}" \
-        "${CAJA}/lanzar.sh" > "${CAJA}/salida" 2>&1 < /dev/null &
+        "${CAJA}/lanzar.sh" fedora > "${CAJA}/salida" 2>&1 < /dev/null &
     local pid=$! i
     for (( i = 0; i < 300; i++ )); do
         if [[ -s "${CAJA}/pid_moonlight" ]]; then break; fi
@@ -1355,7 +1497,7 @@ prueba_lanzador_sondeo_real_contra_un_puerto_cerrado() {
 #  LAS UNIDADES DEL HP
 # ===========================================================================
 
-UNIDADES=(nomad-pantalla.service nomad-pantalla-vincular@.service)
+UNIDADES=(nomad-pantalla@.service nomad-pantalla-vincular@.service)
 
 # Número de la línea de la plantilla que contiene el texto (0 si ninguna).
 linea_de() { awk -v t="$2" 'index($0, t) { print NR; f = 1; exit } END { if (!f) print 0 }' "$1"; }
@@ -1374,9 +1516,9 @@ prueba_unidades_sin_cambio_de_consola_en_cage() {
 prueba_audio_usa_la_tarjeta_por_nombre() {
     local raiz
     raiz="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-    grep -q -- '-c PCH sset Master' "${raiz}/templates/systemd/nomad-pantalla.service" \
+    grep -q -- '-c PCH sset Master' "${raiz}/templates/systemd/nomad-pantalla@.service" \
         || fallar "la unidad debe ajustar el volumen en la tarjeta PCH"
-    grep -qE -- 'amixer .*-c [0-9]' "${raiz}/templates/systemd/nomad-pantalla.service" \
+    grep -qE -- 'amixer .*-c [0-9]' "${raiz}/templates/systemd/nomad-pantalla@.service" \
         && fallar "un número de tarjeta cambia con los periféricos USB"
     grep -q '^export ALSA_CARD=PCH$' "${raiz}/templates/etc/nomad-pantalla-lanzar.sh" \
         || fallar "el lanzador debe fijar ALSA_CARD=PCH"
@@ -1406,13 +1548,41 @@ prueba_unidades_se_descargan_al_fallar() {
 
 prueba_unidad_de_vinculo_y_de_sesion_no_coinciden() {
     local f="${RAIZ}/templates/systemd/nomad-pantalla-vincular@.service"
-    grep -qx 'Conflicts=nomad-pantalla.service' "${f}" || fallar "falta Conflicts"
+    grep -qx 'Conflicts=nomad-pantalla@fedora.service nomad-pantalla@windows.service' "${f}" \
+        || fallar "falta Conflicts con las dos instancias"
     # Sin orden, el pkill de la que para mataría a la que arranca.
-    grep -qE '^After=.*nomad-pantalla\.service' "${f}" || fallar "falta After"
+    grep -qE '^After=nomad-pantalla@fedora\.service nomad-pantalla@windows\.service ' "${f}" \
+        || fallar "falta After con las dos instancias"
+}
+
+prueba_unidad_pasa_el_emisor_al_lanzador() {
+    local f="${RAIZ}/templates/systemd/nomad-pantalla@.service"
+    grep -qx 'ExecStart=/usr/bin/cage -- /opt/nomad-pantalla/lanzar.sh %i' "${f}" \
+        || fallar "el lanzador no recibe el emisor de la instancia"
+    [[ ! -e "${RAIZ}/templates/systemd/nomad-pantalla.service" ]] \
+        || fallar "sigue la plantilla de la unidad sin instancia"
+}
+
+prueba_unidad_de_vinculo_pasa_por_el_traductor() {
+    # La IP sale de emisor.sh: la unidad no lleva ninguna IP propia.
+    local f="${RAIZ}/templates/systemd/nomad-pantalla-vincular@.service"
+    grep -qx 'ExecStart=/usr/bin/cage -- /opt/nomad-pantalla/emisor.sh --vincular %i' "${f}" \
+        || fallar "la vinculación no pasa por emisor.sh"
+    if grep -n 'PANTALLA_EMISOR' "${f}"; then fallar "la unidad de vínculo lleva una IP"; fi
+}
+
+prueba_sudoers_tiene_exactamente_cuatro_ordenes() {
+    local f="${RAIZ}/templates/etc/sudoers-nomad-pantalla" reglas ordenes esperadas
+    reglas="$(grep -vE '^[[:space:]]*(#|$)' "${f}")"
+    (( $(wc -l <<<"${reglas}") == 1 )) || fallar "más de una línea de reglas"
+    ordenes="$(tr ',' '\n' <<<"${reglas#*NOPASSWD: }" | sed 's/^ *//' | sort)"
+    esperadas="$(printf '/usr/bin/systemctl %s nomad-pantalla@%s.service\n' \
+        start fedora stop fedora start windows stop windows | sort)"
+    [[ "${ordenes}" == "${esperadas}" ]] || fallar "órdenes inesperadas: $(tr '\n' '|' <<<"${ordenes}")"
 }
 
 prueba_unidad_el_sonido_no_impide_la_imagen() {
-    local f="${RAIZ}/templates/systemd/nomad-pantalla.service"
+    local f="${RAIZ}/templates/systemd/nomad-pantalla@.service"
     (( $(grep -c '^ExecStartPre=-/usr/bin/amixer' "${f}") == 2 )) || fallar "amixer sin '-'"
     if grep -n '^ExecStartPre=/usr/bin/amixer' "${f}"; then fallar "queda un amixer sin '-'"; fi
 }
@@ -1454,8 +1624,10 @@ preparar_hp() {
         echo 'MOONLIGHT_SHA256="abc"'
     } > "${CAJA}/repo/config/servidor.env"
     echo "pantalla video render audio" > "${CAJA}/usuario_grupos"
-    echo "admin ALL=(root) NOPASSWD: /usr/bin/systemctl start nomad-pantalla.service, /usr/bin/systemctl stop nomad-pantalla.service" \
-        > "${CAJA}/sudoers"
+    echo "${SUDOERS_CUATRO}" > "${CAJA}/sudoers"
+    # La unidad de la versión anterior, en la caja y no en /etc: 'antigua' la crea.
+    sed -i "s|^UNIDAD_SIN_INSTANCIA=.*|UNIDAD_SIN_INSTANCIA=${CAJA}/nomad-pantalla.service|" \
+        "${CAJA}/repo/scripts/18_pantalla.sh"
 
     cat > "${d}/id" <<'DOBLE'
 #!/bin/bash
@@ -1485,7 +1657,19 @@ DOBLE
     cat > "${d}/systemctl" <<'DOBLE'
 #!/bin/bash
 [[ "$1" != cat ]] || exit 1
-[[ "$1" != is-enabled ]] || echo static
+# Ninguna sesión en marcha, salvo las de 'en_marcha'.
+if [[ "$1" == is-active ]]; then
+    [[ -e "${CAJA}/en_marcha" ]] && grep -qxF -- "${*: -1}" "${CAJA}/en_marcha" && exit 0
+    exit 3
+fi
+# 'habilitadas' lista las unidades que dicen 'enabled'; las demás, 'static'.
+if [[ "$1" == is-enabled ]]; then
+    if [[ -e "${CAJA}/habilitadas" ]] && grep -qxF -- "$2" "${CAJA}/habilitadas"; then
+        echo enabled
+    else
+        echo static
+    fi
+fi
 exit 0
 DOBLE
     printf '#!/bin/bash\nexit 0\n' > "${d}/visudo"
@@ -1576,11 +1760,53 @@ prueba_hp_sin_usuario_avisa_de_los_limites_con_check() {
     dice "user-<uid>.slice.d/50-nomad-pantalla.conf"
 }
 
+prueba_hp_instala_el_traductor_de_emisores() {
+    preparar_hp
+    montar_hp
+    rc_es 0
+    dice "/opt/nomad-pantalla/emisor.sh"
+    dice "/etc/systemd/system/nomad-pantalla@.service"
+}
+
+prueba_hp_retira_la_unidad_sin_instancia_y_recarga() {
+    # La versión anterior dejó nomad-pantalla.service: seguiría arrancable a mano.
+    preparar_hp
+    touch "${CAJA}/nomad-pantalla.service"
+    montar_hp
+    rc_es 0
+    dice "ejecutaría: rm -f ${CAJA}/nomad-pantalla.service"
+    dice "ejecutaría: systemctl daemon-reload"
+}
+
+prueba_hp_no_retira_la_unidad_antigua_en_marcha() {
+    preparar_hp
+    touch "${CAJA}/nomad-pantalla.service"
+    echo nomad-pantalla.service > "${CAJA}/en_marcha"
+    montar_hp
+    rc_es 0
+    no_dice "rm -f"
+    dice "está en marcha: no se retira"
+}
+
+prueba_hp_sin_unidad_antigua_no_retira_nada() {
+    preparar_hp
+    montar_hp
+    rc_es 0
+    no_dice "rm -f"
+}
+
+prueba_hp_ip_de_windows_es_opcional() {
+    preparar_hp
+    montar_hp
+    rc_es 0
+    no_dice "PANTALLA_EMISOR_WINDOWS_IP está vacía"
+}
+
 prueba_verificar_sudoers_exacto_con_comentarios_pasa() {
     preparar_hp
     sed -i '1i # comentario\n' "${CAJA}/sudoers"
     verificar_hp
-    dice "sudoers con las dos reglas exactas"
+    dice "sudoers con las cuatro reglas exactas"
 }
 
 prueba_verificar_sudoers_con_una_regla_de_mas_falla() {
@@ -1589,7 +1815,35 @@ prueba_verificar_sudoers_con_una_regla_de_mas_falla() {
     verificar_hp
     rc_no_es_cero
     dice "no contiene exactamente las reglas esperadas"
-    no_dice "sudoers con las dos reglas exactas"
+    no_dice "sudoers con las cuatro reglas exactas"
+}
+
+prueba_verificar_sudoers_de_la_version_anterior_falla() {
+    preparar_hp
+    echo "admin ALL=(root) NOPASSWD: /usr/bin/systemctl start nomad-pantalla.service, /usr/bin/systemctl stop nomad-pantalla.service" \
+        > "${CAJA}/sudoers"
+    verificar_hp
+    rc_no_es_cero
+    dice "no contiene exactamente las reglas esperadas"
+    dice "18_pantalla.sh"
+}
+
+prueba_verificar_instancia_habilitada_falla() {
+    local instancia
+    for instancia in fedora windows; do
+        preparar_hp
+        echo "nomad-pantalla@${instancia}.service" > "${CAJA}/habilitadas"
+        verificar_hp
+        rc_no_es_cero
+        dice "nomad-pantalla@${instancia}.service está habilitado al arranque"
+    done
+}
+
+prueba_verificar_ninguna_instancia_habilitada_pasa() {
+    preparar_hp
+    verificar_hp
+    dice "nomad-pantalla@fedora.service no se habilita al arranque."
+    dice "nomad-pantalla@windows.service no se habilita al arranque."
 }
 
 prueba_verificar_paquete_que_falta_falla() {

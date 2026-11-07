@@ -6,7 +6,10 @@
 #  Capítulo : docs/18_pantalla_extendida.md
 #
 #  Propósito : arrancar Moonlight a pantalla completa contra el emisor, y cerrarlo
-#              si el emisor desaparece. Lo lanza 'cage' desde nomad-pantalla.service.
+#              si el emisor desaparece. Lo lanza 'cage' desde
+#              nomad-pantalla@<emisor>.service, que le pasa el nombre del emisor.
+#
+#  Uso       : lanzar.sh <emisor>     ('fedora' o 'windows'; lo traduce emisor.sh)
 #
 #  CÓMO APLICARLA A MANO (equivalente a lo que hace el script)
 #
@@ -20,6 +23,8 @@
 #
 #  No lleva 'pair': vincular es un paso aparte (nomad-pantalla-vincular@.service).
 #  Tampoco --performance-overlay: la superposición tapa la imagen.
+#  Sí lleva --capture-system-keys: sin él, Moonlight se queda la tecla Win y no
+#  la envía al emisor (medido en Windows, 2026-11-07).
 #
 #  POR QUÉ NO HACE 'exec' DE MOONLIGHT
 #
@@ -39,7 +44,11 @@ export SDL_AUDIODRIVER=alsa
 export LIBVA_DRIVER_NAME=iHD
 
 MOONLIGHT=/opt/nomad-pantalla/moonlight/AppRun
-EMISOR=${PANTALLA_EMISOR_IP}
+RESOLVER=/opt/nomad-pantalla/emisor.sh
+
+# Un emisor desconocido o sin IP termina aquí, antes de arrancar Moonlight. El
+# motivo lo escribe emisor.sh y queda en el journal de la unidad.
+EMISOR="$("${RESOLVER}" "${1:-}")" || exit 1
 
 PUERTO_SONDEO=47989    # el puerto HTTP de Sunshine
 ESPERA_INICIAL=10      # s: Sunshine puede estar arrancando todavía
@@ -79,7 +88,7 @@ vigilar_emisor() {
     --1080 --fps 60 --bitrate ${PANTALLA_BITRATE} --no-vsync \
     --packet-size 1024 --display-mode fullscreen \
     --video-decoder hardware --video-codec HEVC \
-    --audio-config stereo --absolute-mouse &
+    --audio-config stereo --absolute-mouse --capture-system-keys fullscreen &
 PID_MOONLIGHT=$!
 
 # Al parar la unidad, 'cage' espera a este proceso: la señal debe llegar a Moonlight.
