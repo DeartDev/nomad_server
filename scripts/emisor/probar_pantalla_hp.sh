@@ -1354,7 +1354,7 @@ prueba_unidades_limpian_al_usuario_antes_de_volver_a_tty1() {
     for u in "${UNIDADES[@]}"; do
         f="${RAIZ}/templates/systemd/${u}"
         # shellcheck disable=SC2016  # la plantilla lleva la variable sin expandir
-        pkill="$(linea_de "${f}" 'ExecStopPost=-+/usr/bin/pkill -KILL -u ${PANTALLA_USUARIO}')"
+        pkill="$(linea_de "${f}" 'ExecStopPost=-+/usr/bin/loginctl terminate-user ${PANTALLA_USUARIO}')"
         chvt="$(linea_de "${f}" 'ExecStopPost=+/usr/bin/chvt 1')"
         (( pkill > 0 && chvt > pkill )) || fallar "${u}: pkill (línea ${pkill}) debe ir antes de chvt (línea ${chvt})"
     done
