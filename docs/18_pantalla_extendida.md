@@ -115,7 +115,7 @@ añade `video`, `render` o `audio` si le falta alguno.
 `nomad-pantalla.service` no tiene sección `[Install]`: no se puede habilitar por error. Arranca solo
 cuando el portátil lo pide y nunca vuelve sola tras un reinicio.
 
-**Límites:** `CPUWeight=50` y `MemoryMax=2G`, para que la pantalla no le quite recursos a Docker.
+**Límites:** `MemoryMax=2G` impide que el receptor agote la memoria del servidor. `CPUWeight=50` solo pesa frente a otros usuarios: Docker vive en `system.slice`, así que **no le da prioridad sobre el receptor**. En las pruebas Moonlight usó un 11–12 % de CPU, de modo que hoy no hace falta más.
 Van en la porción del usuario (`user-<uid>.slice`), con un añadido que instala el script, y no en la
 unidad: `PAMName=login` abre una sesión, y eso mueve el cliente a `session-N.scope`, dentro de esa
 porción y fuera de `nomad-pantalla.service`. La unidad conserva las dos líneas porque no estorban,
@@ -443,7 +443,7 @@ El último archivo son los límites de recursos del usuario, y lleva su `uid` en
 
 ```bash
 # [servidor] — comprobación obligatoria: ninguna variable sin sustituir
-sudo grep -nE '\$\{[A-Z][A-Z0-9_]*\}' /opt/nomad-pantalla/lanzar.sh \
+sudo grep -nE '\$\{(PANTALLA|MOONLIGHT_V|ADMIN)[A-Z_]*\}' /opt/nomad-pantalla/lanzar.sh \
     /etc/systemd/system/nomad-pantalla.service || echo "CORRECTO"
 ```
 
@@ -763,6 +763,7 @@ este**.
 | Síntoma | Causa | Solución |
 |---|---|---|
 | Tras `pantalla-hp vincular` exitoso, `journalctl -u nomad-pantalla-vincular@<PIN>` dice `Failed with result 'timeout'` | **No es un error.** `moonlight pair` no termina solo tras vincular: la unidad tiene `RuntimeMaxSec=90`, y es ese límite el que la cierra | Nada. Comprueba que el vínculo funciona con `pantalla-hp extender` |
+| `pantalla-hp vincular` falla justo después de otro intento | La instancia anterior sigue viva hasta 90 s, y al terminar devuelve el panel a `tty1` y mata lo que corra como `pantalla` | Espera 90 segundos entre intentos |
 | El ratón del HP solo alcanza media pantalla | Sunshine arrancó antes que el modo, y calculó el ratón con la geometría antigua | `pantalla-hp off` y abre de nuevo. `pantalla-hp` aplica el modo antes de Sunshine; si lo has hecho a mano, invierte el orden |
 | La pantalla interna queda **negra** al abrir o cerrar | KDE reaplicó una disposición guardada: las dos pantallas coinciden en `0,0` | Espera, la restauración programada actúa en 10 minutos como mucho. A mano: `kscreen-doctor output.Virtual-hp-pantalla.position.1920,0 output.eDP-1.enable output.eDP-1.position.0,0 output.eDP-1.priority.1` |
 | `kscreen-doctor` devuelve 0 pero no cambia nada | La salida que nombra no existe (la virtual murió): no aplica ninguna orden de esa llamada | Repite la llamada **sin** nombrar la virtual. Comprueba el resultado con `kscreen-doctor -o`, nunca con el código de salida |
