@@ -45,7 +45,8 @@ Hay dos modos, y el usuario elige cuál arrancar:
 **Antiobjetivos: esto sería un fracaso aunque la imagen funcione**
 
 - Que abrir o cerrar la pantalla afecte a Docker, SSH, Tailscale o Cloudflare Tunnel.
-- Que una sesión gráfica bloquee los reinicios de seguridad de `unattended-upgrades`.
+- Que el reposo del HP bloquee los reinicios de seguridad de `unattended-upgrades`. Con una sesión
+  abierta se aplazan, igual que con una sesión SSH: `who` muestra a `pantalla` (decisión del usuario).
 - Abrir puertos en el HP o publicar nada hacia internet.
 - Que el kiosco dé acceso al HP: desde `cage` no se llega a una consola ni a la cuenta `compass`.
 - Dejar al usuario sin imagen: ningún fallo puede mantener la pantalla interna apagada sin una
@@ -128,10 +129,10 @@ y script `scripts/18_pantalla.sh`, idempotente y con `--check`. Hace lo siguient
   ella. La unidad conserva las dos líneas, que no estorban pero no limitan a Moonlight. Se comprueba
   en la Tarea 7.
 - **Panel**: cambia a `tty7` al arrancar y vuelve a `tty1` al terminar por cualquier causa. Antes de
-  volver, `ExecStopPost` hace `pkill -KILL` de lo que quede del usuario: la parada no alcanza lo que
+  volver, `ExecStopPost` hace `loginctl terminate-user` de lo que quede del usuario: la parada no alcanza lo que
   está en `session-N.scope`.
 - **Unidad de vínculo**: `Conflicts=` y `After=` con `nomad-pantalla.service`, porque comparten
-  `tty7` y usuario, y el `pkill` de la que para no debe alcanzar a la que arranca.
+  `tty7` y usuario, y el `terminate-user` de la que para no debe alcanzar a la que arranca.
 - **Volumen**: `Master` y `Speaker` al 100 %. Esos controles se suman: al 80 % atenúan unos 25,5 dB.
   Si un control falta, la sesión arranca igual.
 - **Lanzador**: `stream <emisor> Desktop --1080 --fps 60 --bitrate 40000 --no-vsync --packet-size 1024
@@ -268,8 +269,8 @@ seleccionar el cliente solo en el caso de Ubuntu.
 4. Los modos y `off` funcionan sin pedir contraseña, y `off` deja el panel en `tty1`.
 5. Una sesión de **60 minutos** con vídeo y un respaldo de restic en marcha mantiene todos los
    contenedores sanos y sin avisos de Uptime Kuma.
-6. Con el receptor activo, `who` no muestra a `pantalla`, y el reinicio automático sigue pudiendo
-   ocurrir.
+6. Con el receptor cerrado, `who` no muestra a `pantalla` y el reinicio automático puede ocurrir. Con
+   una sesión abierta se aplaza a la noche siguiente.
 7. Una caída de red, de Sunshine o del portátil termina la unidad y devuelve el panel a `tty1`, y el
    portátil restaura la pantalla interna y retira el monitor virtual antes de 90 segundos.
 8. `18_pantalla.sh` informa `Cambios que se aplicarían: 0` en la segunda ejecución,

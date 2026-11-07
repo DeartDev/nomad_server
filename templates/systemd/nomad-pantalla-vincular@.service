@@ -60,7 +60,7 @@ ExecStartPre=+/usr/bin/chvt 7
 ExecStart=/usr/bin/cage -- /opt/nomad-pantalla/moonlight/AppRun pair ${PANTALLA_EMISOR_IP} --pin %i
 # Lo que PAMName dejó en session-N.scope no está en el cgroup de la unidad y la
 # parada no lo alcanza. Las órdenes de ExecStopPost van una tras otra, así que el
-# panel cambia de consola con 'cage' ya muerto. '-': pkill sale con 1 si no quedaba
+# panel cambia de consola con 'cage' ya muerto. '-': loginctl falla si no quedaba
 # nada. '+': como root.
-ExecStopPost=-+/usr/bin/pkill -KILL -u ${PANTALLA_USUARIO}
+ExecStopPost=-+/usr/bin/loginctl terminate-user ${PANTALLA_USUARIO}
 ExecStopPost=+/usr/bin/chvt 1

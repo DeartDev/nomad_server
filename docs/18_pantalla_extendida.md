@@ -123,7 +123,7 @@ pero no son ellas las que limitan a Moonlight. Esto sale de cómo funciona `PAMN
 medición; se comprueba en el servidor.
 
 **Parada:** por la misma razón, parar la unidad no alcanza lo que está en la sesión. `ExecStopPost`
-mata primero todo lo que quede del usuario `pantalla` (`pkill -KILL`) y después devuelve el panel a
+cierra primero la sesión del usuario `pantalla` (`loginctl terminate-user`; `pkill -KILL` dejaba `user@<uid>.service` fallida) y después devuelve el panel a
 `tty1`. Las órdenes de `ExecStopPost` van una tras otra, así que `chvt` no compite con `pkill`, y
 se ejecutan al terminar **por cualquier causa**. Al arrancar, el panel cambia a `tty7`.
 
@@ -134,7 +134,7 @@ sola (`CollectMode=inactive-or-failed`): `systemctl status` no la encontrará, y
 Pedir una sesión es siempre `stop` y `start` en la misma llamada: `start` sobre una unidad activa no
 hace nada, y seguiría el Moonlight de la sesión anterior. La unidad de vínculo y esta usan el mismo
 `tty7` y el mismo usuario, así que se excluyen (`Conflicts=`), y una no arranca hasta que la otra ha
-parado del todo: si no, su `pkill` mataría a la que entra.
+parado del todo: si no, su `loginctl terminate-user` cerraría la que entra.
 
 La unidad pone `Master` y `Speaker` al 100 %. Esos controles se suman: al 80 % atenúan unos 25,5 dB.
 Si uno de ellos falta, la sesión arranca igual: mejor imagen sin sonido que nada.
@@ -206,7 +206,8 @@ como `Ping Timeout`: en los cortes de cable medidos, el primero llegó unos 5 se
 no se depende de ello.
 
 **No mantiene ninguna sesión SSH abierta en el HP**, porque `who` la contaría y bloquearía el
-reinicio automático de `unattended-upgrades`. El receptor tampoco aparece en `who`.
+reinicio automático de `unattended-upgrades`. Con una sesión abierta, `who` sí muestra a `pantalla`
+y el reinicio se aplaza a la noche siguiente, igual que con una sesión SSH.
 
 **El HP se cuida solo.** Si el portátil cae, nadie puede pedir el `stop` por SSH, y Moonlight se
 quedaría en su diálogo de error con el panel ocupado. Por eso `lanzar.sh` no hace `exec` de Moonlight:
