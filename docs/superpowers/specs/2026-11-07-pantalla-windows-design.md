@@ -1,6 +1,7 @@
 # Pantalla extendida en Windows 11 — especificación de diseño
 
-> **Estado: DISEÑO, sin construir.** Escrito en Fedora el 2026-11-07. Se construye desde Windows 11 con
+> **Estado: EN CONSTRUCCIÓN.** Tarea 2 del plan hecha el 2026-11-07: emisor elegido y preguntas del § 5
+> respondidas (resultados en el § 7). Escrito en Fedora el 2026-11-07. Se construye desde Windows 11 con
 > WSL2, en una sesión que no conoce la conversación anterior: este documento y su plan deben bastar.
 > Plan: `docs/superpowers/plans/2026-11-07-pantalla-windows.md`. Antecedentes: el diseño de Fedora
 > (`docs/superpowers/specs/2026-11-05-pantalla-extendida-design.md`) y el capítulo 18.
@@ -110,6 +111,22 @@ Solo cuentan tras un intento real, y su resultado se escribe en este documento:
 4. Si la pantalla de bloqueo y las ventanas de UAC se ven y se controlan desde el HP.
 5. Si WSL2 llega al HP por Tailscale, o hay que usar `ssh.exe` por la MTU.
 
+**Respuestas, tras la prueba real de la Tarea 2 (2026-11-07):**
+
+1. **Sí.** Tras vincular con Windows, `Moonlight.conf` tiene dos anfitriones: `E14` (`100.100.15.46`) y
+   `Nomad` (`100.113.63.57`), este último intacto.
+2. **`DisplaySwitch.exe /external`** («Solo segunda pantalla»): la pantalla interna se apaga y el HP
+   muestra el escritorio. No hicieron falta opciones del emisor ni una segunda aplicación.
+3. **Sigue vivo sin cambiar nada.** Con la tapa cerrada 5 minutos, 36 muestras cada 10 s desde el HP, sin
+   un corte, con imagen fluida. Windows registró la entrada y salida de espera moderna (sucesos 506 y
+   507) en el mismo segundo. La acción de la tapa es la predeterminada, «suspender» (1) con corriente y
+   batería, y no hubo que tocarla: no hay ajuste que restaurar.
+4. **Sí.** La pantalla de bloqueo se ve en el HP y se desbloquea con su teclado; la ventana de UAC se ve
+   y se responde con su ratón. El atajo `Win+L` no llega: Windows no lo acepta desde teclado simulado.
+   Bloquear desde Inicio o con `LockWorkStation` sí funciona.
+5. **WSL2 llega** por Tailscale con `ssh` normal, sin cuelgues ni problemas de MTU. No hace falta
+   `ssh.exe`.
+
 ## 6. Criterios de aceptación
 
 1. `pantalla-hp extender` da un escritorio extendido a 1920×1080, con ventanas que pasan de una pantalla
@@ -126,3 +143,89 @@ Solo cuentan tras un intento real, y su resultado se escribe en este documento:
    `verificar_sistema.sh --seccion pantalla` y `make check`.
 8. **Regresión de Fedora:** tras reiniciar en Fedora, `pantalla-hp extender` y `off` funcionan, con
    sonido, y su vínculo sigue vivo.
+
+## 7. Resultados de la prueba del emisor (Tarea 2)
+
+**Emisor elegido: Apollo 0.4.6** (`Apollo-0.4.6.exe`, SHA-256 `42b2aefa…f5021a`, comprobada con la que
+publica GitHub). Cumple los cuatro criterios del § 4.2, así que no se probó Sunshine:
+
+| Criterio | Resultado |
+|---|---|
+| Pantalla virtual a 1920×1080 que se retira sola | Sí, con los dos ajustes de la aplicación de abajo |
+| Sonido en el HP y silencio en el portátil | Sí |
+| Modo principal | Sí, con `DisplaySwitch.exe /external` |
+| QuickSync con HEVC | Sí: `h264_qsv` y `hevc_qsv`. AV1 no existe en esta gráfica, y no hace falta |
+
+Windows 11 Pro 26H2 (compilación 26300; el registro dice «Windows 10 Pro», un error conocido de ese
+campo), Iris Xe con controlador `32.0.101.7088`, cuenta administradora. Controlador de pantalla virtual
+de Apollo: `SudoMaker Virtual Display Adapter` 1.10.9.289.
+
+### 7.1 Ajustes de Apollo que hacen falta
+
+En `C:\Program Files\Apollo\config`. La Tarea 4 debe fijarlos, no suponerlos:
+
+- `sunshine.conf`: `encoder = quicksync`. Apollo no tiene opción de dirección de escucha: escucha en
+  `0.0.0.0` y solo IPv4, y la protección queda en manos del cortafuegos.
+- `apps.json`, aplicación `Desktop`: `"virtual-display": true` y `"terminate-on-pause": true`.
+  - **Sin `virtual-display`**, Apollo transmite la pantalla física y Windows queda en «Duplicar».
+  - **Sin `terminate-on-pause`**, al parar la sesión la aplicación solo se pausa y la pantalla virtual
+    **sigue siendo la principal, sin que nadie la vea**: el portátil se queda sin barra de tareas. Pasó
+    en la prueba y se recuperó parando la aplicación en la web. Con el ajuste, Windows vuelve a la
+    pantalla interna en unos 3 s, sin intervenir.
+
+### 7.2 Extender: la pantalla virtual debe ser la principal
+
+Apollo captura la pantalla **principal** («If unset, the primary display is captured»). En «Extender» con
+la interna como principal, el HP muestra la interna. Lo que funciona es «Extender» con la virtual como
+principal en 0,0 y la interna a su izquierda, en −1920,0. Así hay dos escritorios y las ventanas pasan
+de uno a otro; la barra de tareas queda en el HP.
+
+Windows recordó esa disposición en la sesión siguiente sin tocar nada, pero `pantalla-hp extender` debe
+aplicarla siempre (§ 4.3). La pantalla virtual fue `\\.\DISPLAY5` en todas las sesiones del día; la
+otra vía, fijar ese nombre en «Display Device Id» de Apollo, no se probó porque el número podría
+cambiar.
+
+### 7.3 Receptor: capturar las teclas del sistema
+
+Sin `--capture-system-keys`, Moonlight no envía la tecla Win. Con
+`--capture-system-keys fullscreen` en `lanzar.sh` funciona. La Tarea 3 debe añadirlo a
+`templates/etc/nomad-pantalla-lanzar.sh`. En Fedora no se había probado la tecla Win, y la regresión
+de la Tarea 6 debe comprobarla.
+
+### 7.4 Cortafuegos de Windows
+
+El instalador crea dos reglas `Apollo`, TCP y UDP, abiertas a todos los puertos, direcciones y perfiles.
+Se desactivaron, sin borrarlas, y se crearon `Nomad Apollo TCP` (47984, 47989, 48010) y `Nomad Apollo UDP`
+(47998-48000), solo desde `100.75.40.17`.
+
+**No bastó:** Tailscale instala `Tailscale-In`, que permite toda entrada por su interfaz, que está en
+perfil Privado. Desde el HP seguía abierto el 47990. Hicieron falta reglas de **bloqueo**, que en
+Windows ganan a las de permitir:
+
+- `Nomad Apollo bloquear web`: TCP 47990 desde todo menos `127.0.0.0/8`.
+- `Nomad Apollo solo HP TCP` y `Nomad Apollo solo HP UDP`: los mismos puertos desde todo menos
+  `100.75.40.17` y `127.0.0.0/8`.
+
+Resultado desde el HP: 47984, 47989 y 48010 abiertos; 47990 cerrado. La web sigue disponible en
+`https://localhost:47990`. No se probó el bloqueo desde otro equipo de la tailnet. `preparar_windows.ps1`
+debe crear estas reglas y avisar si una actualización de Apollo vuelve a activar las suyas.
+
+### 7.5 Observaciones sin causa conocida
+
+- **Volumen bajo en el HP** tras unos minutos de sesión: `Master` de ALSA estaba al 69 % (−20 dB),
+  aunque la unidad lo pone al 100 % al arrancar (`ExecStartPre`, estado 0). El mezclador se modificó a
+  las 16:17:15, con la sesión ya abierta y durante pruebas de teclado. En el HP no hay demonios de
+  teclas (`triggerhappy`, `acpid`). Se restauró con `amixer -c PCH sset Master 100%`; no se confirmó
+  si el sonido volvió al nivel anterior. Vigilarlo en la Tarea 5.
+- Con Windows bloqueado, la combinación `Win+L` tampoco llega; ver § 5, respuesta 4.
+
+### 7.6 Restos de la prueba
+
+- En el HP, `~compass/copias-pantalla-windows/` guarda las copias de `lanzar.sh`, de la unidad de
+  vinculación, de `Moonlight.conf` y el registro de la prueba de tapa. `lanzar.sh` y la unidad se
+  restauraron desde ahí, y `18_pantalla.sh --check` dio `Cambios que se aplicarían: 0`. La carpeta se
+  puede borrar al cerrar la Tarea 3.
+- El vínculo con Windows se queda en `Moonlight.conf`: lo usa la Tarea 3.
+- En Windows, la sesión de Claude usó una copia portátil de Node en `%LOCALAPPDATA%\nomad-tools` para
+  el MCP de Chrome DevTools, porque WSL con red NAT no llega al `localhost` de Windows. No forma parte
+  del proyecto.
