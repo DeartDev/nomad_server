@@ -25,7 +25,7 @@ Lo que **no** hace:
 - No sobrevive a un cambio de red: si se corta el cable, la sesión termina y se vuelve a abrir.
 - No es un monitor físico. En modo extensor el texto se lee, pero sin la nitidez de un panel
   conectado por cable de vídeo.
-- No es fiable por Wi-Fi todavía (§ 3.8 y § 9).
+- Por Wi-Fi funciona con menos bitrate: el texto se ve peor que por cable (§ 3.10).
 
 ---
 
@@ -231,12 +231,19 @@ Lo que sí se garantiza es lo contrario: desde `cage` no se llega a una consola 
 Pero lleva una consecuencia práctica: **no dejes una sesión abierta con el HP a la vista de
 terceros** y no cargues la clave SSH del servidor en un portátil que va a estar en un sitio público.
 
-### 3.10 Wi-Fi: de calidad menor, y sin medir
+### 3.10 Wi-Fi: menos bitrate, y automático
 
-El cable es la ruta recomendada. **El Wi-Fi no está medido.** Una sesión corta a 40 Mbit/s salió
-entrecortada, y el cable volvió a mitad, así que ni siquiera es una prueba limpia. Este capítulo no
-afirma que funcione por Wi-Fi. La reserva de DHCP del router para el portátil (`192.168.1.4`) tampoco
-cubre el Wi-Fi, aunque da igual: la sesión usa la IP de Tailscale.
+El cable es la ruta recomendada, pero el Wi-Fi funciona. Una sesión de más de 5 minutos, con el cable
+fuera todo el tiempo, fue fluida y con buen sonido a unos 11 Mbit/s. Una prueba anterior a 40 Mbit/s
+salió entrecortada, y en ella el cable volvió a mitad, así que no sirve para comparar.
+
+El HP pide siempre `PANTALLA_BITRATE`. Para no tocarlo al cambiar de ruta, `pantalla-hp` mira por dónde
+sale el portátil a la red: si es Wi-Fi, arranca Sunshine con `max_bitrate=15000`, y si es cable, sin
+tope. Se limita en el portátil y no hace falta `sudo`. La ruta se decide al abrir la sesión: si cambias
+de cable a Wi-Fi, la sesión se corta y se vuelve a abrir.
+
+La reserva de DHCP del router para el portátil (`192.168.1.4`) no cubre el Wi-Fi, aunque da igual: la
+sesión usa la IP de Tailscale.
 
 ### 3.11 Lo que se mide y lo que no
 
@@ -250,11 +257,13 @@ Medido en el HP con Moonlight 6.2.0 (el HP All-in-One 22-dd2xxx; panel `eDP-1` d
 | Memoria de Moonlight | 179 MB como máximo |
 | FPS | 27–45 en extensor, 60 en principal, con 60 solicitados. Aceptable para el usuario |
 | Tapa cerrada | Casi 3 minutos sin suspender, con `systemd-inhibit` |
+| Corte de cable en modo principal | Pantalla interna de vuelta a los 62 segundos |
+| Portátil sin red en plena sesión | El HP cierra solo: `tty1` a los 29 segundos |
+| Wi-Fi | Fluido a unos 11 Mbit/s negociados; por cable, 31 Mbit/s |
+| Con sesión abierta | `who` muestra a `pantalla`; el reinicio automático se aplaza |
 
-Todo esto salió de pruebas manuales **antes** de escribir el script. Queda **pendiente de medir en
-el servidor con el script**: la sesión de 60 minutos con un respaldo de restic en marcha, el sonido
-tras un reinicio, y el tiempo real de recuperación ante cortes. Hasta entonces no hay cifras finales
-de esos puntos.
+Las cifras de cortes y de Wi-Fi son del servidor real con `pantalla-hp`; las de CPU y FPS, de las
+pruebas manuales anteriores.
 
 ---
 
@@ -698,9 +707,8 @@ Tras `off`, la interna (`eDP-1`) debe decir `enabled 0,0`, y las demás unidades
 4. `sudo ./scripts/18_pantalla.sh --check` informa de `Cambios que se aplicarían: 0`.
 5. `make check` pasa.
 
-**Pendiente de medir en el servidor real** (no hay cifras finales todavía): sesión de 60 minutos con
-un respaldo de restic y los contenedores sanos, sonido tras reinicio, recuperación en menos de 90
-segundos ante un corte, y el comportamiento por Wi-Fi.
+Tras cambiar de ruta o reiniciar el HP, repite una sesión corta: el sonido debe salir por el HP y
+`pantalla-hp estado` debe mostrar `cliente conectado`.
 
 ---
 
@@ -781,7 +789,8 @@ este**.
 | `El usuario 'pantalla' pertenece al grupo ...` | Alguien lo metió en un grupo con privilegios | `sudo gpasswd -d ${PANTALLA_USUARIO} <grupo>` |
 | `libfuse2t64 está instalado` (aviso) | Resto de una prueba manual | No hace falta. Si quieres quitarlo: `sudo apt-get remove libfuse2t64`. El script **no** lo hace |
 | Hay un `segfault` de Moonlight en el registro al parar | Un cierre por tiempo deja el hilo de audio a medias (Moonlight 6.2.0) | No afecta al servidor. La unidad termina y el panel vuelve a `tty1` |
-| Sesión entrecortada por Wi-Fi | El Wi-Fi no se ha medido y es de calidad menor | Usa el cable. Si insistes, baja `PANTALLA_BITRATE` (15000, un valor sin medir). El valor se escribe en `lanzar.sh`: tras cambiarlo, ejecuta otra vez `sudo ./scripts/18_pantalla.sh` en el HP |
+| Sesión entrecortada por Wi-Fi | Red saturada o señal débil, aun con el tope de 15 Mbit/s | Acércate al router o usa el cable. Para bajar el tope, cambia `BITRATE_WIFI` en `pantalla-hp.sh` |
+| Tras apagar la red del portátil, `Este equipo no tiene la IP` | `nmcli networking off` le quita la dirección a `tailscale0` y Tailscale no la repone | `sudo systemctl restart tailscaled` |
 | Unas veces 60 FPS, otras 27–45 | Aceptado. Hay `Atomic commit failed` en `eDP-1`, unos 6 por minuto, con y sin V-Sync. Causa sin confirmar | Ninguna conocida. `--no-vsync` se mantiene porque fue la última configuración probada |
 | Una **franja inferior** del panel (unos 150–200 px) se pixela cada 2 segundos, incluso con el escritorio quieto | **Causa desconocida**, abierta | Ver más abajo |
 

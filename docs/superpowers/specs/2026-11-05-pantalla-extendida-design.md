@@ -1,7 +1,7 @@
 # Pantalla extendida en nomadservernw — especificación de diseño
 
-> **Estado: DISEÑO, pendiente de aprobación.** Fedora está validado con una prueba manual el
-> 2026-11-05; Windows y Ubuntu no se han probado. Sustituye a la propuesta técnica de
+> **Estado: CONSTRUIDO para Fedora, en validación final.** Aplicado en el HP y probado con
+> `pantalla-hp` en noviembre de 2026; Windows y Ubuntu no se han probado. Sustituye a la propuesta técnica de
 > `docs/new_specs/nomad-server-mw-display-extension-spec.md`, que queda como antecedente.
 >
 > **Convención de este documento:** las variables que todavía no existen en
@@ -30,7 +30,7 @@ Hay dos modos, y el usuario elige cuál arrancar:
 - Arrancar y parar con una sola orden desde el portátil.
 - Emisores por orden: Fedora 44 KDE, Windows 11, Ubuntu 24.04.
 - Conexión por Tailscale, para que el HP use siempre la misma dirección del portátil, venga este por
-  cable o por Wi-Fi. El cable es la ruta recomendada; el Wi-Fi es de calidad menor.
+  cable o por Wi-Fi. El cable es la ruta recomendada; por Wi-Fi el bitrate se limita solo.
 
 **No objetivos**
 
@@ -284,8 +284,8 @@ seleccionar el cliente solo en el caso de Ubuntu.
   escritorio quieto. Sigue con HEVC y H.264 y con `cqp`; `vbr` la redujo. Sunshine no emite fotogramas
   completos periódicos, así que esa explicación queda descartada. Falta revisar la captura y la salida
   al panel.
-- **Wi-Fi sin medir:** entrecortado a 40 Mbit/s, en una sesión corta en la que el cable volvió a mitad.
-  Se valida con 15 Mbit/s y sin tocar el cable antes de cerrar Fedora; `vbr` podría empeorarlo.
+- **Wi-Fi:** fluido a unos 11 Mbit/s con el cable fuera toda la sesión. `pantalla-hp` limita Sunshine a
+  15 Mbit/s (`max_bitrate`) cuando la salida a la red es Wi-Fi, sin tocar el HP.
 - **Corte del cable:** el enlace del ThinkPad cayó 15 segundos a las 21:39 del 2026-11-05 sin causa
   conocida. Si se repite sin tocar el cable, revisar el cable y el puerto del router.
 - **Cierre de Moonlight:** al pararlo por tiempo hubo un `segfault` en su hilo de audio. No afectó al
