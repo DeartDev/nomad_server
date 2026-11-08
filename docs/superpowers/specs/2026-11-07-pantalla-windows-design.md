@@ -1,8 +1,10 @@
 # Pantalla extendida en Windows 11 — especificación de diseño
 
 > **Estado: EN CONSTRUCCIÓN.** Tareas 2 a 5 del plan hechas el 2026-11-07: emisor elegido (§ 7), el HP
-> elige emisor (§ 8) y validación real en Windows con los criterios 1 a 6 cumplidos (§ 9). **Desde la
-> Tarea 3, Fedora no abre sesión** hasta recibir esta rama (regresión de la Tarea 6). Escrito en Fedora el
+> elige emisor (§ 8) y validación real en Windows con los criterios 1 a 6 cumplidos (§ 9). Tarea 6:
+> documentación hecha (capítulos 18, 05 y 16, README; commit `7240bce`). **Falta la regresión de
+> Fedora** (criterio 8), que no abre sesión hasta recibir esta rama: está en el HP, en
+> `~/nomad_server`, rama `pantalla-windows`, y no se ha hecho push. Escrito en Fedora el
 > 2026-11-07. Se construye desde Windows 11 con WSL2, en una sesión que no conoce la conversación
 > anterior: este documento y su plan deben bastar.
 > Plan: `docs/superpowers/plans/2026-11-07-pantalla-windows.md`. Antecedentes: el diseño de Fedora
