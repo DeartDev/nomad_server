@@ -227,8 +227,8 @@ debe crear estas reglas y avisar si una actualización de Apollo vuelve a activa
 
 - En el HP, `~compass/copias-pantalla-windows/` guarda las copias de `lanzar.sh`, de la unidad de
   vinculación, de `Moonlight.conf` y el registro de la prueba de tapa. `lanzar.sh` y la unidad se
-  restauraron desde ahí, y `18_pantalla.sh --check` dio `Cambios que se aplicarían: 0`. La carpeta se
-  puede borrar al cerrar la Tarea 3.
+  restauraron desde ahí, y `18_pantalla.sh --check` dio `Cambios que se aplicarían: 0`. La carpeta,
+  con los registros de las pruebas de corte, se borró el 2026-11-08 con el permiso del usuario.
 - El vínculo con Windows se queda en `Moonlight.conf`: lo usa la Tarea 3.
 - En Windows, la sesión de Claude usó una copia portátil de Node en `%LOCALAPPDATA%\nomad-tools` para
   el MCP de Chrome DevTools, porque WSL con red NAT no llega al `localhost` de Windows. No forma parte
