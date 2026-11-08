@@ -1,7 +1,8 @@
 # 18 — Pantalla extendida
 
-> El panel del HP como segunda pantalla del portátil Fedora, o como su pantalla principal. Un
-> capítulo opcional: ningún otro depende de él, y el servidor sigue siendo un servidor.
+> El panel del HP como segunda pantalla del portátil, desde Fedora o desde Windows 11, o como su
+> pantalla principal. Un capítulo opcional: ningún otro depende de él, y el servidor sigue siendo un
+> servidor.
 
 ---
 
@@ -16,12 +17,15 @@ Al terminar este capítulo, tienes:
   - `pantalla-hp extender`: el HP es un segundo monitor, a la derecha de la pantalla interna.
   - `pantalla-hp principal`: el HP es la pantalla principal y la interna se apaga.
   - `pantalla-hp off`, `pantalla-hp estado` y `pantalla-hp vincular`.
-- **Un vínculo** entre los dos, hecho una sola vez, que sobrevive a los reinicios.
+- **En Windows 11**, en el mismo portátil, Apollo y la misma orden `pantalla-hp`, en PowerShell, con
+  los mismos modos (§ 10).
+- **Un vínculo** con cada sistema, hecho una sola vez, que sobrevive a los reinicios.
 
 Lo que **no** hace:
 
-- No funciona con Windows ni con Ubuntu. Son etapas posteriores, con su propio plan, y este capítulo
-  no las cubre.
+- No funciona con Ubuntu. Es una etapa posterior, con su propio plan, y este capítulo no la cubre.
+- No abre dos sesiones a la vez: el portátil es uno solo, y cada `pantalla-hp` cierra antes la del otro
+  sistema, si quedó alguna.
 - No sobrevive a un cambio de red: si se corta el cable, la sesión termina y se vuelve a abrir.
 - No es un monitor físico. En modo extensor el texto se lee, pero sin la nitidez de un panel
   conectado por cable de vídeo.
@@ -40,7 +44,8 @@ tocar el sistema.
 
 **Necesitas a mano:**
 
-- El portátil Fedora 44 con KDE Plasma, en sesión Wayland, con Tailscale conectado.
+- El portátil Fedora 44 con KDE Plasma, en sesión Wayland, con Tailscale conectado. Para Windows, lo
+  que pide el § 10.2.
 - Una vez, el teclado del HP (o un SSH con sudo): el vínculo pide la contraseña de `sudo` del HP.
 - La contraseña del panel web de Sunshine (usuario `nomad`), que se crea con `sunshine --creds`
   (§ 5 paso 9). No se guarda en el repositorio.
@@ -112,13 +117,19 @@ añade `video`, `render` o `audio` si le falta alguno.
 
 ### 3.5 La unidad no se habilita, y tampoco se lanza al arrancar
 
-`nomad-pantalla.service` no tiene sección `[Install]`: no se puede habilitar por error. Arranca solo
+La unidad tiene una instancia por emisor: `nomad-pantalla@fedora.service` y
+`nomad-pantalla@windows.service`. El nombre de la instancia llega a `lanzar.sh`, que lo traduce a una IP
+con `/opt/nomad-pantalla/emisor.sh`: `fedora` es `PANTALLA_EMISOR_IP` y `windows`,
+`PANTALLA_EMISOR_WINDOWS_IP`. Es el único sitio del HP que guarda esas IP. Un nombre desconocido, o un
+emisor sin IP, termina con un mensaje claro y sin arrancar Moonlight. Ubuntu será una instancia más.
+
+`nomad-pantalla@.service` no tiene sección `[Install]`: no se puede habilitar por error. Arranca solo
 cuando el portátil lo pide y nunca vuelve sola tras un reinicio.
 
 **Límites:** `MemoryMax=2G` impide que el receptor agote la memoria del servidor. `CPUWeight=50` solo pesa frente a otros usuarios: Docker vive en `system.slice`, así que **no le da prioridad sobre el receptor**. En las pruebas Moonlight usó un 11–12 % de CPU, de modo que hoy no hace falta más.
 Van en la porción del usuario (`user-<uid>.slice`), con un añadido que instala el script, y no en la
 unidad: `PAMName=login` abre una sesión, y eso mueve el cliente a `session-N.scope`, dentro de esa
-porción y fuera de `nomad-pantalla.service`. La unidad conserva las dos líneas porque no estorban,
+porción y fuera de la unidad. La unidad conserva las dos líneas porque no estorban,
 pero no son ellas las que limitan a Moonlight. Esto sale de cómo funciona `PAMName`, no de una
 medición; se comprueba en el servidor.
 
@@ -128,13 +139,17 @@ cierra primero la sesión del usuario `pantalla` (`loginctl terminate-user`; `pk
 se ejecutan al terminar **por cualquier causa**. Al arrancar, el panel cambia a `tty7`.
 
 `Restart=no`: si algo falla se mira el registro y se vuelve a pedir. Una unidad fallida se descarga
-sola (`CollectMode=inactive-or-failed`): `systemctl status` no la encontrará, y lo que pasó está en
-`journalctl -u nomad-pantalla.service`.
+sola (`CollectMode=inactive-or-failed`): `systemctl status` no la encontrará. Lo que hizo la unidad
+está en `journalctl -u nomad-pantalla@fedora.service` (o `@windows`); la salida de Moonlight, que corre
+en la sesión del usuario, en `sudo journalctl _UID=$(id -u pantalla)`.
 
 Pedir una sesión es siempre `stop` y `start` en la misma llamada: `start` sobre una unidad activa no
-hace nada, y seguiría el Moonlight de la sesión anterior. La unidad de vínculo y esta usan el mismo
-`tty7` y el mismo usuario, así que se excluyen (`Conflicts=`), y una no arranca hasta que la otra ha
-parado del todo: si no, su `loginctl terminate-user` cerraría la que entra.
+hace nada, y seguiría el Moonlight de la sesión anterior. `pantalla-hp` para **las dos** instancias
+antes de arrancar la suya, porque puede quedar una huérfana del otro sistema: las instancias no se
+excluyen entre sí (`Conflicts=` sobre la propia plantilla pararía también la que entra). La unidad de
+vínculo, `nomad-pantalla-vincular@<emisor>-<PIN>.service`, sí excluye a las dos (`Conflicts=`), porque
+usan el mismo `tty7` y el mismo usuario, y no arranca hasta que han parado del todo: si no, su
+`loginctl terminate-user` cerraría la que entra.
 
 La unidad pone `Master` y `Speaker` al 100 %. Esos controles se suman: al 80 % atenúan unos 25,5 dB.
 Si uno de ellos falta, la sesión arranca igual: mejor imagen sin sonido que nada.
@@ -142,12 +157,16 @@ Si uno de ellos falta, la sesión arranca igual: mejor imagen sin sonido que nad
 ### 3.6 Una excepción limitada a `NOPASSWD`
 
 El portátil arranca y para la unidad por SSH, y no hay nadie que teclee una contraseña. Se concede
-una regla de `sudoers` que permite **exactamente dos órdenes**:
+una regla de `sudoers` que permite **exactamente cuatro órdenes**:
 
 ```
-systemctl start nomad-pantalla.service
-systemctl stop  nomad-pantalla.service
+systemctl start nomad-pantalla@fedora.service
+systemctl stop  nomad-pantalla@fedora.service
+systemctl start nomad-pantalla@windows.service
+systemctl stop  nomad-pantalla@windows.service
 ```
+
+No se usa un comodín (`nomad-pantalla@*`): en `sudoers` casaría también con argumentos añadidos.
 
 Es la única excepción a la decisión del capítulo [05](05_usuarios_y_acceso_ssh.md) § 3.6, y está
 documentada allí. La frase de la clave SSH se sigue pidiendo una vez por sesión del portátil:
@@ -211,10 +230,19 @@ y el reinicio se aplaza a la noche siguiente, igual que con una sesión SSH.
 
 **El HP se cuida solo.** Si el portátil cae, nadie puede pedir el `stop` por SSH, y Moonlight se
 quedaría en su diálogo de error con el panel ocupado. Por eso `lanzar.sh` no hace `exec` de Moonlight:
-lo deja en segundo plano y sondea por TCP el puerto `47989` de Sunshine cada 5 segundos, con un límite
-de 3 segundos por conexión. Tras 3 sondeos fallidos seguidos cierra Moonlight, y la unidad termina y
-devuelve el panel a `tty1`. Empieza 10 segundos después de arrancar, porque Sunshine puede estar
-arrancando todavía. Los sondeos salen del HP, como la sesión: el cortafuegos no cambia.
+lo deja en segundo plano y lo cierra por dos vías. En los dos casos la unidad termina y devuelve el
+panel a `tty1`.
+
+- **Su propia salida.** `lanzar.sh` copia todo lo que escribe Moonlight al journal y lo cierra en cuanto
+  escribe `Connection terminated`. Cubre el corte con el portátil aún accesible, por ejemplo al quitar
+  el cable con el Wi-Fi activo: el emisor sigue respondiendo, pero la sesión ya ha muerto. Sin esto el
+  HP se quedó en el diálogo de error hasta que alguien lo aceptó con su ratón (Windows, 2026-11-07).
+  En las pruebas cerró todos los cortes: cable, corte total y portátil suspendido.
+- **El sondeo**, de respaldo, para un portátil que desaparece sin que Moonlight llegue a enterarse:
+  sondea por TCP el puerto `47989` del emisor cada 5 segundos, con un límite de 3 segundos por conexión.
+  Tras 3 sondeos fallidos seguidos cierra Moonlight. Empieza 10 segundos después de arrancar, porque el
+  emisor puede estar arrancando todavía. Los sondeos salen del HP, como la sesión: el cortafuegos no
+  cambia.
 
 Al reconectar tras un corte hay que relanzar el modo.
 
@@ -231,7 +259,7 @@ Lo que sí se garantiza es lo contrario: desde `cage` no se llega a una consola 
 Pero lleva una consecuencia práctica: **no dejes una sesión abierta con el HP a la vista de
 terceros** y no cargues la clave SSH del servidor en un portátil que va a estar en un sitio público.
 
-### 3.10 Wi-Fi: menos bitrate, y automático
+### 3.10 Wi-Fi: menos bitrate, y automático en Fedora
 
 El cable es la ruta recomendada, pero el Wi-Fi funciona. Una sesión de más de 5 minutos, con el cable
 fuera todo el tiempo, fue fluida y con buen sonido a unos 11 Mbit/s. Una prueba anterior a 40 Mbit/s
@@ -241,6 +269,8 @@ El HP pide siempre `PANTALLA_BITRATE`. Para no tocarlo al cambiar de ruta, `pant
 sale el portátil a la red: si es Wi-Fi, arranca Sunshine con `max_bitrate=15000`, y si es cable, sin
 tope. Se limita en el portátil y no hace falta `sudo`. La ruta se decide al abrir la sesión: si cambias
 de cable a Wi-Fi, la sesión se corta y se vuelve a abrir.
+
+En Windows el tope es fijo, también con cable (§ 10.1).
 
 La reserva de DHCP del router para el portátil (`192.168.1.4`) no cubre el Wi-Fi, aunque da igual: la
 sesión usa la IP de Tailscale.
@@ -264,7 +294,7 @@ Medido en el HP con Moonlight 6.2.0 (el HP All-in-One 22-dd2xxx; panel `eDP-1` d
 | Con sesión abierta | `who` muestra a `pantalla`; el reinicio automático se aplaza |
 
 Las cifras de cortes y de Wi-Fi son del servidor real con `pantalla-hp`; las de CPU y FPS, de las
-pruebas manuales anteriores.
+pruebas manuales anteriores. Todo es de Fedora; lo medido con Windows está en el § 10.5.
 
 ---
 
@@ -278,7 +308,8 @@ Las mismas variables, **en cada máquina**:
 |---|---|---|---|---|
 | `PANTALLA_HABILITADA` | `si`/`no`. Con `no`, el script no toca nada | `no` | sí | sí |
 | `PANTALLA_USUARIO` | Usuario de sistema que ejecuta el receptor | `pantalla` | sí | |
-| `PANTALLA_EMISOR_IP` | IP de Tailscale del portátil | `100.x.y.z` | sí | sí |
+| `PANTALLA_EMISOR_IP` | IP de Tailscale del portátil en Fedora | `100.x.y.z` | sí | sí |
+| `PANTALLA_EMISOR_WINDOWS_IP` | IP de Tailscale del portátil en Windows. Opcional: vacía, solo funciona Fedora | `100.x.y.z` | sí | Windows (§ 10) |
 | `PANTALLA_BITRATE` | Tasa de vídeo, en kbps | `40000` | sí | |
 | `PANTALLA_HP_SSH` | Alias SSH con el que el portátil llega al HP | `nomadservernw` | | sí |
 | `MOONLIGHT_VERSION` | Versión del cliente | `6.2.0` | sí | |
@@ -290,7 +321,8 @@ Las mismas variables, **en cada máquina**:
 
 | Variable | De dónde sale |
 |---|---|
-| `PANTALLA_EMISOR_IP` | `tailscale ip -4` **en el portátil** |
+| `PANTALLA_EMISOR_IP` | `tailscale ip -4` **en el portátil**, en Fedora |
+| `PANTALLA_EMISOR_WINDOWS_IP` | `tailscale ip -4` en Windows: Tailscale da a cada sistema su propia IP |
 | `TS_IP` (en el portátil) | `tailscale ip -4` **en el HP**, o `tailscale status` |
 
 ```bash
@@ -430,7 +462,8 @@ usuario `pantalla` no podría ejecutarla.
 ```bash
 # [servidor] — mira antes qué va a cambiar
 nomad_diff etc/nomad-pantalla-lanzar.sh /opt/nomad-pantalla/lanzar.sh
-nomad_diff systemd/nomad-pantalla.service /etc/systemd/system/nomad-pantalla.service
+nomad_diff etc/nomad-pantalla-emisor.sh /opt/nomad-pantalla/emisor.sh
+nomad_diff systemd/nomad-pantalla@.service /etc/systemd/system/nomad-pantalla@.service
 nomad_diff systemd/nomad-pantalla-vincular@.service /etc/systemd/system/nomad-pantalla-vincular@.service
 nomad_diff systemd/nomad-pantalla-usuario.conf \
     "/etc/systemd/system/user-$(id -u ${PANTALLA_USUARIO}).slice.d/50-nomad-pantalla.conf"
@@ -438,9 +471,11 @@ nomad_diff systemd/nomad-pantalla-usuario.conf \
 
 ```bash
 # [servidor]
-nomad_plantilla etc/nomad-pantalla-lanzar.sh | sudo tee /opt/nomad-pantalla/lanzar.sh >/dev/null
-sudo chmod 755 /opt/nomad-pantalla/lanzar.sh
-for u in nomad-pantalla.service nomad-pantalla-vincular@.service; do
+for f in lanzar emisor; do
+    nomad_plantilla "etc/nomad-pantalla-${f}.sh" | sudo tee "/opt/nomad-pantalla/${f}.sh" >/dev/null
+    sudo chmod 755 "/opt/nomad-pantalla/${f}.sh"
+done
+for u in nomad-pantalla@.service nomad-pantalla-vincular@.service; do
     nomad_plantilla "systemd/${u}" | sudo tee "/etc/systemd/system/${u}" >/dev/null
     sudo chmod 644 "/etc/systemd/system/${u}"
 done
@@ -453,13 +488,24 @@ sudo systemctl daemon-reload
 El último archivo son los límites de recursos del usuario, y lleva su `uid` en la ruta (§ 3.5).
 
 ```bash
-# [servidor] — comprobación obligatoria: ninguna variable sin sustituir
-sudo grep -nE '\$\{(PANTALLA|MOONLIGHT_V|ADMIN)[A-Z_]*\}' /opt/nomad-pantalla/lanzar.sh \
-    /etc/systemd/system/nomad-pantalla.service || echo "CORRECTO"
+# [servidor] — solo si vienes de la versión con una sola unidad, sin instancias
+sudo systemctl stop nomad-pantalla.service
+sudo rm -f /etc/systemd/system/nomad-pantalla.service
+sudo systemctl daemon-reload
 ```
 
-El lanzador, con `PANTALLA_EMISOR_IP` vacía, no da error claro: Moonlight interpreta `Desktop` como
-el anfitrión y no conecta. Por eso el script exige la variable.
+Es lo que hace el script, que no la retira si está en marcha. A la vez hay que poner el `sudoers` nuevo
+(paso 6): el antiguo solo conoce la unidad sin instancia, y `pantalla-hp` lo detecta y lo dice.
+
+```bash
+# [servidor] — comprobación obligatoria: ninguna variable sin sustituir
+sudo grep -nE '\$\{(PANTALLA|MOONLIGHT_V|ADMIN)[A-Z_]*\}' /opt/nomad-pantalla/lanzar.sh \
+    /opt/nomad-pantalla/emisor.sh /etc/systemd/system/nomad-pantalla@.service || echo "CORRECTO"
+```
+
+Las IP se escriben en `emisor.sh` al renderizar: tras cambiarlas en `servidor.env`, repite este paso.
+Con una IP vacía, la instancia de ese emisor termina con `El emisor '...' no tiene IP` en su registro.
+El script exige `PANTALLA_EMISOR_IP`; `PANTALLA_EMISOR_WINDOWS_IP` es opcional, y sin ella solo avisa.
 
 ### Paso 6 — HP: el permiso de `sudo`
 
@@ -560,7 +606,7 @@ Te pide dos contraseñas: la del panel de Sunshine (al principio) y la de `sudo`
 Lo que hace por dentro:
 
 1. Crea el monitor virtual y arranca Sunshine, igual que `extender`.
-2. En el HP lanza `nomad-pantalla-vincular@<PIN>.service`: `moonlight pair` con un PIN aleatorio
+2. En el HP lanza `nomad-pantalla-vincular@fedora-<PIN>.service`: `moonlight pair` con un PIN aleatorio
    bajo `cage`, con un límite de 90 segundos.
 3. Sunshine 2026.914 exige un `pairing_id`: se busca con `GET /api/pin`, comprobando que la
    petición viene de `TS_IP` (el HP), y se confirma con `POST /api/pin`.
@@ -626,7 +672,7 @@ bash scripts/emisor/probar_pantalla_hp.sh
 | 2 — paquetes | `18_pantalla.sh`. Avisa de `libfuse2t64`, no lo retira |
 | 3 — usuario | `18_pantalla.sh`. Si existe, no lo recrea: comprueba sus grupos y añade los que falten |
 | 4 — Moonlight | `18_pantalla.sh`: versión fijada, SHA-256 comprobado, permisos corregidos |
-| 5 — lanzador, unidades y límites | `18_pantalla.sh`, con diff en `--check`; recarga systemd solo si algo cambió |
+| 5 — lanzador, unidades y límites | `18_pantalla.sh`, con diff en `--check`; recarga systemd solo si algo cambió. Retira `nomad-pantalla.service` si existe y está parada |
 | 6 — `sudoers` | `18_pantalla.sh`, validando una copia con `visudo -cf` antes de instalar |
 | 7 — salvaguarda | `18_pantalla.sh`: se niega a seguir si hay `display-manager` |
 | 8 — Sunshine, cortafuegos, enlace | `preparar_fedora.sh`: además comprueba que `vainfo` ofrece HEVC |
@@ -656,9 +702,10 @@ Se omite si `PANTALLA_HABILITADA` no es `si`. Comprueba:
 [OK]    Moonlight instalado en /opt/nomad-pantalla/moonlight, ejecutable por pantalla.
 [OK]    Moonlight 6.2.0, la versión fijada.
 [OK]    pantalla sin grupos sudo, docker, adm ni input.
-[OK]    nomad-pantalla.service no se habilita al arranque.
+[OK]    nomad-pantalla@fedora.service no se habilita al arranque.
+[OK]    nomad-pantalla@windows.service no se habilita al arranque.
 [OK]    No hay gestor de pantalla.
-[OK]    sudoers con las dos reglas exactas (start y stop).
+[OK]    sudoers con las cuatro reglas exactas (start y stop de fedora y windows).
 [OK]    VA-API: decodificación por hardware disponible.
 ```
 
@@ -667,8 +714,8 @@ Sin `sudo` en la sesión, las dos últimas y la de `AppRun` salen como **aviso**
 `pantalla`. Eso es «no puedo mirar», no «está mal». El `sudoers` debe tener esa regla y ninguna más:
 una línea de más también es un fallo.
 
-`nomad-pantalla.service` figura como `static` en `systemctl is-enabled`, porque no tiene `[Install]`:
-es lo esperado.
+Las dos instancias figuran como `static` en `systemctl is-enabled`, porque la plantilla no tiene
+`[Install]`: es lo esperado.
 
 ```bash
 # [servidor] — el receptor no aparece como sesión
@@ -689,7 +736,7 @@ va sin `-s`. Si el panel se queda colgado, la recuperación es por SSH, no desde
 
 ```bash
 # [servidor] — por SSH, si el panel no responde
-sudo systemctl stop nomad-pantalla.service
+sudo systemctl stop nomad-pantalla@fedora.service nomad-pantalla@windows.service
 ```
 
 ```bash
@@ -722,14 +769,14 @@ pantalla-hp off
 
 ```bash
 # [servidor] — desactivar sin borrar nada
-sudo systemctl stop nomad-pantalla.service
+sudo systemctl stop nomad-pantalla@fedora.service nomad-pantalla@windows.service
 ./scripts/variables.sh --fijar PANTALLA_HABILITADA=no
 ```
 
 ```bash
 # [servidor] — quitarlo del todo
-sudo systemctl stop nomad-pantalla.service
-sudo rm -f /etc/systemd/system/nomad-pantalla.service
+sudo systemctl stop nomad-pantalla@fedora.service nomad-pantalla@windows.service
+sudo rm -f /etc/systemd/system/nomad-pantalla@.service
 sudo rm -f /etc/systemd/system/nomad-pantalla-vincular@.service
 sudo rm -f "/etc/systemd/system/user-$(id -u ${PANTALLA_USUARIO}).slice.d/50-nomad-pantalla.conf"
 sudo rmdir --ignore-fail-on-non-empty "/etc/systemd/system/user-$(id -u ${PANTALLA_USUARIO}).slice.d"
@@ -763,7 +810,7 @@ sudo firewall-cmd --reload
 ```
 
 `~/.config/sunshine/sunshine.conf` y el paquete `Sunshine` los quitas tú, si no los quieres para
-otra cosa. El servidor vuelve exactamente al estado anterior; **ningún otro capítulo depende de
+otra cosa. Lo de Windows se deshace como dice el § 10.6. El servidor vuelve exactamente al estado anterior; **ningún otro capítulo depende de
 este**.
 
 ---
@@ -772,7 +819,7 @@ este**.
 
 | Síntoma | Causa | Solución |
 |---|---|---|
-| Tras `pantalla-hp vincular` exitoso, `journalctl -u nomad-pantalla-vincular@<PIN>` dice `Failed with result 'timeout'` | **No es un error.** `moonlight pair` no termina solo tras vincular: la unidad tiene `RuntimeMaxSec=90`, y es ese límite el que la cierra | Nada. Comprueba que el vínculo funciona con `pantalla-hp extender` |
+| Tras `pantalla-hp vincular` exitoso, `journalctl -u nomad-pantalla-vincular@fedora-<PIN>` dice `Failed with result 'timeout'` | **No es un error.** `moonlight pair` no termina solo tras vincular: la unidad tiene `RuntimeMaxSec=90`, y es ese límite el que la cierra | Nada. Comprueba que el vínculo funciona con `pantalla-hp extender` |
 | Conecta pero no se oye nada por el HP | Un audio USB, por ejemplo en un hub con teclado, ocupa `card 0` y el sonido va allí | El lanzador fija `ALSA_CARD=PCH` y la unidad usa `amixer -c PCH`. Comprueba con `cat /proc/asound/cards` que el nombre de la tarjeta sigue siendo `PCH` |
 | `pantalla-hp vincular` falla justo después de otro intento | La instancia anterior sigue viva hasta 90 s, y al terminar devuelve el panel a `tty1` y mata lo que corra como `pantalla` | Espera 90 segundos entre intentos |
 | El ratón del HP solo alcanza media pantalla | Sunshine arrancó antes que el modo, y calculó el ratón con la geometría antigua | `pantalla-hp off` y abre de nuevo. `pantalla-hp` aplica el modo antes de Sunshine; si lo has hecho a mano, invierte el orden |
@@ -783,8 +830,11 @@ este**.
 | `... no responde sin preguntas: revisa 'ssh-add -l' ...` | El `ssh` entra preguntando, pero la clave no quedó en el agente, o falta la regla de `sudo` del HP | `ssh-add -l` y, si sale vacío, comprueba que el portátil tiene un agente en marcha. En el HP, `sudo ./scripts/18_pantalla.sh`. No se ha cambiado nada |
 | `Este equipo no tiene la IP ...: ¿Tailscale está conectado?` | `PANTALLA_EMISOR_IP` no es la del portátil, o Tailscale está caído | `tailscale ip -4` en el portátil y compáralo con la variable |
 | `Ya hay una sesión activa` | Quedó Sunshine o el monitor de una sesión anterior | `pantalla-hp off` |
-| El HP muestra un error y vuelve a `tty1` enseguida | Falló `cage` o Moonlight | `sudo journalctl -u nomad-pantalla.service -n 50` |
-| La sesión del HP termina sola, y el registro dice `Sin respuesta de ...:47989` | El HP perdió de vista a Sunshine durante 3 sondeos seguidos: el portátil cayó, o se cortó la red | Es lo previsto (§ 3.8). Vuelve a abrir la sesión desde el portátil |
+| El HP muestra un error y vuelve a `tty1` enseguida | Falló `cage` o Moonlight | `sudo journalctl -u nomad-pantalla@fedora.service -n 50` y la salida de Moonlight: `sudo journalctl _UID=$(id -u pantalla) -n 50` (con `-u` no sale) |
+| `El sudo de ... no permite arrancar nomad-pantalla@...` o `sudoers ... de la versión anterior` | El HP tiene la regla de `sudo` antigua, de la unidad sin instancia | En el HP: `sudo ./scripts/18_pantalla.sh`. No se ha tocado nada |
+| La sesión termina en cuanto arranca y el registro dice `El emisor '...' no tiene IP` | Falta la IP de ese emisor en `servidor.env` del HP | `./scripts/variables.sh --fijar PANTALLA_EMISOR_WINDOWS_IP=<ip>` (o `PANTALLA_EMISOR_IP`) y `sudo ./scripts/18_pantalla.sh` |
+| La sesión del HP termina sola, y el registro dice `Moonlight ha anunciado el fin de la conexión` | Moonlight perdió la sesión: corte de red, cambio de ruta o portátil suspendido | Es lo previsto (§ 3.8). Vuelve a abrir la sesión desde el portátil |
+| La sesión del HP termina sola, y el registro dice `Sin respuesta de ...:47989` | El HP perdió de vista al emisor durante 3 sondeos seguidos: el portátil cayó, o se cortó la red | Es lo previsto (§ 3.8). Vuelve a abrir la sesión desde el portátil |
 | `18_pantalla.sh`: «PANTALLA_EMISOR_IP está vacía» | El lanzador quedaría sin anfitrión | `./scripts/variables.sh --fijar PANTALLA_EMISOR_IP=<ip>` |
 | `18_pantalla.sh`: «El SHA-256 de Moonlight no coincide» | Descarga corrupta o `MOONLIGHT_SHA256` no es de esa versión | No se instala. Revisa la versión y la huella; no relajes la comprobación |
 | `El usuario 'pantalla' pertenece al grupo ...` | Alguien lo metió en un grupo con privilegios | `sudo gpasswd -d ${PANTALLA_USUARIO} <grupo>` |
@@ -828,9 +878,378 @@ paso es ver la misma sesión con un cliente Moonlight en otro equipo.
 
 ---
 
-## 10. Referencias
+## 10. Windows 11 como emisor
+
+El mismo portátil, arrancado en Windows 11, usa el HP igual que Fedora: el receptor es el mismo, con su
+instancia `nomad-pantalla@windows.service`, y la orden se llama igual. Probado el 2026-11-07 en el
+ThinkPad E14 con Windows 11 Pro 26H2, gráfica Iris Xe, Apollo 0.4.6 y PowerShell 5.1.
+
+```powershell
+pantalla-hp extender     # el HP es un segundo escritorio
+pantalla-hp principal    # el HP es la única pantalla: la interna se apaga
+pantalla-hp estado
+pantalla-hp off          # deja la interna activa y como principal
+pantalla-hp vincular     # una vez
+```
+
+En este capítulo, `# [windows]` es una consola de PowerShell en el portátil. Los bloques que dicen
+**como administrador** necesitan una consola abierta con «Ejecutar como administrador».
+
+### 10.1 Decisiones y por qué
+
+**Apollo, no Sunshine.** Apollo es una variante de Sunshine con pantalla virtual propia (SudoVDA): la
+crea cuando el HP conecta y la retira cuando se va. Es la limpieza que en Fedora hizo falta programar
+(§ 3.7 y § 3.8). Cumplió los cuatro criterios de elección (pantalla virtual a 1920×1080 que se retira
+sola, sonido en el HP y silencio en el portátil, modo principal y HEVC por QuickSync), así que Sunshine
+no se probó.
+
+**Apollo transmite la pantalla principal.** En «Extender» con la interna como principal, el HP mostraría
+la interna. Por eso `extender` deja la pantalla virtual como **principal** en `0,0` y la interna a su
+izquierda, en `−1920,0`: hay dos escritorios, las ventanas pasan de uno a otro, y la barra de tareas
+queda en el HP. `principal` es `DisplaySwitch /external` («Solo segunda pantalla»), y `off`,
+`DisplaySwitch /internal`. Windows, como KDE, recuerda disposiciones antiguas, así que el modo se aplica
+siempre y se comprueba leyendo las pantallas, no el código de salida.
+
+**Los ajustes que Apollo necesita**, y que `preparar_windows.ps1` fija:
+
+| Archivo (en `C:\Program Files\Apollo\config`) | Ajuste | Sin él |
+|---|---|---|
+| `sunshine.conf` | `encoder = quicksync` | Apollo elige solo y puede caer en el codificador por software |
+| `sunshine.conf` | `max_bitrate = 15000` | Por Wi-Fi, a los 40000 kbps que pide el HP, se nota lentitud pasados unos minutos |
+| `apps.json`, aplicación `Desktop` | `"virtual-display": true` | Apollo transmite la pantalla física y Windows queda en «Duplicar» |
+| `apps.json`, aplicación `Desktop` | `"terminate-on-pause": true` | Al parar, la pantalla virtual sigue siendo la principal sin que nadie la vea: el portátil se queda sin barra de tareas |
+
+El tope de bitrate es **fijo, también con cable**. En Fedora solo se pone con Wi-Fi, al arrancar Sunshine
+(§ 3.10), pero Apollo es un servicio, y cambiarlo en cada sesión exigiría administrador. Con el tope, la
+imagen por cable se sigue viendo bien.
+
+**Cortafuegos: hacen falta reglas de bloqueo.** El instalador crea dos reglas `Apollo` abiertas a todo,
+y Tailscale instala `Tailscale-In`, que permite **toda** entrada por su interfaz. Permitir solo al HP no
+basta: desde el HP seguía abierta la web de Apollo (47990). En Windows, una regla de bloqueo gana a una
+de permitir, así que las reglas de `Apollo` se desactivan (sin borrarlas) y se crean cinco:
+
+| Regla | Acción | Puertos | Desde |
+|---|---|---|---|
+| `Nomad Apollo TCP` | Permitir (`sunshine.exe`) | TCP 47984, 47989, 48010 | solo el HP (`TS_IP`) |
+| `Nomad Apollo UDP` | Permitir (`sunshine.exe`) | UDP 47998-48000 | solo el HP |
+| `Nomad Apollo bloquear web` | Bloquear | TCP 47990 | todo menos `127.0.0.0/8` |
+| `Nomad Apollo solo HP TCP` | Bloquear | TCP 47984, 47989, 48010 | todo menos el HP y `127.0.0.0/8` |
+| `Nomad Apollo solo HP UDP` | Bloquear | UDP 47998-48000 | todo menos el HP y `127.0.0.0/8` |
+
+Medido desde el HP: 47984, 47989 y 48010 abiertos, y 47990 cerrado. La web sigue en
+`https://localhost:47990`. No se probó desde otro equipo de la tailnet. Apollo no tiene opción de
+dirección de escucha (escucha en `0.0.0.0`, solo IPv4): la protección es el cortafuegos. Si una
+actualización de Apollo vuelve a activar sus reglas, `preparar_windows.ps1 -Check` lo cuenta como
+cambio.
+
+**Sin vigilante ni restauración programada.** Cuando el HP deja de verse, Apollo da la sesión por
+perdida a los 10 segundos (`Ping Timeout`), retira la pantalla virtual, y Windows vuelve solo a la
+interna. Se comprobó en modo principal con el corte total (cable fuera y modo avión): la interna volvió
+sin hacer nada. `off` pide al HP que pare, espera hasta 20 segundos a que la virtual desaparezca, aplica
+`DisplaySwitch /internal` y comprueba que la interna es la principal.
+
+**La tapa no se toca.** Con la tapa cerrada la sesión sigue: cinco minutos, 36 muestras desde el HP, sin
+cortes, con la acción de tapa predeterminada («suspender»). No hay ajuste de energía que restaurar. En
+modo principal, al cerrar la tapa Windows entra un instante en espera moderna y **se bloquea**: se
+desbloquea desde el HP y sigue funcionando. Al abrirla, la interna sigue apagada hasta el `off`.
+
+**Teclado.** La pantalla de bloqueo y las ventanas de UAC se ven y se controlan desde el HP. La tecla
+Win funciona porque `lanzar.sh` lleva `--capture-system-keys fullscreen`. `Win+L` no llega, porque
+Windows no lo acepta desde un teclado simulado: para bloquear, usa Inicio.
+
+**Salidas fantasma.** El controlador de Apollo deja diez salidas (`DISPLAY5`…`DISPLAY14`) aunque no
+haya sesión. `pantalla-hp` solo cuenta las que tienen monitor: si no, creía que había una sesión.
+
+**SSH de Windows, no de WSL.** La orden usa `ssh.exe`, el cliente OpenSSH de Windows, con su propio
+`%USERPROFILE%\.ssh\config` y el servicio `ssh-agent`. WSL no hace falta para usarla, solo para el
+repositorio si lo tienes ahí. Las órdenes al HP van con `BatchMode` y tiempo límite, como en Fedora. La
+primera de cada sesión puede pedir la frase de la clave, y la deja en el agente (`AddKeysToAgent`).
+
+El riesgo aceptado del § 3.9 es el mismo: quien está frente al HP controla el portátil.
+
+### 10.2 Requisitos
+
+- **En el HP**, el § 5 hecho, y además la IP de Windows en su `servidor.env`. Tailscale da a cada
+  sistema del portátil su propia IP:
+
+  ```powershell
+  # [windows]
+  tailscale ip -4
+  ```
+
+  ```bash
+  # [servidor]
+  ./scripts/variables.sh --fijar PANTALLA_EMISOR_WINDOWS_IP=<ip-de-windows>
+  source scripts/lib/entorno.sh
+  sudo ./scripts/18_pantalla.sh
+  sudo ./scripts/18_pantalla.sh --check     # debe decir: Cambios que se aplicarían: 0
+  ```
+
+- **En Windows:** Tailscale conectado; el Cliente OpenSSH (*Configuración › Sistema › Características
+  opcionales*); la clave del HP en `%USERPROFILE%\.ssh` con un alias en `%USERPROFILE%\.ssh\config`, el
+  mismo que `PANTALLA_HP_SSH`. Comprueba que entra:
+
+  ```powershell
+  # [windows]
+  ssh nomadservernw true; if ($?) { 'CORRECTO' }
+  ```
+
+- **Una copia del repositorio** que Windows pueda leer, con su `config/servidor.env`.
+  `preparar_windows.ps1` lee de él `TS_IP`, `PANTALLA_HP_SSH` y `PANTALLA_EMISOR_WINDOWS_IP`. Puede
+  estar en WSL: Windows la ve en `\\wsl.localhost\<distribución>\home\<usuario>\nomad_server`.
+- La contraseña de `sudo` del HP, una vez, para vincular.
+
+### 10.3 Vía A — con los scripts
+
+Apollo se instala a mano (§ 10.4, pasos W1 y W2): es un instalador que se descarga, se comprueba y se
+ejecuta como administrador, y su usuario web lo creas tú. Después:
+
+```powershell
+# [windows] como administrador — desde la raíz de la copia del repositorio
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\emisor\preparar_windows.ps1 -Check
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\emisor\preparar_windows.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\emisor\preparar_windows.ps1 -Check
+```
+
+La última debe decir `Cambios que se aplicarían: 0`. Es idempotente y no pide elevación por su cuenta:
+en una consola normal hace lo que no necesita administrador (instalar la orden), deja el resto como
+**pendiente** y termina con código 1. Al final comprueba, solo leyendo, que el HP acepta la sesión de
+Windows sin contraseña.
+
+Abre una consola **nueva**, para que tome el `PATH`, y vincula:
+
+```powershell
+# [windows]
+pantalla-hp vincular
+```
+
+| Paso manual (§ 10.4) | Lo hace el script |
+|---|---|
+| W1 — instalar Apollo | **No.** Lo comprueba y para si falta |
+| W2 — usuario de la web | **No.** Es una contraseña tuya |
+| W3 — ajustes de Apollo | `preparar_windows.ps1`, y reinicia `ApolloService` si cambió algo |
+| W4 — cortafuegos | `preparar_windows.ps1`, calculando los rangos a partir de `TS_IP` |
+| W5 — agente de SSH | `preparar_windows.ps1` |
+| W6 — instalar la orden | `preparar_windows.ps1`: copia comparando SHA-256, para que el BOM llegue intacto |
+| W7 — vincular | `pantalla-hp vincular` |
+
+Las pruebas de la orden, con dobles de todo lo que toca el sistema:
+
+```powershell
+# [windows]
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\emisor\probar_pantalla_hp.ps1
+```
+
+### 10.4 La vía manual
+
+**W1 — Instalar Apollo.** Descarga `Apollo-0.4.6.exe` de las *releases* de `ClassicOldSong/Apollo` en
+GitHub y comprueba su huella:
+
+```powershell
+# [windows]
+(Get-FileHash .\Apollo-0.4.6.exe -Algorithm SHA256).Hash
+```
+
+Debe ser `42B2AEFAACB3474511517A56B96EE9F0517F30AC38B5DD2FDA9FD5B478F5021A`. **Si no coincide, no lo
+ejecutes.** Si coincide, instálalo como administrador.
+
+**W2 — El usuario de la web.** Abre `https://localhost:47990`, acepta el certificado propio de Apollo y
+crea el usuario y la contraseña. No se guardan en el repositorio. Comprueba que en *Applications* existe
+`Desktop`.
+
+**W3 — Ajustes de Apollo.**
+
+```powershell
+# [windows] como administrador
+$dir = 'C:\Program Files\Apollo\config'
+Copy-Item "$dir\sunshine.conf" "$dir\sunshine.conf.antes"
+Copy-Item "$dir\apps.json" "$dir\apps.json.antes"
+notepad "$dir\sunshine.conf"
+```
+
+Añade, quitando antes cualquier línea anterior con esos nombres:
+
+```
+encoder = quicksync
+max_bitrate = 15000
+```
+
+```powershell
+# [windows] como administrador — la aplicación Desktop
+notepad "$dir\apps.json"
+```
+
+En el objeto con `"name": "Desktop"`, pon `"virtual-display": true` y `"terminate-on-pause": true`.
+Después:
+
+```powershell
+# [windows] como administrador
+Set-Service ApolloService -StartupType Automatic
+Restart-Service ApolloService
+```
+
+**W4 — Cortafuegos.** Sustituye las direcciones por las de tu HP: `$hp` es `TS_IP`, y los dos rangos
+`$antes` y `$despues` son los vecinos de esa IP, la dirección anterior y la siguiente.
+
+```powershell
+# [windows] como administrador
+$hp = '100.75.40.17'
+$antes = '0.0.0.0-100.75.40.16'
+$despues = '100.75.40.18-126.255.255.255'
+$exe = 'C:\Program Files\Apollo\sunshine.exe'
+$tcp = '47984', '47989', '48010'
+$udp = '47998-48000'
+$noLocal = '0.0.0.0-126.255.255.255', '128.0.0.0-255.255.255.255'
+$noHP = $antes, $despues, '128.0.0.0-255.255.255.255'
+
+Disable-NetFirewallRule -DisplayName 'Apollo'
+New-NetFirewallRule -DisplayName 'Nomad Apollo TCP' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $tcp -RemoteAddress $hp -Program $exe
+New-NetFirewallRule -DisplayName 'Nomad Apollo UDP' -Direction Inbound -Action Allow -Protocol UDP -LocalPort $udp -RemoteAddress $hp -Program $exe
+New-NetFirewallRule -DisplayName 'Nomad Apollo bloquear web' -Direction Inbound -Action Block -Protocol TCP -LocalPort 47990 -RemoteAddress $noLocal
+New-NetFirewallRule -DisplayName 'Nomad Apollo solo HP TCP' -Direction Inbound -Action Block -Protocol TCP -LocalPort $tcp -RemoteAddress $noHP
+New-NetFirewallRule -DisplayName 'Nomad Apollo solo HP UDP' -Direction Inbound -Action Block -Protocol UDP -LocalPort $udp -RemoteAddress $noHP
+```
+
+Los rangos dejan fuera `127.0.0.0/8`, para que la web siga funcionando en `localhost`. Comprueba desde el
+HP que la web no responde:
+
+```bash
+# [servidor]
+timeout 3 bash -c 'exec 3<>/dev/tcp/<ip-de-windows>/47990' && echo "ABIERTO: revisa" || echo "CORRECTO"
+```
+
+**W5 — El agente de SSH.** Viene desactivado en Windows:
+
+```powershell
+# [windows] como administrador
+Set-Service ssh-agent -StartupType Automatic
+Start-Service ssh-agent
+```
+
+**W6 — Instalar la orden.** Desde la raíz de la copia del repositorio, en una consola normal:
+
+```powershell
+# [windows]
+$destino = "$env:LOCALAPPDATA\nomad-pantalla"
+New-Item -ItemType Directory -Force $destino | Out-Null
+Copy-Item .\scripts\emisor\pantalla-hp.ps1 $destino
+Set-Content -Encoding ASCII "$destino\pantalla-hp.conf" @(
+    'HP_SSH="nomadservernw"'          # PANTALLA_HP_SSH
+    'EMISOR_IP="<ip-de-windows>"'     # PANTALLA_EMISOR_WINDOWS_IP
+)
+Set-Content -Encoding ASCII "$destino\pantalla-hp.cmd" @(
+    '@echo off'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0pantalla-hp.ps1" %*'
+    'exit /b %ERRORLEVEL%'
+)
+$ruta = [Environment]::GetEnvironmentVariable('Path', 'User')
+[Environment]::SetEnvironmentVariable('Path', "$ruta;$destino", 'User')
+```
+
+`pantalla-hp.ps1` se copia tal cual: lleva BOM, y sin él PowerShell 5.1 lee mal los acentos. Abre una
+consola nueva.
+
+**W7 — Vincular.** Una vez, y otra si reconstruyes el HP o reinstalas Apollo:
+
+```powershell
+# [windows]
+pantalla-hp vincular
+```
+
+Pide la contraseña de `sudo` del HP, lanza allí `nomad-pantalla-vincular@windows-<PIN>.service` y abre
+`https://localhost:47990/pin`. En la pestaña *PIN Pairing* escribe el PIN que muestra y pulsa *Send*:
+tienes 90 segundos. El HP guarda los dos vínculos en su `Moonlight.conf`, el de Fedora y el de Windows,
+porque las IP son distintas.
+
+**W8 — Sesiones.**
+
+```powershell
+# [windows]
+pantalla-hp extender
+pantalla-hp estado
+pantalla-hp off
+```
+
+### 10.5 Validación y lo medido
+
+```powershell
+# [windows]
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\emisor\preparar_windows.ps1 -Check
+pantalla-hp estado
+```
+
+Esperado: `Cambios que se aplicarían: 0` y, sin sesión, la interna como única pantalla, `activa=True
+principal=True`, y las dos instancias del HP `inactive`.
+
+Medido en el HP real el 2026-11-07:
+
+| Prueba | Resultado |
+|---|---|
+| `extender` | Dos escritorios, ventanas de uno a otro, buen sonido en el HP y silencio en el portátil |
+| `principal` | Interna apagada; con la tapa cerrada no se suspende y los periféricos del HP lo controlan |
+| `off` | Interna activa y principal, sin pantalla virtual; el HP en `tty1` |
+| Quitar el cable con el Wi-Fi activo | Windows recupera la interna en segundos; el HP vuelve a `tty1` solo |
+| Corte total: cable fuera y modo avión | El HP para casi al instante; Windows recupera la interna sin intervenir |
+| Suspender el portátil en plena sesión | El HP vuelve a `tty1` a los ~20 s; al despertar, la interna está bien sin `off` |
+| Wi-Fi | Fluido durante más de 5 minutos con el tope de 15000 kbps |
+| Sesión de 30 minutos con vídeo | 17/17 contenedores sanos en las 29 muestras, sin avisos de Uptime Kuma; CPU libre del HP entre 63 y 82 %; memoria usada estable, entre 2176 y 2235 MB |
+
+### 10.6 Reversión en Windows
+
+```powershell
+# [windows]
+pantalla-hp off
+Remove-Item -Recurse "$env:LOCALAPPDATA\nomad-pantalla"
+```
+
+Quita también esa carpeta del `PATH` del usuario (*Variables de entorno*).
+
+```powershell
+# [windows] como administrador
+'Nomad Apollo TCP', 'Nomad Apollo UDP', 'Nomad Apollo bloquear web',
+'Nomad Apollo solo HP TCP', 'Nomad Apollo solo HP UDP' |
+    ForEach-Object { Remove-NetFirewallRule -DisplayName $_ }
+```
+
+Si vas a dejar Apollo instalado, **no** vuelvas a activar sus reglas `Apollo`: están abiertas a todo.
+Desinstálalo desde *Aplicaciones instaladas* si no lo quieres. `ssh-agent` puede quedarse como está.
+
+```bash
+# [servidor] — el HP olvida a Windows
+./scripts/variables.sh --fijar PANTALLA_EMISOR_WINDOWS_IP=""
+source scripts/lib/entorno.sh
+sudo ./scripts/18_pantalla.sh
+```
+
+El vínculo queda en `Moonlight.conf` del HP, pero sin IP la instancia `windows` no arranca. Fedora no se
+ve afectado.
+
+### 10.7 Errores frecuentes en Windows
+
+| Síntoma | Causa | Solución |
+|---|---|---|
+| `No existe ...\pantalla-hp.conf` | La orden no está instalada | `preparar_windows.ps1` (§ 10.3) o el paso W6 |
+| `pantalla-hp` no se reconoce como orden | La consola se abrió antes de cambiar el `PATH` | Abre una consola nueva |
+| `Este equipo no tiene la IP ...: ¿Tailscale está conectado?` | Tailscale caído, o la IP de Windows cambió | `tailscale ip -4` y corrige `PANTALLA_EMISOR_WINDOWS_IP` en las dos máquinas |
+| `Apollo no está en marcha (servicio ApolloService)` | El servicio está parado | `Start-Service ApolloService` como administrador, o `preparar_windows.ps1` |
+| `Ya hay una sesión activa: la pantalla virtual de Apollo existe` | Quedó la pantalla virtual de una sesión anterior | `pantalla-hp off` |
+| `... no responde sin preguntas: comprueba con 'ssh-add -l'` | La clave no está en el agente de Windows, o `ssh-agent` está parado | `ssh-add -l`; si falla, `preparar_windows.ps1` (W5) y `ssh-add $HOME\.ssh\nomadservernw` |
+| `El sudo de ... no permite arrancar nomad-pantalla@windows.service` | El HP tiene la regla de `sudo` antigua | En el HP: `sudo ./scripts/18_pantalla.sh` |
+| `Apollo no ha creado la pantalla virtual en 30 s` | Falta `virtual-display` en `Desktop`, el HP no está vinculado con Windows, o falta su IP en el HP | `preparar_windows.ps1 -Check`; en el HP, `sudo journalctl _UID=$(id -u pantalla) -n 30` |
+| En el HP se ve lo mismo que en el portátil | Windows está en «Duplicar», o la interna es la principal | `pantalla-hp off` y `pantalla-hp extender`: la orden fija la disposición |
+| Tras parar, el portátil se queda sin barra de tareas | Falta `terminate-on-pause` en `Desktop`: la virtual sigue como principal | Para la aplicación en la web de Apollo, `preparar_windows.ps1` y `pantalla-hp off` |
+| `La pantalla interna no ha vuelto` | Windows no aplicó `DisplaySwitch /internal` | `Win+P` y *Solo pantalla de PC* |
+| Al cerrar la tapa en modo principal, el HP muestra la pantalla de bloqueo | Windows entra un instante en espera moderna | Es lo previsto: desbloquea desde el HP |
+| `Win+L` no bloquea desde el HP | Windows no acepta ese atajo de un teclado simulado | Bloquea desde Inicio |
+| La web de Apollo responde desde otro equipo | Falta una regla de bloqueo, o una actualización reactivó las reglas `Apollo` | `preparar_windows.ps1 -Check` lo cuenta como cambio; aplícalo como administrador |
+| Un script `.ps1` editado muestra acentos rotos o falla al cargar | Se guardó sin BOM | Guárdalo en UTF-8 **con BOM**. `make check` lo comprueba |
+
+---
+
+## 11. Referencias
 
 - [Sunshine](https://docs.lizardbyte.dev/projects/sunshine/) — emisor, `sunshine.conf` y la API del PIN
+- [Apollo](https://github.com/ClassicOldSong/Apollo) — el emisor de Windows, con su pantalla virtual
 - [Moonlight Qt](https://github.com/moonlight-stream/moonlight-qt) — el receptor
 - [cage](https://github.com/cage-kiosk/cage) — el compositor de una sola aplicación
 - [`kscreen-doctor`](https://userbase.kde.org/KScreen) — la disposición de pantallas de KDE
@@ -840,3 +1259,4 @@ paso es ver la misma sesión con un cliente Moonlight en otro equipo.
 - [08 — Tailscale](08_tailscale.md) — la red por la que viaja la sesión
 - [16 — Recuperación ante desastres](16_recuperacion_ante_desastres.md) — revincular tras reconstruir
 - `docs/superpowers/specs/2026-11-05-pantalla-extendida-design.md` — el diseño y sus mediciones
+- `docs/superpowers/specs/2026-11-07-pantalla-windows-design.md` — el diseño de Windows y sus pruebas

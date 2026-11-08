@@ -153,15 +153,15 @@ recuerda durante 15 minutos.
 
 **Una excepción, limitada y aprobada (capítulo [18](18_pantalla_extendida.md)).** Si activas la
 pantalla extendida, `/etc/sudoers.d/nomad-pantalla` permite a `${ADMIN_USUARIO}` ejecutar sin
-contraseña **exactamente** `systemctl start nomad-pantalla.service` y
-`systemctl stop nomad-pantalla.service`, y nada más. El portátil las lanza por SSH y no hay nadie
-para teclearla.
+contraseña **exactamente** `systemctl start` y `systemctl stop` de `nomad-pantalla@fedora.service` y
+de `nomad-pantalla@windows.service`, cuatro órdenes y nada más. El portátil las lanza por SSH, desde
+Fedora o desde Windows, y no hay nadie para teclearla.
 
-Es aceptable porque con esas dos órdenes solo se puede abrir o cerrar una unidad que ejecuta un
+Es aceptable porque con esas cuatro órdenes solo se puede abrir o cerrar una unidad que ejecuta un
 usuario sin privilegios y que no se habilita al arranque: no da shell, ni lectura de archivos, ni
 acceso a otras unidades. Cualquier otro uso de `sudo` sigue pidiendo la contraseña. El script
 valida el archivo con `visudo -cf` antes de instalarlo, y `verificar_sistema.sh --seccion pantalla`
-comprueba que contiene esas dos reglas exactas.
+comprueba que contiene esas cuatro órdenes exactas, sin comodines.
 
 ### 3.7 fail2ban con backend systemd y acción nftables
 

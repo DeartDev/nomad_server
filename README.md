@@ -181,7 +181,7 @@ que no los saltes: el 06 da por hecho lo que hizo el 05.
 | 15 | [Mantenimiento](docs/15_mantenimiento_y_actualizaciones.md) | Una rutina para que el servidor no se pudra con el tiempo |
 | 16 | [Recuperación ante desastres](docs/16_recuperacion_ante_desastres.md) | Volver a estar en pie tras un fallo grave |
 | 17 | [Auditoría automática](docs/17_auditoria_del_servidor.md) | Que las comprobaciones se ejecuten solas y te avisen |
-| 18 | [Pantalla extendida](docs/18_pantalla_extendida.md) | El panel del HP como segunda pantalla (o principal) del portátil Fedora |
+| 18 | [Pantalla extendida](docs/18_pantalla_extendida.md) | El panel del HP como segunda pantalla (o principal) del portátil, desde Fedora o Windows 11 |
 
 ### Anexos transversales
 

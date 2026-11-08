@@ -726,8 +726,9 @@ cd ~/nomad_server
 
 **Solo si usabas la pantalla extendida** (capítulo [18](18_pantalla_extendida.md)): el vínculo entre
 el HP y el portátil vive en el directorio personal del usuario `pantalla`, que **no** está en el
-respaldo. Tras reconstruir el HP hay que vincular de nuevo. Con `PANTALLA_HABILITADA=si` y
-`PANTALLA_EMISOR_IP` fijadas en el `servidor.env` restaurado:
+respaldo. Tras reconstruir el HP hay que vincular de nuevo, una vez por cada sistema del portátil.
+Con `PANTALLA_HABILITADA=si`, `PANTALLA_EMISOR_IP` y, si usas Windows, `PANTALLA_EMISOR_WINDOWS_IP`
+fijadas en el `servidor.env` restaurado:
 
 ```bash
 # [servidor]
@@ -735,7 +736,7 @@ sudo ./scripts/18_pantalla.sh
 ```
 
 ```bash
-# [portátil] — y a continuación, desde el portátil
+# [portátil] — y a continuación, desde el portátil: en Fedora y, si lo usas, en Windows
 pantalla-hp vincular
 ```
 
@@ -949,7 +950,7 @@ sudo ./scripts/14_restic.sh --instalar
 ```
 
 ```bash
-# [servidor] — solo si usas la pantalla extendida; después, 'pantalla-hp vincular' en el portátil
+# [servidor] — solo si usas la pantalla extendida; después, 'pantalla-hp vincular' en Fedora y en Windows
 sudo ./scripts/18_pantalla.sh
 ```
 
