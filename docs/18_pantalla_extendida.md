@@ -843,7 +843,7 @@ este**.
 | Sesión entrecortada por Wi-Fi | Red saturada o señal débil, aun con el tope de 15 Mbit/s | Acércate al router o usa el cable. Para bajar el tope, cambia `BITRATE_WIFI` en `pantalla-hp.sh` |
 | Tras apagar la red del portátil, `Este equipo no tiene la IP` | `nmcli networking off` le quita la dirección a `tailscale0` y Tailscale no la repone | `sudo systemctl restart tailscaled` |
 | Unas veces 60 FPS, otras 27–45 | Aceptado. Hay `Atomic commit failed` en `eDP-1`, unos 6 por minuto, con y sin V-Sync. Causa sin confirmar | Ninguna conocida. `--no-vsync` se mantiene porque fue la última configuración probada |
-| Una **franja inferior** del panel (unos 150–200 px, y otra más fina arriba) se pixela cada 2 segundos | **Causa desconocida**, limitación aceptada | Ver más abajo |
+| Una **franja inferior** del panel (unos 150–200 px, y otra más fina arriba) se estropea cada 2 segundos, con rayas verticales | **Causa sin demostrar**: apunta a la decodificación o al dibujo en el HP. Limitación aceptada | Ver más abajo |
 
 ### La franja inferior: limitación aceptada
 
@@ -866,9 +866,20 @@ estables, y el usuario aceptó dejarla así (2026-11-07). Lo descartado, proband
 - **El ahorro de energía del panel (PSR):** el estado de PSR da `No such device`, señal de que este
   panel no lo usa.
 
-Sin probar: la decodificación por software en el HP, porque un Celeron de 2 núcleos a 1080p60 pondría
-en riesgo el servidor, y la captura de la salida virtual en el portátil. Si se retoma, el siguiente
-paso es ver la misma sesión con un cliente Moonlight en otro equipo.
+**Hallazgo del 2026-11-08: apunta al receptor.** Un vídeo del panel, grabado con Windows como emisor
+mientras se reproducía YouTube, muestra lo mismo que en Fedora. No es un pixelado de compresión: en la
+banda inferior, a la altura de la barra de tareas, aparecen **rayas verticales de colores**, como si una
+fila de píxeles se repitiera hacia abajo, y en algunos fotogramas tapan los iconos. Es el patrón típico
+de un dibujo que lee por debajo del borde válido del fotograma decodificado y repite la última fila
+buena ([Mozilla, error 1766124](https://bugzilla.mozilla.org/show_bug.cgi?id=1766124)).
+
+Con dos sistemas, dos codificadores y la codificación por software, todos con la franja, el emisor
+queda prácticamente descartado. La sospecha pasa a la decodificación por hardware del HP (VA-API en
+la UHD 600) o a cómo Moonlight pasa ese fotograma a la pantalla (EGL sobre Xwayland). Es una hipótesis
+fundada, no una causa demostrada.
+
+Sin probar: la decodificación por software en el HP durante unos segundos y con ajustes ligeros, para
+no ahogar el Celeron de 2 núcleos, y otra vía de dibujo de Qt (`QT_XCB_GL_INTEGRATION`).
 
 ### Otros riesgos abiertos
 
