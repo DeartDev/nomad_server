@@ -115,8 +115,30 @@ if [[ "${modo}" == "local" ]]; then
     (( libre_gb < 5 )) && fallar "Quedan menos de 5 GB en el disco de respaldo."
 fi
 
-restic cat config >/dev/null 2>&1 \
-    || fallar "No se puede abrir el repositorio ${RESTIC_REPOSITORY}"
+# Se reintenta, y cada fallo deja el motivo que da restic. Si el servidor
+# estuvo apagado, 'Persistent=true' del temporizador lanza el respaldo pocos
+# minutos después de arrancar, y la salida a internet puede no estar lista
+# aunque la red local sí: el 2026-11-08 falló así un respaldo remoto, y el
+# motivo se perdió porque el error iba a /dev/null. Con el disco USB los
+# reintentos no estorban: un repositorio sano abre a la primera.
+intentos_repo=4
+pausa_repo="${pausa_repo_prueba:-60}"   # s entre intentos; la prueba la acorta
+
+abrir_repositorio() {
+    local intento salida
+    for (( intento = 1; intento <= intentos_repo; intento++ )); do
+        if salida="$(restic cat config 2>&1 >/dev/null)"; then
+            (( intento > 1 )) && registrar "Repositorio accesible en el intento ${intento}."
+            return 0
+        fi
+        registrar "Intento ${intento}/${intentos_repo}: restic no abre el repositorio: $(tail -n 3 <<<"${salida}" | tr '\n' ' ')"
+        (( intento < intentos_repo )) && sleep "${pausa_repo}"
+    done
+    return 1
+}
+
+abrir_repositorio \
+    || fallar "No se puede abrir el repositorio ${RESTIC_REPOSITORY} tras ${intentos_repo} intentos."
 
 # ===========================================================================
 #  2. Manifiesto del sistema
