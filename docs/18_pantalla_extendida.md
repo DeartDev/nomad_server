@@ -204,6 +204,9 @@ evitan están escritas en la cabecera de `scripts/emisor/pantalla-hp.sh`:
 - **`kscreen-doctor` devuelve 0 aunque no haya hecho nada**: si la salida que nombra no existe, no
   aplica *ninguna* de las órdenes de esa llamada. Su código de salida no vale; el resultado se
   comprueba leyendo `kscreen-doctor -o`.
+- **Sunshine debe escuchar antes de llamar al HP.** Si no consigue su puerto RTSP (48010), sigue vivo
+  sin servidor y solo lo anota en su registro. `pantalla-hp` comprueba con `ss` que escucha; si no,
+  aborta, restaura y muestra la línea `Fatal` de Sunshine.
 - **El modo se aplica antes de arrancar Sunshine.** Al revés, Sunshine calcula el ratón con la
   geometría antigua y este solo alcanza media pantalla.
 - **La interna se mueve en el orden correcto:** la virtual a `1920,0` *antes* de encender la interna,
@@ -575,6 +578,21 @@ sudo firewall-cmd --zone="${zona}" --add-rich-rule='rule port port="15905" proto
 ```
 
 ```bash
+# [portátil] — que Linux no dé los puertos de Sunshine a conexiones salientes
+printf '%s\n' \
+    "# nomad_server (capítulo 18): Linux no da estos puertos a conexiones salientes." \
+    "net.ipv4.ip_local_reserved_ports = 47984-48010" \
+    | sudo tee /etc/sysctl.d/60-nomad-sunshine.conf >/dev/null
+sudo sysctl -q -w net.ipv4.ip_local_reserved_ports=47984-48010
+cat /proc/sys/net/ipv4/ip_local_reserved_ports    # debe decir 47984-48010
+```
+
+Los puertos de Sunshine caen en el rango que Linux reparte a las conexiones salientes (32768-60999).
+Si al arrancar Sunshine una conexión de cualquier programa tiene el 48010, Sunshine no abre su
+servidor RTSP y el HP vuelve a su consola (ocurrió el 2026-11-08). Si ya tenías otros puertos
+reservados, añade este rango a esa lista en lugar de sustituirla.
+
+```bash
 # [portátil] — la orden en el PATH, desde la raíz de tu copia del repositorio
 mkdir -p ~/.local/bin
 ln -sfn "$(pwd)/scripts/emisor/pantalla-hp.sh" ~/.local/bin/pantalla-hp
@@ -851,6 +869,7 @@ este**.
 | Tras apagar la red del portátil, `Este equipo no tiene la IP` | `nmcli networking off` le quita la dirección a `tailscale0` y Tailscale no la repone | `sudo systemctl restart tailscaled` |
 | Unas veces 60 FPS, otras 27–45 | Aceptado. Hay `Atomic commit failed` en `eDP-1`, unos 6 por minuto, con y sin V-Sync. Causa sin confirmar | Ninguna conocida. `--no-vsync` se mantiene porque fue la última configuración probada |
 | El vídeo de Disney+, Prime Video o Netflix se ve **en negro** en el HP, con sonido | Protección anticopia (DRM) del servicio, sobre todo en Edge o en apps de Windows | Usa Chrome sin aceleración por hardware o el navegador de Fedora. Ver más abajo |
+| `pantalla-hp` aborta con «Sunshine no escucha en …:48010» y «Address already in use» | Otro programa tenía el puerto 48010 como puerto de una conexión saliente | Repite la orden. Para que no vuelva, reserva los puertos con `preparar_fedora.sh` (paso 8) |
 | En `principal`, al cerrar la tapa la barra de Plasma y las ventanas desaparecen del HP | KWin aplica su disposición guardada para la tapa cerrada, y era la del extensor | El vigilante la reaplica en 5 segundos como mucho. Si no vuelve, mira el aviso en `journalctl --user -u pantalla-hp-vigilante` |
 | Una **franja inferior** del panel (unos 150–200 px, y otra más fina arriba) se estropea cada 2 segundos, con rayas verticales | **Fallo de hardware del panel del HP**: aparece hasta en la BIOS | Ninguna por software; ver más abajo |
 

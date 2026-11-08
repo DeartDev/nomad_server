@@ -271,6 +271,19 @@ fi
 exit 0
 DOBLE
 
+    # Como Sunshine: escucha en el 48010 mientras su unidad está activa, salvo
+    # que otro programa tenga el puerto ('puerto_ocupado', medido 2026-11-08).
+    cat > "${d}/ss" <<'DOBLE'
+#!/bin/bash
+. "${CAJA}/dobles/_comun"
+registrar ss "$@"
+ip="$(sed -n 's/^PANTALLA_EMISOR_IP="\(.*\)"$/\1/p' "${CAJA}/repo/config/servidor.env")"
+if esta_en pantalla-hp-sunshine "${CAJA}/activas" && [[ ! -e "${CAJA}/puerto_ocupado" ]]; then
+    printf 'LISTEN 0      4096   %s:48010      0.0.0.0:*\n' "${ip}"
+fi
+exit 0
+DOBLE
+
     # Nada de esto debe ejecutarse: solo systemd-run lo lanzaría de verdad.
     local n
     for n in krfb-virtualmonitor sunshine systemd-inhibit; do
@@ -469,6 +482,27 @@ prueba_sunshine_con_inhibidor_y_ruta_fija() {
     hay "systemd-inhibit --what=handle-lid-switch:sleep:idle --who=pantalla-hp"
     hay "--mode=block /usr/bin/sunshine"
     hay "StandardInput=null"
+}
+
+# Si otro programa tiene el puerto RTSP, Sunshine sigue vivo pero sin servidor, y
+# el HP vuelve a su consola sin explicación. Se aborta antes de llamar al HP.
+prueba_sunshine_sin_puerto_aborta_y_restaura() {
+    touch "${CAJA}/puerto_ocupado"
+    log_sunshine "[2026-11-08 13:22:47.115]: Fatal: Couldn't bind RTSP server to port [48010], Address already in use"
+    lanzar extender
+    rc_es 1
+    no_hay "sudo -n systemctl start nomad-pantalla@fedora.service"
+    interna_restaurada
+    dice "48010"
+    dice "Address already in use"
+    dice "preparar_fedora.sh"
+}
+
+prueba_sunshine_escuchando_sigue_al_hp() {
+    lanzar extender
+    rc_es 0
+    hay "sudo -n systemctl start nomad-pantalla@fedora.service"
+    hay "ss -Hltn"
 }
 
 prueba_vigilante_se_lanza_con_el_script() {

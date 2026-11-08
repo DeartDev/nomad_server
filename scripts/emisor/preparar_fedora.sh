@@ -5,7 +5,8 @@
 #  Propósito : preparar el portátil Fedora (KDE) que emite la pantalla extendida
 #              al HP: instalar Sunshine y el controlador de vídeo, escribir la
 #              configuración de Sunshine, cerrar al exterior el puerto del
-#              monitor virtual y enlazar 'pantalla-hp' en el PATH. Después
+#              monitor virtual, reservar los puertos de Sunshine y enlazar
+#              'pantalla-hp' en el PATH. Después
 #              comprueba que la GPU codifica HEVC por hardware.
 #  Uso       : scripts/emisor/preparar_fedora.sh [--check]
 #  Capítulo  : docs/18_pantalla_extendida.md
@@ -51,6 +52,9 @@ REGLA_PUERTO="rule port port=\"${PUERTO_MONITOR}\" protocol=\"tcp\" reject"
 ENLACE="${HOME}/.local/bin/pantalla-hp"
 DESTINO_ENLACE="${NOMAD_RAIZ}/scripts/emisor/pantalla-hp.sh"
 CONF_SUNSHINE="${HOME}/.config/sunshine/sunshine.conf"
+PUERTOS_SUNSHINE="47984-48010"
+SYSCTL_PUERTOS="/etc/sysctl.d/60-nomad-sunshine.conf"
+RESERVADOS="${RESERVADOS:-/proc/sys/net/ipv4/ip_local_reserved_ports}"
 
 # --- Comprobaciones previas --------------------------------------------------
 
@@ -127,6 +131,40 @@ regla_cortafuegos() {
     fi
 }
 
+# --- Puertos de Sunshine -------------------------------------------------------
+
+# Sus puertos caen dentro del rango que Linux reparte a las conexiones salientes
+# (32768-60999). Si una conexión de cualquier programa tiene el 48010 cuando
+# arranca, Sunshine no abre su servidor RTSP y el HP vuelve a su consola (medido
+# el 2026-11-08). Reservados, Linux no los da a nadie; quien los pide por número,
+# como Sunshine, los sigue obteniendo.
+reservar_puertos() {
+    log_paso "Puertos reservados para Sunshine"
+    local deseado actual
+    deseado="$(printf '%s\n' \
+        "# nomad_server (capítulo 18): Linux no da estos puertos a conexiones salientes." \
+        "net.ipv4.ip_local_reserved_ports = ${PUERTOS_SUNSHINE}")"
+    if [[ -f "${SYSCTL_PUERTOS}" && "$(cat "${SYSCTL_PUERTOS}")" == "${deseado}" ]]; then
+        log_sinca "${SYSCTL_PUERTOS} ya está actualizado."
+    else
+        local tmp
+        tmp="$(mktemp)"
+        printf '%s\n' "${deseado}" > "${tmp}"
+        ejecutar sudo install -m 644 -o root -g root "${tmp}" "${SYSCTL_PUERTOS}"
+        rm -f "${tmp}"
+    fi
+
+    # Lo que rige ahora. Otra reserva ajena no se pisa: se avisa.
+    actual="$(cat "${RESERVADOS}" 2>/dev/null || true)"
+    if [[ "${actual}" == "${PUERTOS_SUNSHINE}" ]]; then
+        log_sinca "Puertos ${PUERTOS_SUNSHINE} ya reservados."
+    elif [[ -z "${actual}" ]]; then
+        ejecutar sudo sysctl -q -w "net.ipv4.ip_local_reserved_ports=${PUERTOS_SUNSHINE}"
+    else
+        log_aviso "Ya hay otros puertos reservados (${actual}): añade ${PUERTOS_SUNSHINE} a mano."
+    fi
+}
+
 # --- Enlace ------------------------------------------------------------------
 
 enlazar_pantalla_hp() {
@@ -175,6 +213,7 @@ comprobar_sistema
 instalar_sunshine
 escribir_conf_sunshine
 regla_cortafuegos
+reservar_puertos
 enlazar_pantalla_hp
 comprobar_vainfo
 

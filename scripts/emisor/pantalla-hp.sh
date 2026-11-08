@@ -79,6 +79,8 @@ PLAZO_SIN_CLIENTE=60         # s: sin cliente tras haberlo tenido
 CADENCIA_REARME=60           # s: cada cuánto se aplaza la restauración con cliente
 PLAZO_SALIDA=30              # s: lo que puede tardar en aparecer la salida virtual
 PLAZO_DISPOSICION=5          # s: lo que puede tardar KWin en aplicar la disposición
+PLAZO_SUNSHINE=20            # s: lo que puede tardar Sunshine en escuchar
+PUERTO_RTSP=48010            # el que pide Moonlight para abrir la sesión
 PLAZO_VINCULO=60             # s: lo que puede tardar la petición de Moonlight
 PAUSA_TRAS_VINCULO=10        # s: Moonlight sigue el intercambio tras aceptar el PIN
 LIMITE_PARADA_SUNSHINE=15    # s: tras esto, SIGKILL. Tarda varios en salir
@@ -148,6 +150,12 @@ disposicion_aplicada() {
 }
 
 unidad_activa() { systemctl --user is-active --quiet "$1" >/dev/null 2>&1; }
+
+# Sunshine sigue vivo aunque no consiga su puerto RTSP: solo deja un 'Fatal' en
+# su registro. Hay que mirar si escucha de verdad.
+sunshine_escucha() {
+    ss -Hltn 2>/dev/null | awk -v d="${PANTALLA_EMISOR_IP}:${PUERTO_RTSP}" '$4 == d { f = 1 } END { exit !f }'
+}
 
 # Sunshine solo no basta: un monitor huérfano también impide crear otro.
 sesion_activa() { unidad_activa "${U_SUNSHINE}" || unidad_activa "${U_MONITOR}"; }
@@ -341,6 +349,18 @@ levantar_pila() {
 
     log_paso "Sunshine"
     arrancar_sunshine || { log_error "No se pudo arrancar Sunshine."; return 1; }
+
+    # Sus puertos caen en el rango que Linux reparte a las conexiones salientes:
+    # una de cualquier programa puede tener el 48010 justo al arrancar (medido
+    # el 2026-11-08). Sin esto, el HP conecta, no encuentra sesión y vuelve a su
+    # consola sin decir nada.
+    if ! esperar "${PLAZO_SUNSHINE}" sunshine_escucha; then
+        local fatal
+        fatal="$(grep -m1 -o 'Fatal: .*' "${REGISTRO_SUNSHINE}" 2>/dev/null || true)"
+        log_error "Sunshine no escucha en ${PANTALLA_EMISOR_IP}:${PUERTO_RTSP}.${fatal:+ Su registro dice: ${fatal}}"
+        log_info "Si el puerto estaba ocupado, repite la orden. Para evitarlo, reserva los puertos de Sunshine con scripts/emisor/preparar_fedora.sh (capítulo 18)."
+        return 1
+    fi
 }
 
 # 'start' sobre una unidad ya activa no hace nada y devuelve 0: seguiría el
