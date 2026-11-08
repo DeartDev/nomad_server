@@ -32,6 +32,10 @@ $script:UHpOtra = 'nomad-pantalla@fedora.service'
 $script:Directorio = Join-Path $env:LOCALAPPDATA 'nomad-pantalla'
 $script:ArchivoConf = Join-Path $script:Directorio 'pantalla-hp.conf'
 $script:UrlPin = 'https://localhost:47990/pin'
+# Los TCP que pide Moonlight. Apollo puede estar en marcha sin haberlos abierto,
+# si otro programa o una reserva de Windows los tenía al arrancar: en este
+# portátil el rango efímero TCP va de 1024 a 65535 y los incluye (2026-11-08).
+$script:PuertosApollo = 47984, 47989, 48010
 
 $script:PlazoVirtual = 30     # s: lo que puede tardar Apollo en crear la pantalla virtual
 $script:PlazoRetirada = 20    # s: Apollo deja de ver al HP a los 10 s ('Ping Timeout')
@@ -222,6 +226,12 @@ function Test-Apollo {
     return ($null -ne $s -and $s.Status -eq 'Running')
 }
 
+function Get-PuertosSinEscuchar {
+    $escuchan = @(Get-NetTCPConnection -State Listen -LocalPort $script:PuertosApollo -ErrorAction SilentlyContinue |
+        ForEach-Object { [int]$_.LocalPort })
+    return @($script:PuertosApollo | Where-Object { $escuchan -notcontains $_ })
+}
+
 function Wait-Segundos { param([double]$Segundos) Start-Sleep -Milliseconds ([int]($Segundos * 1000)) }
 
 function Start-Navegador { param([string]$Url) Start-Process $Url }
@@ -248,6 +258,15 @@ function Test-InternaRestaurada {
     return ($null -ne $i -and $i.Principal)
 }
 
+# Sin esto, el HP conecta, no encuentra la sesión y vuelve a su consola sin
+# explicación (lo que pasó en Fedora con el 48010 ocupado).
+function Test-ApolloEscucha {
+    $faltan = @(Get-PuertosSinEscuchar)
+    if ($faltan.Count -gt 0) {
+        throw "Apollo está en marcha pero no escucha en TCP $($faltan -join ', '): otro programa o una reserva de Windows tiene el puerto. Míralo con 'netsh int ipv4 show excludedportrange protocol=tcp' y reinicia ApolloService. No se ha tocado nada."
+    }
+}
+
 # Todo lo que puede fallar sin haber tocado nada va aquí, antes de pedir la
 # sesión: así un error nunca deja las pantallas movidas.
 function Test-Requisitos {
@@ -260,6 +279,7 @@ function Test-Requisitos {
     if (-not (Test-Apollo)) {
         throw 'Apollo no está en marcha (servicio ApolloService). Arráncalo desde su icono o con preparar_windows.ps1. No se ha tocado nada.'
     }
+    Test-ApolloEscucha
     if (Get-Virtual) {
         throw 'Ya hay una sesión activa: la pantalla virtual de Apollo existe. Ciérrala antes con: pantalla-hp off'
     }
@@ -359,7 +379,11 @@ function Get-Estado {
     Escribir 'INFO' "HP: $($script:Conf.HP_SSH). Este equipo: $($script:Conf.EMISOR_IP)."
     if (Test-IPLocal $script:Conf.EMISOR_IP) { Escribir 'OK' 'Tailscale: la IP está en este equipo.' }
     else { Escribir 'AVISO' 'Tailscale: este equipo no tiene la IP configurada.' }
-    if (Test-Apollo) { Escribir 'OK' 'Apollo en marcha.' } else { Escribir 'AVISO' 'Apollo no está en marcha.' }
+    if (Test-Apollo) {
+        $faltan = @(Get-PuertosSinEscuchar)
+        if ($faltan.Count -eq 0) { Escribir 'OK' 'Apollo en marcha y escuchando.' }
+        else { Escribir 'AVISO' "Apollo en marcha, pero no escucha en TCP $($faltan -join ', ')." }
+    } else { Escribir 'AVISO' 'Apollo no está en marcha.' }
     foreach ($p in @(Get-Pantallas)) {
         $tipo = if ($p.Virtual) { 'virtual' } else { 'interna' }
         Escribir 'INFO' ("{0} ({1}): activa={2} principal={3} x={4}" -f $p.Nombre, $tipo, $p.Activa, $p.Principal, $p.X)
@@ -374,6 +398,7 @@ function Get-Estado {
 function Invoke-Vincular {
     if (-not (Test-IPLocal $script:Conf.EMISOR_IP)) { throw "Este equipo no tiene la IP $($script:Conf.EMISOR_IP): ¿Tailscale está conectado?" }
     if (-not (Test-Apollo)) { throw 'Apollo no está en marcha (servicio ApolloService).' }
+    Test-ApolloEscucha
     if (Get-Virtual) { throw 'Hay una sesión activa. Ciérrala antes con: pantalla-hp off' }
     $pin = '{0:D4}' -f (Get-Random -Minimum 0 -Maximum 10000)
     Escribir 'INFO' 'Te pedirá la contraseña de sudo del HP.'

@@ -1007,6 +1007,17 @@ Windows no lo acepta desde un teclado simulado: para bloquear, usa Inicio.
 **Salidas fantasma.** El controlador de Apollo deja diez salidas (`DISPLAY5`…`DISPLAY14`) aunque no
 haya sesión. `pantalla-hp` solo cuenta las que tienen monitor: si no, creía que había una sesión.
 
+**Puertos: se comprueba que Apollo escucha.** En Fedora, una conexión saliente de otro programa llegó a
+tener el 48010, y Sunshine siguió vivo sin abrirlo (§ 3.7). En el E14 el rango efímero TCP de Windows no
+es el predeterminado (49152-65535) sino **1024-65535**, así que los puertos TCP de Apollo también caen en
+él; el UDP sí empieza en 49152. Además, Hyper-V y WSL reservan al arrancar rangos al azar
+(`netsh int ipv4 show excludedportrange protocol=tcp`), y dentro de una reserva Apollo no puede abrir
+un puerto. Medido el 2026-11-08: ninguna reserva pisa sus puertos, y Apollo escucha en 47984, 47989,
+47990 y 48010. Como Apollo es un servicio, abre los puertos al arrancar Windows y no en cada sesión: el
+riesgo está en el arranque. Por eso `pantalla-hp` comprueba que Apollo escucha en 47984, 47989 y 48010
+antes de llamar al HP, y `preparar_windows.ps1` avisa si una reserva los pisa. No se cambia el rango
+efímero ni se reserva nada: no se ha probado si una reserva propia deja a Apollo abrir el puerto.
+
 **SSH de Windows, no de WSL.** La orden usa `ssh.exe`, el cliente OpenSSH de Windows, con su propio
 `%USERPROFILE%\.ssh\config` y el servicio `ssh-agent`. WSL no hace falta para usarla, solo para el
 repositorio si lo tienes ahí. Las órdenes al HP van con `BatchMode` y tiempo límite, como en Fedora. La
@@ -1279,6 +1290,8 @@ ve afectado.
 | `pantalla-hp` no se reconoce como orden | La consola se abrió antes de cambiar el `PATH` | Abre una consola nueva |
 | `Este equipo no tiene la IP ...: ¿Tailscale está conectado?` | Tailscale caído, o la IP de Windows cambió | `tailscale ip -4` y corrige `PANTALLA_EMISOR_WINDOWS_IP` en las dos máquinas |
 | `Apollo no está en marcha (servicio ApolloService)` | El servicio está parado | `Start-Service ApolloService` como administrador, o `preparar_windows.ps1` |
+| `Apollo está en marcha pero no escucha en TCP ...` | Al arrancar, otro programa o una reserva de Hyper-V/WSL tenía el puerto | `netsh int ipv4 show excludedportrange protocol=tcp`. Si no hay reserva, `Restart-Service ApolloService` como administrador; si la hay, reinicia el equipo (las reservas cambian en cada arranque). No se ha tocado nada |
+| `preparar_windows.ps1`: «Windows tiene reservados los puertos ... de Apollo» | Una reserva de Hyper-V/WSL cae sobre ellos | Reinicia el equipo y vuelve a comprobarlo. Si se repite, anótalo: reservar los puertos para Apollo no está probado |
 | `Ya hay una sesión activa: la pantalla virtual de Apollo existe` | Quedó la pantalla virtual de una sesión anterior | `pantalla-hp off` |
 | `... no responde sin preguntas: comprueba con 'ssh-add -l'` | La clave no está en el agente de Windows, o `ssh-agent` está parado | `ssh-add -l`; si falla, `preparar_windows.ps1` (W5) y `ssh-add $HOME\.ssh\nomadservernw` |
 | `El sudo de ... no permite arrancar nomad-pantalla@windows.service` | El HP tiene la regla de `sudo` antigua | En el HP: `sudo ./scripts/18_pantalla.sh` |

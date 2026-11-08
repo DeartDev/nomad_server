@@ -305,6 +305,25 @@ if ($script:ReiniciarApollo -and -not $Check -and $EsAdmin) {
 
 # ---------------------------------------------------------------------------
 Paso 'Comprobaciones (solo lectura)'
+# Hyper-V y WSL reservan al arrancar rangos de puertos al azar, y en una reserva
+# Apollo no puede abrir los suyos. Hoy no se solapan (medido, 2026-11-08); si
+# un día pasa, se avisa aquí y pantalla-hp se niega a abrir la sesión. No se
+# reserva nada: no se ha probado si una exclusión propia deja abrir el puerto.
+$puertosApollo = @{ tcp = @(47984, 47989, 47990, 48010); udp = @(47998, 47999, 48000) }
+foreach ($protocolo in 'tcp', 'udp') {
+    $pisados = @()
+    foreach ($linea in @(& netsh.exe int ipv4 show excludedportrange "protocol=$protocolo")) {
+        if ($linea -match '^\s*(\d+)\s+(\d+)') {
+            $desde = [int]$Matches[1]; $hasta = [int]$Matches[2]
+            $pisados += @($puertosApollo[$protocolo] | Where-Object { $_ -ge $desde -and $_ -le $hasta })
+        }
+    }
+    if ($pisados.Count -gt 0) {
+        Aviso "Windows tiene reservados los puertos $($protocolo.ToUpper()) $($pisados -join ', ') de Apollo: no podrá abrirlos. Reinicia el equipo y vuelve a comprobarlo (capítulo 18, § 10.7)."
+    } else {
+        Bien "Ninguna reserva de Windows pisa los puertos $($protocolo.ToUpper()) de Apollo."
+    }
+}
 if ((Invoke-Nativo 'ssh-add.exe' @('-l')) -eq 0) {
     $rc = Invoke-Nativo 'ssh.exe' @('-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', $Vars.PANTALLA_HP_SSH,
                                     'sudo -n -l /usr/bin/systemctl start nomad-pantalla@windows.service')

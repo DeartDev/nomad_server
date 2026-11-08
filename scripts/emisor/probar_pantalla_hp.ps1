@@ -37,6 +37,7 @@ function Initialize-Sim {
         SudoRechaza      = $false
         IP               = $true
         Apollo           = $true
+        SinEscuchar      = @()
         InternaRebelde   = $false
         Esperas          = 0
     }
@@ -120,6 +121,7 @@ function Set-Disposicion {
 
 function Test-IPLocal { param([string]$IP) $script:S.Llamadas.Add("ip $IP"); $script:S.IP }
 function Test-Apollo { $script:S.Apollo }
+function Get-PuertosSinEscuchar { $script:S.SinEscuchar }
 function Wait-Segundos { param([double]$Segundos) $script:S.Esperas++ }
 function Start-Navegador { param([string]$Url) $script:S.Llamadas.Add("navegador $Url") }
 
@@ -227,6 +229,31 @@ function Prueba-ApolloParadoNoTocaNada {
     RcNoCero $rc
     PantallasIntactas
     Dice 'Apollo'
+}
+
+function Prueba-ApolloSinEscucharNoTocaNada {
+    $script:S.SinEscuchar = @(48010)
+    $rc = Invoke-PantallaHP 'extender'
+    RcNoCero $rc
+    NoHay 'ssh'
+    PantallasIntactas
+    Dice 'no escucha en TCP 48010'
+}
+
+function Prueba-VincularConApolloSinEscucharNoLlamaAlHP {
+    $script:S.SinEscuchar = @(47984, 47989)
+    $rc = Invoke-PantallaHP 'vincular'
+    RcNoCero $rc
+    NoHay 'ssh'
+    NoHay 'navegador'
+    Dice '47984, 47989'
+}
+
+function Prueba-EstadoAvisaSiApolloNoEscucha {
+    $script:S.SinEscuchar = @(48010)
+    $rc = Invoke-PantallaHP 'estado'
+    RcEs $rc 0
+    Dice 'no escucha en TCP 48010'
 }
 
 function Prueba-HPInaccesibleAntesDeEmpezarNoTocaNada {
