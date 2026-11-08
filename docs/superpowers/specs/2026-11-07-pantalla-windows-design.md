@@ -1,10 +1,10 @@
 # Pantalla extendida en Windows 11 — especificación de diseño
 
-> **Estado: EN CONSTRUCCIÓN.** Tareas 2 y 3 del plan hechas el 2026-11-07: emisor elegido y preguntas
-> del § 5 respondidas (resultados en el § 7); el HP elige emisor y `nomad-pantalla@windows.service`
-> funcionó en la prueba real. **Desde la Tarea 3, Fedora no abre sesión** hasta recibir esta rama
-> (regresión de la Tarea 6). Escrito en Fedora el 2026-11-07. Se construye desde Windows 11 con
-> WSL2, en una sesión que no conoce la conversación anterior: este documento y su plan deben bastar.
+> **Estado: EN CONSTRUCCIÓN.** Tareas 2 a 5 del plan hechas el 2026-11-07: emisor elegido (§ 7), el HP
+> elige emisor (§ 8) y validación real en Windows con los criterios 1 a 6 cumplidos (§ 9). **Desde la
+> Tarea 3, Fedora no abre sesión** hasta recibir esta rama (regresión de la Tarea 6). Escrito en Fedora el
+> 2026-11-07. Se construye desde Windows 11 con WSL2, en una sesión que no conoce la conversación
+> anterior: este documento y su plan deben bastar.
 > Plan: `docs/superpowers/plans/2026-11-07-pantalla-windows.md`. Antecedentes: el diseño de Fedora
 > (`docs/superpowers/specs/2026-11-05-pantalla-extendida-design.md`) y el capítulo 18.
 
@@ -242,3 +242,65 @@ lista las cuatro órdenes.
 `nomad-pantalla@windows.service` arrancó `lanzar.sh windows` contra `100.100.15.46`: escritorio extendido,
 sonido a buen volumen (`Master` al 100 %) y tecla Win, confirmados por el usuario. Al parar, el HP volvió
 a `tty1` sin procesos de `pantalla` y Windows a su pantalla interna como única principal.
+
+## 9. Validación real en Windows (Tarea 5)
+
+Hecha el 2026-11-07 desde el E14, con la orden instalada por `preparar_windows.ps1` (la segunda ejecución
+dio `Cambios que se aplicarían: 0`) y el vínculo de la Tarea 2, que convive con el de Fedora en
+`Moonlight.conf`.
+
+| Prueba | Resultado |
+|---|---|
+| `extender` (criterios 1, 3 y 4) | Escritorio extendido, ventanas entre pantallas, buen sonido; `off` deja la interna como única principal |
+| `principal` (criterio 2) | Interna apagada y escritorio en el HP. Con la tapa cerrada no se suspende y los periféricos del HP lo controlan |
+| Quitar el cable con el Wi-Fi activo | Windows recupera la interna en segundos; el HP vuelve a `tty1` solo (tras el arreglo de abajo) |
+| Corte total: cable fuera y modo avión | El HP para casi al instante y vuelve a `tty1`; Windows recupera la interna (criterio 5) |
+| Suspender el portátil en plena sesión | El HP vuelve a `tty1` a los ~20 s; al despertar, interna activa y principal, sin `off` |
+| Wi-Fi, más de 5 minutos | Fluido con el tope de 15000 kbps; sin él, lentitud perceptible pasados unos 5 minutos |
+| Sesión de 30 minutos con vídeo (criterio 6) | 17/17 sanos en todas las muestras y sin avisos de Uptime Kuma; ver § 9.4 |
+
+### 9.1 Salidas fantasma de Apollo
+
+El adaptador de Apollo deja diez salidas (`DISPLAY5`…`DISPLAY14`) sin monitor aunque no haya sesión.
+`pantalla-hp` las contaba como pantalla virtual y creía que había sesión. Solo cuentan las salidas con
+monitor (commit `8dc783a`).
+
+### 9.2 El HP se quedaba en el diálogo de error de Moonlight
+
+Al quitar el cable con el Wi-Fi activo, Windows recuperó la conexión por Wi-Fi y siguió respondiendo al
+sondeo del puerto 47989, pero la sesión de Moonlight ya había muerto: el HP se quedó en el diálogo de
+error hasta que el usuario lo aceptó con el ratón. En el journal (`journalctl _UID=988`, no `-u`):
+`SDL Error (0): Connection terminated: -1`.
+
+Arreglo en `lanzar.sh` (commit `b0d8fdc`): copia la salida de Moonlight al journal y lo cierra en cuanto
+escribe `Connection terminated`. Cubre también a Fedora, y no hace falta un vigilante en Windows. Tras
+instalarlo con `18_pantalla.sh`, los tres cortes (cable, corte total y suspensión) los cerró esta vía, en
+el mismo segundo del aviso; el sondeo no llegó a actuar en ninguno y queda de respaldo. En la suspensión,
+los ~20 s son lo que tarda Moonlight en dar la conexión por perdida.
+
+### 9.3 Tope de bitrate fijo
+
+El HP pide `PANTALLA_BITRATE` (40000). Por Wi-Fi se notó lentitud pasados unos 5 minutos. En Fedora el
+tope solo se pone con Wi-Fi, al arrancar Sunshine; en Windows Apollo es un servicio y cambiarlo en cada
+sesión exigiría administrador, así que `preparar_windows.ps1` fija `max_bitrate = 15000` en
+`sunshine.conf` (commit `e2b61c5`). Con él, fluido por Wi-Fi y buena imagen por cable.
+
+### 9.4 Sesión de 30 minutos
+
+Una muestra por minuto en el HP, de 23:28 a 23:56 (29 muestras, sesión activa en todas):
+
+| Medida | Mínimo | Máximo |
+|---|---|---|
+| CPU libre (`vmstat 5 2`) | 63 % | 82 % |
+| Contenedores sanos | 17/17 | 17/17 |
+| Memoria usada | 2176 MB | 2235 MB |
+
+Antes de la sesión, el HP estaba al 71 % libre con 2,2 GB usados; tras el `off`, al 95 %. La memoria no
+crece durante la sesión. Uptime Kuma no dio ningún aviso (confirmado por el usuario).
+
+### 9.5 Observaciones
+
+- **Tapa cerrada en modo `principal`:** al cerrarla, Windows entra un instante en el modo de espera
+  moderno y se bloquea; se desbloquea desde el HP y sigue funcionando. Al abrirla, la interna sigue
+  apagada hasta el `off`. Se acepta como está.
+- El volumen bajo del § 7.5 no se repitió.
