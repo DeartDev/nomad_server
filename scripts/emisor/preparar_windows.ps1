@@ -122,14 +122,25 @@ if (-not (Test-Path $ExeApollo) -or -not $servicio) {
 
     # Sin forzar QuickSync, Apollo elige solo y puede caer en el codificador por
     # software, que el portátil no aguanta a 1080p60.
+    # El tope de bitrate: el HP pide siempre PANTALLA_BITRATE (40000), y por Wi-Fi
+    # eso se percibe a ratos lento (medido, 2026-11-07). En Fedora el tope solo se
+    # pone con Wi-Fi, al arrancar Sunshine; aquí Apollo es un servicio y cambiarlo
+    # en cada sesión exigiría administrador, así que es fijo, también con cable.
+    $ajustes = [ordered]@{ encoder = 'quicksync'; max_bitrate = '15000' }
     $conf = @(Get-Content -Encoding UTF8 $ConfApollo -ErrorAction SilentlyContinue)
-    if ($conf -match '^\s*encoder\s*=\s*quicksync\s*$') {
-        Igual 'Codificador: quicksync.'
-    } else {
-        Cambiar 'fijar encoder = quicksync en sunshine.conf' -Admin {
-            $resto = @($conf | Where-Object { $_ -notmatch '^\s*encoder\s*=' })
-            Write-SinBom $ConfApollo ((@('encoder = quicksync') + $resto) -join "`r`n")
-            $script:ReiniciarApollo = $true
+    foreach ($clave in $ajustes.Keys) {
+        $valor = $ajustes[$clave]
+        if ($conf -match "^\s*$clave\s*=\s*$valor\s*$") {
+            Igual "sunshine.conf: $clave = $valor."
+        } else {
+            Cambiar "fijar $clave = $valor en sunshine.conf" -Admin {
+                $resto = @($conf | Where-Object { $_ -notmatch "^\s*$clave\s*=" })
+                $script:ConfNueva = @("$clave = $valor") + $resto
+                Write-SinBom $ConfApollo ($script:ConfNueva -join "`r`n")
+                $script:ReiniciarApollo = $true
+            }
+            # La siguiente clave parte de lo ya escrito, no del archivo original.
+            if (-not $Check -and $script:ConfNueva) { $conf = $script:ConfNueva }
         }
     }
 
