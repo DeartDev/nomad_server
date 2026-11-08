@@ -194,6 +194,13 @@ evitan están escritas en la cabecera de `scripts/emisor/pantalla-hp.sh`:
   | `principal` | `0,0`, prioridad 1 | apagada, prioridad 2 |
 
   KDE guarda la disposición de cada pareja de pantallas. Por eso se fija siempre.
+- **En `principal`, el vigilante mantiene la disposición.** KWin guarda además una disposición para
+  la **tapa cerrada**, y la aplica al cerrarla. Si la guardada es la del extensor, enciende la interna
+  como principal y la barra de Plasma se va con ella, fuera de la vista (medido el 2026-11-08). Cada
+  5 segundos, si la disposición no es la de `principal`, el vigilante la reaplica, y KWin la guarda
+  así para la próxima vez. En `extender` no toca nada.
+- **El uso normal no cambia.** Sin sesión no hay vigilante ni bloqueo de la tapa: al cerrarla, el
+  portátil se suspende como siempre. Solo durante una sesión `systemd-inhibit` impide la suspensión.
 - **`kscreen-doctor` devuelve 0 aunque no haya hecho nada**: si la salida que nombra no existe, no
   aplica *ninguna* de las órdenes de esa llamada. Su código de salida no vale; el resultado se
   comprueba leyendo `kscreen-doctor -o`.
@@ -844,6 +851,7 @@ este**.
 | Tras apagar la red del portátil, `Este equipo no tiene la IP` | `nmcli networking off` le quita la dirección a `tailscale0` y Tailscale no la repone | `sudo systemctl restart tailscaled` |
 | Unas veces 60 FPS, otras 27–45 | Aceptado. Hay `Atomic commit failed` en `eDP-1`, unos 6 por minuto, con y sin V-Sync. Causa sin confirmar | Ninguna conocida. `--no-vsync` se mantiene porque fue la última configuración probada |
 | El vídeo de Disney+, Prime Video o Netflix se ve **en negro** en el HP, con sonido | Protección anticopia (DRM) del servicio, sobre todo en Edge o en apps de Windows | Usa Chrome sin aceleración por hardware o el navegador de Fedora. Ver más abajo |
+| En `principal`, al cerrar la tapa la barra de Plasma y las ventanas desaparecen del HP | KWin aplica su disposición guardada para la tapa cerrada, y era la del extensor | El vigilante la reaplica en 5 segundos como mucho. Si no vuelve, mira el aviso en `journalctl --user -u pantalla-hp-vigilante` |
 | Una **franja inferior** del panel (unos 150–200 px, y otra más fina arriba) se estropea cada 2 segundos, con rayas verticales | **Fallo de hardware del panel del HP**: aparece hasta en la BIOS | Ninguna por software; ver más abajo |
 
 ### La franja inferior: fallo de hardware del panel del HP

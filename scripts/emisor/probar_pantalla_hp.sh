@@ -478,6 +478,13 @@ prueba_vigilante_se_lanza_con_el_script() {
     hay "repo/scripts/emisor/pantalla-hp.sh --vigilar"
 }
 
+# El vigilante necesita el modo para saber qué disposición debe mantener.
+prueba_vigilante_recibe_el_modo() {
+    lanzar principal
+    rc_es 0
+    hay "--setenv=PANTALLA_HP_MODO=principal"
+}
+
 prueba_restauracion_se_programa_antes_de_tocar_pantallas() {
     lanzar principal
     rc_es 0
@@ -1014,6 +1021,62 @@ GUION
     rc_es 0
     (( $(veces "--on-active=600") == 2 )) \
         || fallar "hubo $(veces "--on-active=600") intentos de rearme, se esperaban 2 (a los 60 y 65 s)"
+}
+
+# Al cerrar la tapa, KWin aplica la disposición que tenga guardada para la tapa
+# cerrada. Si es la del extensor, enciende la interna como principal y la barra
+# de Plasma se va con ella (medido el 2026-11-08). El guion lo imita en el tic 3.
+kde_aplica_extensor_en_tic() {
+    cat > "${CAJA}/guion" <<GUION
+#!/bin/bash
+P="\${CAJA}/pantallas"
+if (( \$1 == $1 )); then
+    echo enabled > "\${P}/${I}.estado"; echo 0,0 > "\${P}/${I}.posicion"; echo 1 > "\${P}/${I}.prioridad"
+    echo 1920,0 > "\${P}/${V}.posicion"; echo 2 > "\${P}/${V}.prioridad"
+fi
+if (( \$1 == 10 )); then
+    printf '%s\n' 'CLIENT CONNECTED' 'CLIENT DISCONNECTED' > "\${CAJA}/home/.config/sunshine/sunshine.log"
+fi
+GUION
+    chmod +x "${CAJA}/guion"
+}
+
+prueba_vigilante_principal_reaplica_si_kde_la_cambia() {
+    ENTORNO_EXTRA=(PANTALLA_HP_MODO=principal)
+    sesion_montada
+    fijar_pantalla "${I}" disabled 0,0 2
+    fijar_pantalla "${V}" enabled 0,0 1
+    log_sunshine 'CLIENT CONNECTED'
+    kde_aplica_extensor_en_tic 3
+    lanzar --vigilar
+    rc_es 0
+    hay "output.${V}.position.0,0 output.${V}.priority.1 output.${I}.priority.2 output.${I}.disable"
+    (( $(linea "output.${V}.position.0,0 output.${V}.priority.1") < $(linea "${ORDEN_RESTAURAR}") )) \
+        || fallar "no reaplicó 'principal' antes de que se fuera el cliente"
+    dice "se vuelve a aplicar"
+}
+
+prueba_vigilante_extender_no_toca_la_disposicion() {
+    ENTORNO_EXTRA=(PANTALLA_HP_MODO=extender)
+    sesion_montada
+    fijar_pantalla "${I}" enabled 0,0 1
+    fijar_pantalla "${V}" enabled 1920,0 2
+    log_sunshine 'CLIENT CONNECTED'
+    kde_aplica_extensor_en_tic 3
+    lanzar --vigilar
+    rc_es 0
+    no_hay "output.${I}.disable"
+}
+
+prueba_vigilante_sin_modo_no_toca_la_disposicion() {
+    sesion_montada
+    fijar_pantalla "${I}" disabled 0,0 2
+    fijar_pantalla "${V}" enabled 0,0 1
+    log_sunshine 'CLIENT CONNECTED'
+    kde_aplica_extensor_en_tic 3
+    lanzar --vigilar
+    rc_es 0
+    no_hay "output.${I}.disable"
 }
 
 prueba_vigilante_reconexion_no_corta() {

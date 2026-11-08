@@ -258,8 +258,10 @@ arrancar_sunshine() {
         --why="Pantalla extendida en el HP" --mode=block /usr/bin/sunshine ${tope:+"${tope}"}
 }
 
+# El modo va en el entorno: la orden solo admite un argumento.
 lanzar_vigilante() {
-    systemd-run --user --quiet --unit="${U_VIGILANTE}" "${SCRIPT}" --vigilar
+    systemd-run --user --quiet --unit="${U_VIGILANTE}" \
+        --setenv=PANTALLA_HP_MODO="$1" "${SCRIPT}" --vigilar
 }
 
 # ===========================================================================
@@ -423,7 +425,7 @@ arrancar() {
     comprobar_hp
 
     trap interrumpir INT TERM HUP
-    if ! levantar_pila "${modo}" || ! lanzar_vigilante || ! pedir_hp; then
+    if ! levantar_pila "${modo}" || ! lanzar_vigilante "${modo}" || ! pedir_hp; then
         log_error "No se ha podido abrir la sesión: se deshace lo hecho."
         detener
         exit 1
@@ -446,8 +448,15 @@ arrancar() {
 #
 # No abre ssh salvo para el 'stop' de 'detener': 'who' contaría esa sesión en el
 # HP y bloquearía su reinicio automático.
+#
+# En 'principal' mantiene además la disposición. Al cerrar la tapa, KWin aplica
+# la que tenga guardada para la tapa cerrada; si es la del extensor, enciende la
+# interna como principal y la barra de Plasma se va con ella, fuera de la vista
+# (medido el 2026-11-08). Reaplicarla con la tapa cerrada la deja guardada para
+# la próxima vez. En 'extender' no se toca: no hay nada que fijar.
 vigilar() {
     local limite="${PLAZO_PRIMERA_CONEXION}" sin_cliente=0 desde_rearme=0
+    local modo="${PANTALLA_HP_MODO:-}"
 
     while true; do
         sleep "${INTERVALO_VIGILANTE}"
@@ -462,6 +471,10 @@ vigilar() {
         if cliente_conectado; then
             limite="${PLAZO_SIN_CLIENTE}"
             sin_cliente=0
+            if [[ "${modo}" == principal ]] && ! disposicion_aplicada principal; then
+                log_aviso "KDE ha cambiado la disposición (¿tapa cerrada?): se vuelve a aplicar 'principal'."
+                disposicion principal || log_aviso "kscreen-doctor ha fallado; se reintenta en el próximo sondeo."
+            fi
             if (( desde_rearme >= CADENCIA_REARME )); then
                 # Si falla no se reinicia la cuenta: se reintenta en el próximo
                 # sondeo, porque ahora mismo puede no haber temporizador.
