@@ -253,6 +253,34 @@ function Prueba-ComprobacionesAntesDeArrancar {
     Antes 'ssh sudo -n -l' "ssh $ORDEN_ARRANQUE"
 }
 
+# La lista real de Windows sin sesión (2026-11-07): la interna, tres salidas
+# fantasma de Intel y diez del adaptador de Apollo, todas sin monitor. Con
+# sesión, DISPLAY5 tiene monitor.
+function New-ListaReal {
+    param([switch]$ConSesion)
+    $lista = @([pscustomobject]@{ Nombre = '\\.\DISPLAY1'; Adaptador = 'Intel(R) Iris(R) Xe Graphics'; Activa = $true; Principal = $true; TieneMonitor = $true; X = 0; Ancho = 1920 })
+    foreach ($n in 2..4) {
+        $lista += [pscustomobject]@{ Nombre = "\\.\DISPLAY$n"; Adaptador = 'Intel(R) Iris(R) Xe Graphics'; Activa = $false; Principal = $false; TieneMonitor = $false; X = 0; Ancho = 0 }
+    }
+    foreach ($n in 5..14) {
+        $monitor = $ConSesion -and $n -eq 5
+        $lista += [pscustomobject]@{ Nombre = "\\.\DISPLAY$n"; Adaptador = 'SudoMaker Virtual Display Adapter'; Activa = $monitor; Principal = $false; TieneMonitor = $monitor; X = 1920; Ancho = 1920 }
+    }
+    return $lista
+}
+
+function Prueba-SalidasFantasmaDeApolloNoSonUnaSesion {
+    $p = @(ConvertTo-Pantallas (New-ListaReal))
+    if ($p.Count -ne 1) { Fallar "se esperaba solo la interna, hay $($p.Count): $(($p | ForEach-Object { $_.Nombre }) -join ' ')"; return }
+    if ($p[0].Virtual) { Fallar 'la interna sale como virtual' }
+}
+
+function Prueba-LaVirtualConMonitorSiEsUnaSesion {
+    $p = @(ConvertTo-Pantallas (New-ListaReal -ConSesion))
+    $v = @($p | Where-Object { $_.Virtual })
+    if ($v.Count -ne 1 -or $v[0].Nombre -ne '\\.\DISPLAY5') { Fallar "virtual inesperada: $(($v | ForEach-Object { $_.Nombre }) -join ' ')" }
+}
+
 function Prueba-SesionActivaSeRechaza {
     Set-SesionMontada
     $rc = Invoke-PantallaHP 'extender'

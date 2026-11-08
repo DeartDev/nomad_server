@@ -179,17 +179,24 @@ public static class NomadPantallas {
 '@
 }
 
-# Solo las salidas con monitor: Windows lista también adaptadores fantasma.
-function Get-Pantallas {
-    Initialize-TipoPantallas
-    foreach ($p in [NomadPantallas]::Listar()) {
-        $virtual = $p.Adaptador -match 'SudoMaker|Virtual Display'
-        if (-not $virtual -and -not $p.TieneMonitor) { continue }
+# Solo las salidas con monitor. Windows lista también salidas fantasma: tres de
+# la gráfica de Intel y diez del adaptador de Apollo (DISPLAY5 a DISPLAY14),
+# siempre presentes, con o sin sesión. La pantalla virtual de verdad es la que
+# tiene monitor: aparece al conectar el HP y se va al terminar (medido).
+function ConvertTo-Pantallas {
+    param($Lista)
+    foreach ($p in $Lista) {
+        if (-not $p.TieneMonitor) { continue }
         [pscustomobject]@{
-            Nombre = $p.Nombre; Virtual = [bool]$virtual; Activa = $p.Activa
-            Principal = $p.Principal; X = $p.X; Ancho = $p.Ancho
+            Nombre = $p.Nombre; Virtual = [bool]($p.Adaptador -match 'SudoMaker|Virtual Display')
+            Activa = $p.Activa; Principal = $p.Principal; X = $p.X; Ancho = $p.Ancho
         }
     }
+}
+
+function Get-Pantallas {
+    Initialize-TipoPantallas
+    ConvertTo-Pantallas ([NomadPantallas]::Listar())
 }
 
 function Invoke-DisplaySwitch {
