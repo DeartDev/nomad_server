@@ -167,6 +167,6 @@ Con el usuario, que informa de lo que ve. Anotar cifras.
 
 - [ ] **Step 1: Capítulo 18.** Sección de Windows con las dos vías, los nuevos nombres de unidad en todo el capítulo, la tabla de resultados y los errores nuevos. Quitar «No funciona con Windows». Ajustar los capítulos 05 y 16.
 - [ ] **Step 2: `make check`** y **commit.**
-- [ ] **Step 3: Regresión.** Antes de reiniciar, avisar al usuario de que la sesión de Claude en WSL se corta y dejar escrito el estado. En Fedora, sin push, traer la rama desde el HP (`git fetch nomadservernw:nomad_server pantalla-windows:pantalla-windows && git checkout pantalla-windows`), y ejecutar `pantalla-hp extender`, comprobar imagen y sonido, y `pantalla-hp off`. Criterio 8.
+- [x] **Step 3: Regresión.** Antes de reiniciar, avisar al usuario de que la sesión de Claude en WSL se corta y dejar escrito el estado. En Fedora, sin push, traer la rama desde el HP (`git fetch nomadservernw:nomad_server pantalla-windows:pantalla-windows && git checkout pantalla-windows`), y ejecutar `pantalla-hp extender`, comprobar imagen y sonido, y `pantalla-hp off`. Criterio 8.
 Expected: si falla, volver a la rama y corregir antes de cualquier merge.
-- [ ] **Step 4: Cierre.** Actualizar el estado del diseño a `CONSTRUIDO`, commit, y preguntar al usuario por el merge y el push. Después sigue Ubuntu, con su propio plan.
+- [x] **Step 4: Cierre.** Actualizar el estado del diseño a `CONSTRUIDO`, commit, y preguntar al usuario por el merge y el push. Después sigue Ubuntu, con su propio plan.

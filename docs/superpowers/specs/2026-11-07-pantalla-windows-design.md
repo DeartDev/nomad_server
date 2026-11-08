@@ -1,10 +1,10 @@
 # Pantalla extendida en Windows 11 — especificación de diseño
 
-> **Estado: EN CONSTRUCCIÓN.** Tareas 2 a 5 del plan hechas el 2026-11-07: emisor elegido (§ 7), el HP
-> elige emisor (§ 8) y validación real en Windows con los criterios 1 a 6 cumplidos (§ 9). Tarea 6:
-> documentación hecha (capítulos 18, 05 y 16, README; commit `7240bce`). **Falta la regresión de
-> Fedora** (criterio 8), que no abre sesión hasta recibir esta rama: está en el HP, en
-> `~/nomad_server`, rama `pantalla-windows`, y no se ha hecho push. Escrito en Fedora el
+> **Estado: CONSTRUIDO.** Tareas 2 a 6 del plan hechas: emisor elegido (§ 7), el HP elige emisor
+> (§ 8), validación real en Windows con los criterios 1 a 6 cumplidos (§ 9), y documentación en los
+> capítulos 18, 05 y 16 y el README. **Regresión de Fedora cumplida el 2026-11-08** (criterio 8):
+> con la rama, 130 pruebas en verde y `preparar_fedora.sh --check` a 0; `pantalla-hp extender` da
+> escritorio, sonido y tecla Win en el HP, y `off` deja `tty1` sin procesos de `pantalla`. Escrito en Fedora el
 > 2026-11-07. Se construye desde Windows 11 con WSL2, en una sesión que no conoce la conversación
 > anterior: este documento y su plan deben bastar.
 > Plan: `docs/superpowers/plans/2026-11-07-pantalla-windows.md`. Antecedentes: el diseño de Fedora
@@ -193,8 +193,8 @@ cambiar.
 
 Sin `--capture-system-keys`, Moonlight no envía la tecla Win. Con
 `--capture-system-keys fullscreen` en `lanzar.sh` funciona. La Tarea 3 debe añadirlo a
-`templates/etc/nomad-pantalla-lanzar.sh`. En Fedora no se había probado la tecla Win, y la regresión
-de la Tarea 6 debe comprobarla.
+`templates/etc/nomad-pantalla-lanzar.sh`. En Fedora la tecla Win abre el menú de Plasma desde el
+teclado del HP (regresión del 2026-11-08).
 
 ### 7.4 Cortafuegos de Windows
 
