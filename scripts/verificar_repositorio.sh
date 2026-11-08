@@ -314,6 +314,23 @@ comprobar_scripts() {
         log_aviso "estos 'trap ... EXIT' pisan el de common.sh; encadena nomad_limpiar_contador:"
         printf '%s\n' "${trampas}" | sed 's/^/          /'
     fi
+
+    # PowerShell 5.1, el de Windows 11, lee como ANSI un .ps1 sin BOM: los
+    # acentos salen rotos y una comilla tipográfica puede partir una cadena.
+    local ps1 sin_bom=() hay_ps1=0
+    while IFS= read -r -d '' ps1; do
+        hay_ps1=1
+        if [[ "$(head -c 3 "${ps1}" | od -An -tx1 | tr -d ' \n')" != "efbbbf" ]]; then
+            sin_bom+=("${ps1}")
+        fi
+        grep -q 'Propósito' "${ps1}" || fallo "${ps1} no tiene cabecera con 'Propósito'"
+    done < <(find scripts -name '*.ps1' -print0 | sort -z)
+    if (( ${#sin_bom[@]} > 0 )); then
+        fallo "estos .ps1 no empiezan por BOM (EF BB BF); guárdalos como UTF-8 con BOM:"
+        printf '          %s\n' "${sin_bom[@]}"
+    elif (( hay_ps1 == 1 )); then
+        log_ok "los .ps1 están en UTF-8 con BOM"
+    fi
 }
 
 # ===========================================================================
