@@ -30,8 +30,17 @@
 #
 #  Si el portátil cae, nadie en él puede pedir el 'stop' por SSH, y Moonlight se
 #  queda en su diálogo de error con el panel ocupado. Por eso este proceso sigue
-#  vivo y sondea el puerto de Sunshine. El sondeo sale del HP hacia el portátil,
-#  como la propia sesión: el cortafuegos del HP no cambia.
+#  vivo y lo cierra por dos vías:
+#
+#  - Su propia salida: cuando escribe 'Connection terminated', la sesión ya ha
+#    acabado. Es lo que cubre un corte con el portátil aún accesible, por
+#    ejemplo al quitar el cable con el Wi-Fi activo: el emisor sigue
+#    respondiendo y el sondeo no ve nada (medido en Windows, 2026-11-07).
+#  - El sondeo del puerto de Sunshine, para un portátil que desaparece sin que
+#    Moonlight llegue a enterarse. Sale del HP hacia el portátil, como la propia
+#    sesión: el cortafuegos del HP no cambia.
+#
+#  La salida de Moonlight se sigue copiando entera al journal.
 # ===========================================================================
 # Sin 'set -e': 'wait' devuelve el código de Moonlight, y un sondeo que falla es
 # parte del funcionamiento normal.
@@ -56,6 +65,31 @@ INTERVALO_SONDEO=5     # s entre dos sondeos
 FALLOS_MAXIMOS=3       # sondeos fallidos seguidos que cierran la sesión
 LIMITE_CONEXION=3      # s: un portátil caído no rechaza, solo no contesta
 PLAZO_CIERRE=5         # s que tiene Moonlight para salir antes de SIGKILL
+FIN_DE_SESION='Connection terminated'   # lo que escribe Moonlight 6.2.0 al perderla
+
+PID_MOONLIGHT=""
+
+cerrar_moonlight() {
+    [[ -n "${PID_MOONLIGHT}" ]] || return 0
+    echo "$1: se cierra Moonlight." >&2
+    kill -TERM "${PID_MOONLIGHT}" 2>/dev/null
+    sleep "${PLAZO_CIERRE}"
+    kill -KILL "${PID_MOONLIGHT}" 2>/dev/null
+}
+
+# Copia la salida de Moonlight al journal y avisa al proceso principal, una sola
+# vez, cuando anuncia el fin de la sesión. Corre en una sustitución de procesos:
+# ahí '$$' sigue siendo el PID de este script.
+filtrar_salida() {
+    local linea avisado=0
+    while IFS= read -r linea; do
+        printf '%s\n' "${linea}" >&2
+        if (( avisado == 0 )) && [[ "${linea}" == *"${FIN_DE_SESION}"* ]]; then
+            avisado=1
+            kill -USR1 "$$" 2>/dev/null
+        fi
+    done
+}
 
 emisor_responde() {
     timeout "${LIMITE_CONEXION}" bash -c 'exec 3<>"/dev/tcp/$0/$1"' \
@@ -78,17 +112,18 @@ vigilar_emisor() {
         sleep "${INTERVALO_SONDEO}"
     done
 
-    echo "Sin respuesta de ${EMISOR}:${PUERTO_SONDEO} en ${FALLOS_MAXIMOS} sondeos seguidos: se cierra Moonlight." >&2
-    kill -TERM "${PID_MOONLIGHT}" 2>/dev/null
-    sleep "${PLAZO_CIERRE}"
-    kill -KILL "${PID_MOONLIGHT}" 2>/dev/null
+    cerrar_moonlight "Sin respuesta de ${EMISOR}:${PUERTO_SONDEO} en ${FALLOS_MAXIMOS} sondeos seguidos"
 }
+
+# En segundo plano: el proceso principal vuelve enseguida a esperar a Moonlight.
+trap 'cerrar_moonlight "Moonlight ha anunciado el fin de la conexión" &' USR1
 
 "${MOONLIGHT}" stream "${EMISOR}" Desktop \
     --1080 --fps 60 --bitrate ${PANTALLA_BITRATE} --no-vsync \
     --packet-size 1024 --display-mode fullscreen \
     --video-decoder hardware --video-codec HEVC \
-    --audio-config stereo --absolute-mouse --capture-system-keys fullscreen &
+    --audio-config stereo --absolute-mouse --capture-system-keys fullscreen \
+    > >(filtrar_salida) 2>&1 &
 PID_MOONLIGHT=$!
 
 # Al parar la unidad, 'cage' espera a este proceso: la señal debe llegar a Moonlight.

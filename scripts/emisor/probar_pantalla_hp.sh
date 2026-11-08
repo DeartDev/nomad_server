@@ -1493,6 +1493,37 @@ prueba_lanzador_sondeo_real_contra_un_puerto_cerrado() {
     moonlight_muerto
 }
 
+# Lo que escribió Moonlight 6.2.0 en el HP el 2026-11-07 al cortarse la red del
+# portátil, que siguió accesible por Wi-Fi: el sondeo respondía, y Moonlight se
+# quedó en su diálogo de error con el panel ocupado.
+FIN_DE_CONEXION='00:06:31 - SDL Error (0): Connection terminated: -1'
+
+prueba_lanzador_cierra_moonlight_cuando_anuncia_el_fin_de_la_conexion() {
+    preparar_lanzador "echo 'SDL Info (0): Control stream received unexpected disconnect event'; echo '${FIN_DE_CONEXION}'; exec /usr/bin/sleep 30"
+    ejecutar_lanzador
+    rc_no_es_cero
+    (( RC != 124 )) || fallar "nadie cerró Moonlight: venció el tope de la prueba"
+    # Los sondeos siguen respondiendo: quien cierra es la salida, no el vigilante.
+    (( $(veces "timeout ") < 3 )) || fallar "esperó a los sondeos: $(veces "timeout ")"
+    moonlight_muerto
+}
+
+prueba_lanzador_deja_la_salida_de_moonlight_en_el_journal() {
+    preparar_lanzador "echo 'Qt Info: \"E14\" is now online'; echo 'en la salida de error' >&2; exit 0"
+    ejecutar_lanzador
+    rc_es 0
+    dice '"E14" is now online'
+    dice "en la salida de error"
+}
+
+prueba_lanzador_no_cierra_por_otros_errores() {
+    # Moonlight escribe errores sueltos que no terminan la sesión.
+    preparar_lanzador "echo 'SDL Error (0): Failed to set audio thread priority'; exit 0"
+    ejecutar_lanzador
+    rc_es 0
+    no_dice "se cierra Moonlight"
+}
+
 # ===========================================================================
 #  LAS UNIDADES DEL HP
 # ===========================================================================
