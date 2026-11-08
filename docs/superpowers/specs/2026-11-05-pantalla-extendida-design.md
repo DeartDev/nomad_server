@@ -279,10 +279,9 @@ seleccionar el cliente solo en el caso de Ubuntu.
 
 ## 9. Riesgos abiertos
 
-- **Franja inferior:** limitación aceptada por el usuario el 2026-11-07, con causa desconocida. Unos
-  150–200 px abajo, y menos arriba, se pixelan cada 2 segundos con ritmo fijo; vídeo y sonido estables.
-  Descartados códec, codificador Intel, `cqp`, picos de tráfico, FBC y vsync. Detalle en el capítulo 18,
-  § 9.
+- **Franja inferior:** **fallo de hardware del panel del HP**, demostrado el 2026-11-08: aparece
+  también en la consola de texto y en la BIOS. No depende de esta construcción. Detalle en el capítulo
+  18, § 9.
 - **Wi-Fi:** fluido a unos 11 Mbit/s con el cable fuera toda la sesión. `pantalla-hp` limita Sunshine a
   15 Mbit/s (`max_bitrate`) cuando la salida a la red es Wi-Fi, sin tocar el HP.
 - **Corte del cable:** el enlace del ThinkPad cayó 15 segundos a las 21:39 del 2026-11-05 sin causa

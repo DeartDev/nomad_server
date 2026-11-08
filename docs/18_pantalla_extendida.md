@@ -558,7 +558,7 @@ printf '%s\n' \
     > ~/.config/sunshine/sunshine.conf
 ```
 
-Si ya había un `sunshine.conf`, haz copia antes. `vaapi_rc = vbr` reduce la franja inferior (§ 9).
+Si ya había un `sunshine.conf`, haz copia antes. `vaapi_rc = vbr` se dejó por la franja inferior, que resultó ser un fallo del panel (§ 9).
 
 ```bash
 # [portátil] — krfb-virtualmonitor escucha en TODAS las interfaces y no permite limitarlo
@@ -843,43 +843,34 @@ este**.
 | Sesión entrecortada por Wi-Fi | Red saturada o señal débil, aun con el tope de 15 Mbit/s | Acércate al router o usa el cable. Para bajar el tope, cambia `BITRATE_WIFI` en `pantalla-hp.sh` |
 | Tras apagar la red del portátil, `Este equipo no tiene la IP` | `nmcli networking off` le quita la dirección a `tailscale0` y Tailscale no la repone | `sudo systemctl restart tailscaled` |
 | Unas veces 60 FPS, otras 27–45 | Aceptado. Hay `Atomic commit failed` en `eDP-1`, unos 6 por minuto, con y sin V-Sync. Causa sin confirmar | Ninguna conocida. `--no-vsync` se mantiene porque fue la última configuración probada |
-| Una **franja inferior** del panel (unos 150–200 px, y otra más fina arriba) se estropea cada 2 segundos, con rayas verticales | **Causa sin demostrar**: apunta a la decodificación o al dibujo en el HP. Limitación aceptada | Ver más abajo |
+| Una **franja inferior** del panel (unos 150–200 px, y otra más fina arriba) se estropea cada 2 segundos, con rayas verticales | **Fallo de hardware del panel del HP**: aparece hasta en la BIOS | Ninguna por software; ver más abajo |
 
-### La franja inferior: limitación aceptada
+### La franja inferior: fallo de hardware del panel del HP
 
-Una franja de unos 150–200 píxeles abajo, y otra más fina arriba, se pixelan con un ritmo fijo de unos
-2 segundos, incluso con el escritorio quieto. **Se desconoce la causa.** El vídeo y el sonido llegan
-estables, y el usuario aceptó dejarla así (2026-11-07). Lo descartado, probando un cambio cada vez:
+Una franja de unos 150–200 píxeles abajo, y otra más fina arriba, se estropea con un ritmo fijo de unos
+2 segundos: **rayas verticales de colores**, como si una fila se repitiera hacia abajo. **Es un fallo
+de hardware del panel del HP o de su cable interno**, demostrado el 2026-11-08. La pantalla extendida
+no la causa y ningún ajuste de software la corrige. El vídeo y el sonido llegan estables.
 
-- **El códec:** ocurre igual con HEVC y con H.264.
-- **El codificador Intel:** sigue con `encoder = software` (`libx264`), y además el vídeo fluctúa. Por
-  eso se mantiene `vaapi`.
-- **El control de tasa `cqp`:** ocurre también con él. `vaapi_rc = vbr` la **redujo**, pero no la
-  eliminó, y por eso es el valor de la configuración de Sunshine.
-- **Un fotograma pesado periódico:** el tráfico que recibe el HP, medido cada 50 ms, no late a 2
-  segundos.
-- **La compresión del panel (FBC):** sigue igual apagándola en caliente.
-- **La sincronización vertical:** sigue igual con `--vsync`, y sin mejora apreciable, así que se
-  mantiene `--no-vsync`.
-- **`Atomic commit failed`:** `cage` lo anota unas 23 veces por minuto, pero a intervalos irregulares,
-  y la franja late con ritmo fijo. No se ha visto que afecte a la sesión.
-- **El ahorro de energía del panel (PSR):** el estado de PSR da `No such device`, señal de que este
-  panel no lo usa.
+La prueba que lo zanja: **aparece también en la configuración de la BIOS**, donde no interviene nada de
+Linux. Antes, cambiando una sola cosa cada vez, se vio que aparece igual:
 
-**Hallazgo del 2026-11-08: apunta al receptor.** Un vídeo del panel, grabado con Windows como emisor
-mientras se reproducía YouTube, muestra lo mismo que en Fedora. No es un pixelado de compresión: en la
-banda inferior, a la altura de la barra de tareas, aparecen **rayas verticales de colores**, como si una
-fila de píxeles se repitiera hacia abajo, y en algunos fotogramas tapan los iconos. Es el patrón típico
-de un dibujo que lee por debajo del borde válido del fotograma decodificado y repite la última fila
-buena ([Mozilla, error 1766124](https://bugzilla.mozilla.org/show_bug.cgi?id=1766124)).
+| Prueba | Resultado |
+|---|---|
+| Emisores Fedora (Sunshine) y Windows (Apollo), HEVC y H.264, codificador Intel y por software | Sigue |
+| Decodificación en el HP con `iHD`, con `i965` y por software, que además cambia el dibujo | Sigue |
+| `cage` con `WLR_DRM_NO_MODIFIERS=1` y con `WLR_DRM_NO_ATOMIC=1`; FBC apagado; `--vsync` | Sigue |
+| Patrón de prueba generado en el HP con `ffplay`, sin red ni Moonlight | Sigue |
+| Pantalla negra con solo el cursor de `cage` | Sigue |
+| Consola de texto (`tty1`) con `htop`, sin `cage` | Sigue |
+| BIOS del equipo | Sigue |
 
-Con dos sistemas, dos codificadores y la codificación por software, todos con la franja, el emisor
-queda prácticamente descartado. La sospecha pasa a la decodificación por hardware del HP (VA-API en
-la UHD 600) o a cómo Moonlight pasa ese fotograma a la pantalla (EGL sobre Xwayland). Es una hipótesis
-fundada, no una causa demostrada.
+El controlador `i915` funciona de forma estable: 1920×1080 a 60 Hz, sin PSR ni DRRS, sin entradas en
+estados de ahorro DC (contador `DC3 -> DC5` a 0) y sin errores del kernel.
 
-Sin probar: la decodificación por software en el HP durante unos segundos y con ajustes ligeros, para
-no ahogar el Celeron de 2 núcleos, y otra vía de dibujo de Qt (`QT_XCB_GL_INTEGRATION`).
+**Qué hacer:** si molesta, la vía es física. Se puede reasentar el conector del cable del panel en la
+placa, con el equipo apagado y desenchufado, o reparar el panel. `vaapi_rc = vbr` se mantiene porque
+en Sunshine parecía reducirla, pero con un fallo de hardware esa mejora no está demostrada.
 
 ### Otros riesgos abiertos
 
