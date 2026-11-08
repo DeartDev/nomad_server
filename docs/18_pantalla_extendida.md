@@ -843,6 +843,7 @@ este**.
 | Sesión entrecortada por Wi-Fi | Red saturada o señal débil, aun con el tope de 15 Mbit/s | Acércate al router o usa el cable. Para bajar el tope, cambia `BITRATE_WIFI` en `pantalla-hp.sh` |
 | Tras apagar la red del portátil, `Este equipo no tiene la IP` | `nmcli networking off` le quita la dirección a `tailscale0` y Tailscale no la repone | `sudo systemctl restart tailscaled` |
 | Unas veces 60 FPS, otras 27–45 | Aceptado. Hay `Atomic commit failed` en `eDP-1`, unos 6 por minuto, con y sin V-Sync. Causa sin confirmar | Ninguna conocida. `--no-vsync` se mantiene porque fue la última configuración probada |
+| El vídeo de Disney+, Prime Video o Netflix se ve **en negro** en el HP, con sonido | Protección anticopia (DRM) del servicio, sobre todo en Edge o en apps de Windows | Usa Chrome sin aceleración por hardware o el navegador de Fedora. Ver más abajo |
 | Una **franja inferior** del panel (unos 150–200 px, y otra más fina arriba) se estropea cada 2 segundos, con rayas verticales | **Fallo de hardware del panel del HP**: aparece hasta en la BIOS | Ninguna por software; ver más abajo |
 
 ### La franja inferior: fallo de hardware del panel del HP
@@ -871,6 +872,23 @@ estados de ahorro DC (contador `DC3 -> DC5` a 0) y sin errores del kernel.
 **Qué hacer:** si molesta, la vía es física. Se puede reasentar el conector del cable del panel en la
 placa, con el equipo apagado y desenchufado, o reparar el panel. `vaapi_rc = vbr` se mantiene porque
 en Sunshine parecía reducirla, pero con un fallo de hardware esa mejora no está demostrada.
+
+### Servicios de streaming con DRM (Disney+, Prime Video, Netflix…)
+
+**Sin probar en este equipo:** es el comportamiento habitual de estos servicios, no una medición. Para
+ellos, Sunshine y Apollo son programas que capturan la pantalla. El vídeo puede verse en negro, bajar
+de calidad o no reproducirse; el sonido suele llegar igual.
+
+| Emisor y navegador | Lo esperable |
+|---|---|
+| Fedora, cualquier navegador | Se ve, porque en Linux no se usa la vía protegida por hardware. La calidad ya viene limitada por el servicio, normalmente a 720p en Linux |
+| Windows, Edge o la app de Netflix | Vídeo **en negro**, con sonido: usan la protección por hardware (PlayReady) |
+| Windows, Chrome o Firefox | Suele verse. Si sale en negro, desactiva la **aceleración por hardware** del navegador |
+| Windows, cualquiera | La pantalla virtual de Apollo no tiene HDCP: algunos servicios bajan la resolución en Full HD |
+
+La opción más fiable es el navegador de Fedora, o Chrome en Windows sin aceleración por hardware. Para
+salir de dudas basta una prueba de un minuto por servicio con `pantalla-hp extender`. Cuando se pruebe,
+esta tabla se sustituye por el resultado real.
 
 ### Otros riesgos abiertos
 
