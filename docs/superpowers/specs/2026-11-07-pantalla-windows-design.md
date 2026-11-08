@@ -1,7 +1,9 @@
 # Pantalla extendida en Windows 11 — especificación de diseño
 
-> **Estado: EN CONSTRUCCIÓN.** Tarea 2 del plan hecha el 2026-11-07: emisor elegido y preguntas del § 5
-> respondidas (resultados en el § 7). Escrito en Fedora el 2026-11-07. Se construye desde Windows 11 con
+> **Estado: EN CONSTRUCCIÓN.** Tareas 2 y 3 del plan hechas el 2026-11-07: emisor elegido y preguntas
+> del § 5 respondidas (resultados en el § 7); el HP elige emisor y `nomad-pantalla@windows.service`
+> funcionó en la prueba real. **Desde la Tarea 3, Fedora no abre sesión** hasta recibir esta rama
+> (regresión de la Tarea 6). Escrito en Fedora el 2026-11-07. Se construye desde Windows 11 con
 > WSL2, en una sesión que no conoce la conversación anterior: este documento y su plan deben bastar.
 > Plan: `docs/superpowers/plans/2026-11-07-pantalla-windows.md`. Antecedentes: el diseño de Fedora
 > (`docs/superpowers/specs/2026-11-05-pantalla-extendida-design.md`) y el capítulo 18.
@@ -229,3 +231,14 @@ debe crear estas reglas y avisar si una actualización de Apollo vuelve a activa
 - En Windows, la sesión de Claude usó una copia portátil de Node en `%LOCALAPPDATA%\nomad-tools` para
   el MCP de Chrome DevTools, porque WSL con red NAT no llega al `localhost` de Windows. No forma parte
   del proyecto.
+
+## 8. Resultado de la Tarea 3 en el HP
+
+`18_pantalla.sh` aplicó 8 cambios: lanzador, `emisor.sh`, `nomad-pantalla@.service`, unidad de vínculo,
+límites del usuario y sudoers, y retiró `nomad-pantalla.service` con `daemon-reload`. La segunda ejecución
+dio `Cambios que se aplicarían: 0`; `verificar_sistema.sh --seccion pantalla` pasó entera y `sudo -n -l`
+lista las cuatro órdenes.
+
+`nomad-pantalla@windows.service` arrancó `lanzar.sh windows` contra `100.100.15.46`: escritorio extendido,
+sonido a buen volumen (`Master` al 100 %) y tecla Win, confirmados por el usuario. Al parar, el HP volvió
+a `tty1` sin procesos de `pantalla` y Windows a su pantalla interna como única principal.
