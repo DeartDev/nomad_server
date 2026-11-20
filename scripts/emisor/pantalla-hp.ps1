@@ -422,8 +422,13 @@ function Test-Requisitos {
     } elseif ($rc -ne 0) {
         throw "$hp no responde sin preguntas: comprueba con 'ssh-add -l' que la clave está en el agente de Windows. No se ha tocado nada."
     }
-    if ((Invoke-SshHP "test -w $($script:DirSesionHP)") -ne 0) {
+    # 1 es de 'test': falta la carpeta o no se puede escribir. Otro código es de
+    # ssh (255) o del tope (124), y entonces el problema es la conexión.
+    $rc = Invoke-SshHP "test -w $($script:DirSesionHP)"
+    if ($rc -eq 1) {
         throw "$hp no tiene $($script:DirSesionHP), donde se deja la elección de audio. Ejecuta allí: sudo ./scripts/18_pantalla.sh. No se ha tocado nada."
+    } elseif ($rc -ne 0) {
+        throw "$hp ha dejado de responder por ssh (código $rc). Vuelve a intentarlo; si se repite, comprueba la red. No se ha tocado nada."
     }
 }
 
