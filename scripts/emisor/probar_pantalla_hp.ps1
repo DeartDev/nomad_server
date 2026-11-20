@@ -82,7 +82,7 @@ function Read-Conf { @{ HP_SSH = 'hp-prueba'; EMISOR_IP = '100.64.0.8' } }
 function Escribir { param([string]$Nivel, [string]$Texto) $script:S.Salida.Add("[$Nivel] $Texto") }
 
 function Invoke-SshHP {
-    param([string]$Orden, [switch]$Interactivo)
+    param([string]$Orden, [switch]$Interactivo, [switch]$Tty, [switch]$SinRepetir)
     $tipo = if ($Interactivo) { 'ssh-t' } else { 'ssh' }
     $script:S.Llamadas.Add("$tipo $Orden")
     if ($script:S.SshFalla) { return 255 }

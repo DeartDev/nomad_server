@@ -85,21 +85,51 @@ function Read-Conf {
 # no contesta. Con -Interactivo puede pedir la frase de la clave o la contraseña
 # de sudo: 'AddKeysToAgent' deja la clave en el agente para lo que viene después.
 function Invoke-SshHP {
-    param([string]$Orden, [switch]$Interactivo)
+    param([string]$Orden, [switch]$Interactivo, [switch]$Tty, [switch]$SinRepetir)
     $hp = $script:Conf.HP_SSH
     if ($Interactivo) {
-        # LogLevel=ERROR quita el «Connection to ... closed.» de -t y deja los errores.
-        & ssh.exe -t -o AddKeysToAgent=yes -o ConnectTimeout=5 -o LogLevel=ERROR $hp $Orden
+        # -t solo cuando hace falta teclear en el HP (la contraseña de sudo al
+        # vincular): con -t, ssh.exe se quedó a veces sin terminar tras acabar la
+        # orden, minutos, hasta matarlo (medido, 2026-11-19). La frase de la clave
+        # no la necesita: ssh la pide en la consola, y -n no le afecta.
+        # LogLevel=ERROR quita el «Connection to ... closed.» y deja los errores.
+        if ($Tty) { & ssh.exe -t -o AddKeysToAgent=yes -o ConnectTimeout=5 -o LogLevel=ERROR $hp $Orden }
+        else { & ssh.exe -n -o AddKeysToAgent=yes -o ConnectTimeout=5 -o LogLevel=ERROR $hp $Orden }
         return $LASTEXITCODE
     }
+    $rc = Invoke-SshHPUnaVez $hp $Orden
+    if ($rc -eq 124 -and -not $SinRepetir) {
+        Escribir 'AVISO' "$hp no ha contestado en $($script:LimiteSsh) s: se repite una vez."
+        $rc = Invoke-SshHPUnaVez $hp $Orden
+    }
+    return $rc
+}
+
+# El 2026-11-19 algunas llamadas se quedaron colgadas hasta el tope, con 'true'
+# incluso, y otras 60 seguidas no; desde WSL, ninguna. La causa no se conoce. Las
+# tres corrientes van redirigidas, y quien llama repite una vez: todo lo que se
+# manda sin -Interactivo se puede repetir (comprobar, escribir el audio, stop y
+# start, is-active). La salida se lee aparte y se muestra al terminar.
+function Invoke-SshHPUnaVez {
+    param([string]$hp, [string]$Orden)
     $info = New-Object System.Diagnostics.ProcessStartInfo
     $info.FileName = 'ssh.exe'
-    $info.Arguments = '-o BatchMode=yes -o ConnectTimeout=5 {0} "{1}"' -f $hp, $Orden
+    $info.Arguments = '-n -o BatchMode=yes -o ConnectTimeout=5 {0} "{1}"' -f $hp, $Orden
     $info.UseShellExecute = $false
+    $info.RedirectStandardInput = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
     $proceso = [System.Diagnostics.Process]::Start($info)
+    $proceso.StandardInput.Close()
+    $salida = $proceso.StandardOutput.ReadToEndAsync()
+    $errores = $proceso.StandardError.ReadToEndAsync()
     if (-not $proceso.WaitForExit($script:LimiteSsh * 1000)) {
         try { $proceso.Kill() } catch { }
         return 124
+    }
+    $proceso.WaitForExit()
+    foreach ($texto in $salida.Result, $errores.Result) {
+        if ($texto) { Write-Host ($texto.TrimEnd()) }
     }
     return $proceso.ExitCode
 }
@@ -496,7 +526,9 @@ function Open-Sesion {
 function Close-Sesion {
     if ($script:Conf -and $script:Conf.HP_SSH) {
         $orden = "sudo -n systemctl stop $($script:UHp) ; sudo -n systemctl stop $($script:UHpOtra)"
-        if ((Invoke-SshHP $orden) -ne 0) {
+        # Sin repetir: con la interna quizá apagada, cada segundo cuenta, y si el
+        # HP no contesta su sesión se cierra sola al dejar de ver a Apollo.
+        if ((Invoke-SshHP $orden -SinRepetir) -ne 0) {
             Escribir 'AVISO' "$($script:Conf.HP_SSH) no ha respondido: su sesión se cierra sola al dejar de ver a Apollo."
         }
     } else {
@@ -546,7 +578,7 @@ function Invoke-Vincular {
     if (Get-Virtual) { throw 'Hay una sesión activa. Ciérrala antes con: pantalla-hp off' }
     $pin = '{0:D4}' -f (Get-Random -Minimum 0 -Maximum 10000)
     Escribir 'INFO' 'Te pedirá la contraseña de sudo del HP.'
-    $rc = Invoke-SshHP -Interactivo "sudo systemctl start --no-block nomad-pantalla-vincular@windows-$pin.service"
+    $rc = Invoke-SshHP -Interactivo -Tty "sudo systemctl start --no-block nomad-pantalla-vincular@windows-$pin.service"
     if ($rc -ne 0) { throw 'El HP no ha arrancado la unidad de vínculo.' }
     Start-Navegador $script:UrlPin
     Escribir 'OK' "En la web de Apollo, pestaña 'PIN Pairing', escribe el PIN $pin y pulsa Send. Tienes 90 s."
