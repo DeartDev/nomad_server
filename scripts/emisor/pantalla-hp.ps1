@@ -88,7 +88,8 @@ function Invoke-SshHP {
     param([string]$Orden, [switch]$Interactivo)
     $hp = $script:Conf.HP_SSH
     if ($Interactivo) {
-        & ssh.exe -t -o AddKeysToAgent=yes -o ConnectTimeout=5 $hp $Orden
+        # LogLevel=ERROR quita el «Connection to ... closed.» de -t y deja los errores.
+        & ssh.exe -t -o AddKeysToAgent=yes -o ConnectTimeout=5 -o LogLevel=ERROR $hp $Orden
         return $LASTEXITCODE
     }
     $info = New-Object System.Diagnostics.ProcessStartInfo
@@ -414,7 +415,8 @@ function Test-Requisitos {
     }
     # 1 es de sudo, no de ssh (255) ni del tope (124): ssh ha entrado, pero la
     # regla no permite la instancia. Es un HP con la versión anterior.
-    $rc = Invoke-SshHP "sudo -n -l /usr/bin/systemctl start $($script:UHp)"
+    # Con la orden, «sudo -l» la imprime si la permite: no hace falta verla.
+    $rc = Invoke-SshHP "sudo -n -l /usr/bin/systemctl start $($script:UHp) > /dev/null"
     if ($rc -eq 1) {
         throw "El sudo de $hp no permite arrancar $($script:UHp) sin contraseña. Si el HP tiene la versión anterior, ejecuta allí: sudo ./scripts/18_pantalla.sh. No se ha tocado nada."
     } elseif ($rc -ne 0) {

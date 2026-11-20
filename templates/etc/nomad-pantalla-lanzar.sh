@@ -52,8 +52,11 @@
 #    hp        la tarjeta interna del HP (PCH): altavoces o jack.
 #    hp-usb    la primera tarjeta USB del HP (auriculares, altavoz USB). Si no
 #              hay ninguna, sale por la interna y lo dice en el journal.
-#    portatil  Moonlight pide al emisor que no le envíe el sonido
-#              (--audio-on-host): suena en lo que el portátil tenga como salida.
+#    portatil  suena en lo que el portátil tenga como salida: Moonlight pide
+#              al emisor que lo reproduzca allí (--audio-on-host), y el HP lo
+#              descarta (SDL_AUDIODRIVER=dummy). Hacen falta las dos cosas:
+#              Apollo sigue enviando el sonido con --audio-on-host, y sin la
+#              segunda sonaba también en el HP (medido, 2026-11-19).
 # ===========================================================================
 # Sin 'set -e': 'wait' devuelve el código de Moonlight, y un sondeo que falla es
 # parte del funcionamiento normal.
@@ -142,7 +145,10 @@ OPCIONES_AUDIO=()
 case "${AUDIO}" in
     portatil)
         OPCIONES_AUDIO=(--audio-on-host)
-        echo "Audio: en el portátil (--audio-on-host)." >&2 ;;
+        # El SDL2 de Moonlight es la capa de compatibilidad sobre SDL3, que lee
+        # SDL_AUDIO_DRIVER: se fijan las dos.
+        export SDL_AUDIODRIVER=dummy SDL_AUDIO_DRIVER=dummy
+        echo "Audio: en el portátil (--audio-on-host; el HP no lo reproduce)." >&2 ;;
     hp-usb)
         TARJETA="$(tarjeta_usb)"
         if [[ -n "${TARJETA}" ]]; then

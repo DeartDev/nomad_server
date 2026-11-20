@@ -314,7 +314,10 @@ pruebas manuales anteriores. Todo es de Fedora; lo medido con Windows está en e
 |---|---|---|
 | `hp` (si no se indica) | Los altavoces del HP, o lo que tenga en su jack | Moonlight usa la tarjeta interna del HP (`PCH`) |
 | `hp-usb` | Un audio USB conectado al HP: auriculares, altavoz, tarjeta | Moonlight usa la primera tarjeta USB del HP (`ALSA_CARD`). Si no hay, sale por la interna y lo anota |
-| `portatil` | Lo que el portátil tenga como salida: sus altavoces, auriculares por cable o Bluetooth | Moonlight pide al emisor que no le envíe el sonido (`--audio-on-host`). El dispositivo se cambia en el portátil, como siempre |
+| `portatil` | Lo que el portátil tenga como salida: sus altavoces, auriculares por cable o Bluetooth | Moonlight pide al emisor que lo reproduzca allí (`--audio-on-host`) y el HP lo descarta (`SDL_AUDIODRIVER=dummy`). El dispositivo se cambia en el portátil, como siempre |
+
+Con `portatil` hacen falta las dos cosas: Apollo sigue capturando y enviando el sonido aunque el cliente
+pida `--audio-on-host`, y sin descartarlo en el HP sonaba en los dos sitios (medido, 2026-11-19).
 
 ```bash
 pantalla-hp principal --audio portatil

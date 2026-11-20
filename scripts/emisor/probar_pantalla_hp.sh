@@ -1427,6 +1427,7 @@ preparar_lanzador() {
 echo "\$\$" > "${CAJA}/pid_moonlight"
 echo "\$*" > "${CAJA}/args_moonlight"
 echo "\${ALSA_CARD-}" > "${CAJA}/alsa_card"
+echo "\${SDL_AUDIODRIVER-}" > "${CAJA}/sdl_audio"
 $1
 DOBLE
     chmod +x "${CAJA}/moonlight"
@@ -1502,6 +1503,7 @@ prueba_lanzador_sin_eleccion_de_audio_usa_la_interna() {
     rc_es 0
     [[ "$(cat "${CAJA}/alsa_card")" == PCH ]] || fallar "ALSA_CARD: $(cat "${CAJA}/alsa_card")"
     [[ "$(cat "${CAJA}/args_moonlight")" != *audio-on-host* ]] || fallar "no debía pedir audio en el emisor"
+    [[ "$(cat "${CAJA}/sdl_audio")" == alsa ]] || fallar "SDL_AUDIODRIVER: $(cat "${CAJA}/sdl_audio")"
     dice "tarjeta interna del HP"
 }
 
@@ -1512,6 +1514,8 @@ prueba_lanzador_audio_portatil_pide_audio_on_host() {
     rc_es 0
     [[ "$(cat "${CAJA}/args_moonlight")" == *" --capture-system-keys fullscreen --audio-on-host" ]] \
         || fallar "falta --audio-on-host: $(cat "${CAJA}/args_moonlight")"
+    # Apollo sigue enviando el sonido: el HP lo tiene que descartar.
+    [[ "$(cat "${CAJA}/sdl_audio")" == dummy ]] || fallar "el HP reproduce el sonido: $(cat "${CAJA}/sdl_audio")"
 }
 
 prueba_lanzador_audio_hp_usb_elige_la_tarjeta_usb() {
