@@ -306,6 +306,30 @@ Medido en el HP con Moonlight 6.2.0 (el HP All-in-One 22-dd2xxx; panel `eDP-1` d
 Las cifras de cortes y de Wi-Fi son del servidor real con `pantalla-hp`; las de CPU y FPS, de las
 pruebas manuales anteriores. Todo es de Fedora; lo medido con Windows está en el § 10.5.
 
+### 3.12 Por dónde sale el sonido: se elige en cada sesión
+
+`extender` y `principal` aceptan `--audio`, en Fedora y en Windows:
+
+| Opción | Sale por | Cómo |
+|---|---|---|
+| `hp` (si no se indica) | Los altavoces del HP, o lo que tenga en su jack | Moonlight usa la tarjeta interna del HP (`PCH`) |
+| `hp-usb` | Un audio USB conectado al HP: auriculares, altavoz, tarjeta | Moonlight usa la primera tarjeta USB del HP (`ALSA_CARD`). Si no hay, sale por la interna y lo anota |
+| `portatil` | Lo que el portátil tenga como salida: sus altavoces, auriculares por cable o Bluetooth | Moonlight pide al emisor que no le envíe el sonido (`--audio-on-host`). El dispositivo se cambia en el portátil, como siempre |
+
+```bash
+pantalla-hp principal --audio portatil
+```
+
+**No se recuerda:** cada sesión empieza en `hp`, salvo que se indique otra cosa. El micrófono no entra:
+Moonlight no lo transmite.
+
+**Cómo llega al HP sin ampliar el `sudo`.** La regla del § 3.6 no cambia. En la misma llamada SSH que
+arranca la unidad, el portátil escribe la opción en `/var/lib/nomad-pantalla/audio`, una carpeta del
+administrador que crea `18_pantalla.sh` (`755`; el usuario `pantalla` solo la lee). `lanzar.sh` la lee
+como texto, una vez, y solo acepta esos tres valores: cualquier otro, o ninguno, es `hp`. No ejecuta nada
+de lo que contenga. Antes de tocar nada, `pantalla-hp` comprueba que la carpeta existe y, si no, pide
+ejecutar `18_pantalla.sh` en el HP.
+
 ---
 
 ## 4. Variables usadas
@@ -642,6 +666,8 @@ Lo que hace por dentro:
 
 ### Paso 10 — Abrir y cerrar una sesión
 
+El sonido sale por el HP si no se indica otra cosa; para elegir, `--audio` (§ 3.12).
+
 ```bash
 # [portátil] — te pide la frase de tu clave SSH, una vez, y nada más
 pantalla-hp extender
@@ -855,6 +881,9 @@ este**.
 | `... no responde sin preguntas: revisa 'ssh-add -l' ...` | El `ssh` entra preguntando, pero la clave no quedó en el agente, o falta la regla de `sudo` del HP | `ssh-add -l` y, si sale vacío, comprueba que el portátil tiene un agente en marcha. En el HP, `sudo ./scripts/18_pantalla.sh`. No se ha cambiado nada |
 | `Este equipo no tiene la IP ...: ¿Tailscale está conectado?` | `PANTALLA_EMISOR_IP` no es la del portátil, o Tailscale está caído | `tailscale ip -4` en el portátil y compáralo con la variable |
 | `Ya hay una sesión activa` | Quedó Sunshine o el monitor de una sesión anterior | `pantalla-hp off` |
+| `... no tiene /var/lib/nomad-pantalla, donde se deja la elección de audio` | El HP tiene la versión anterior de `18_pantalla.sh` | En el HP: `sudo ./scripts/18_pantalla.sh`. No se ha tocado nada |
+| Con `--audio hp-usb`, el sonido sale por los altavoces del HP | El HP no ve ninguna tarjeta USB: el registro dice `se pidió una tarjeta USB y el HP no tiene ninguna` | `cat /proc/asound/cards` en el HP: debe salir una línea `USB-Audio`. Reconecta el dispositivo y abre la sesión otra vez |
+| Con `--audio portatil` no suena nada | El portátil tiene silenciada o elegida otra salida | Elige la salida en el portátil. El HP solo deja de pedir el sonido |
 | El HP muestra un error y vuelve a `tty1` enseguida | Falló `cage` o Moonlight | `sudo journalctl -u nomad-pantalla@fedora.service -n 50` y la salida de Moonlight: `sudo journalctl _UID=$(id -u pantalla) -n 50` (con `-u` no sale) |
 | `El sudo de ... no permite arrancar nomad-pantalla@...` o `sudoers ... de la versión anterior` | El HP tiene la regla de `sudo` antigua, de la unidad sin instancia | En el HP: `sudo ./scripts/18_pantalla.sh`. No se ha tocado nada |
 | La sesión termina en cuanto arranca y el registro dice `El emisor '...' no tiene IP` | Falta la IP de ese emisor en `servidor.env` del HP | `./scripts/variables.sh --fijar PANTALLA_EMISOR_WINDOWS_IP=<ip>` (o `PANTALLA_EMISOR_IP`) y `sudo ./scripts/18_pantalla.sh` |
@@ -934,6 +963,7 @@ ThinkPad E14 con Windows 11 Pro 26H2, gráfica Iris Xe, Apollo 0.4.6 y PowerShel
 ```powershell
 pantalla-hp extender     # el HP es un segundo escritorio
 pantalla-hp principal    # el HP es la única pantalla: la interna se apaga
+pantalla-hp principal --audio portatil   # el sonido, en el E14 (§ 3.12)
 pantalla-hp estado
 pantalla-hp off          # deja la interna activa y como principal
 pantalla-hp vincular     # una vez
@@ -995,10 +1025,27 @@ interna. Se comprobó en modo principal con el corte total (cable fuera y modo a
 sin hacer nada. `off` pide al HP que pare, espera hasta 20 segundos a que la virtual desaparezca, aplica
 `DisplaySwitch /internal` y comprueba que la interna es la principal.
 
-**La tapa no se toca.** Con la tapa cerrada la sesión sigue: cinco minutos, 36 muestras desde el HP, sin
-cortes, con la acción de tapa predeterminada («suspender»). No hay ajuste de energía que restaurar. En
-modo principal, al cerrar la tapa Windows entra un instante en espera moderna y **se bloquea**: se
-desbloquea desde el HP y sigue funcionando. Al abrirla, la interna sigue apagada hasta el `off`.
+**Durante la sesión, la tapa no suspende.** Al principio no hizo falta: en noviembre, con la tapa
+cerrada, Windows entraba en espera moderna y salía en el mismo segundo, y la sesión seguía. El
+2026-11-19 dejó de ser así: en modo principal, al cerrar la tapa Windows entró en espera
+(*«motivo: Lid»*), bloqueó la entrada, y el HP perdió la conexión al segundo y volvió a `tty1`. Windows no
+salió de la espera hasta que se abrió la tapa. La causa del cambio no se conoce; puede ser una
+actualización de Windows.
+
+Por eso `pantalla-hp` hace lo mismo que `systemd-inhibit` en Fedora:
+
+- **Al abrir la sesión** guarda la acción de la tapa (un ajuste oculto de energía, `powercfg /qh`), con
+  corriente y con batería, en `%LOCALAPPDATA%\nomad-pantalla\tapa.conf`, y la pone en «No hacer nada».
+  No necesita administrador (medido con un token sin privilegios).
+- **`off` la restaura**, después de devolver la imagen a la interna.
+- **Si la sesión acaba sin `off`** (un corte, el HP que se va), un vigilante oculto que arranca con la
+  sesión ve que la pantalla virtual ha desaparecido y la restaura. Si la virtual no llega a aparecer,
+  la restaura al minuto.
+- **Si aun así queda sin restaurar**, por ejemplo tras un apagón, la siguiente `pantalla-hp extender`,
+  `principal` o `vincular` la restaura antes de seguir. `estado` dice cómo está.
+
+Sin la red de seguridad, un portátil cerrado dentro de una mochila no se suspendería. Con la tapa
+cerrada al terminar la sesión, Windows se suspende en cuanto se restaura.
 
 **Teclado.** La pantalla de bloqueo y las ventanas de UAC se ven y se controlan desde el HP. La tecla
 Win funciona porque `lanzar.sh` lleva `--capture-system-keys fullscreen`. `Win+L` no llega, porque
@@ -1299,7 +1346,9 @@ ve afectado.
 | En el HP se ve lo mismo que en el portátil | Windows está en «Duplicar», o la interna es la principal | `pantalla-hp off` y `pantalla-hp extender`: la orden fija la disposición |
 | Tras parar, el portátil se queda sin barra de tareas | Falta `terminate-on-pause` en `Desktop`: la virtual sigue como principal | Para la aplicación en la web de Apollo, `preparar_windows.ps1` y `pantalla-hp off` |
 | `La pantalla interna no ha vuelto` | Windows no aplicó `DisplaySwitch /internal` | `Win+P` y *Solo pantalla de PC* |
-| Al cerrar la tapa en modo principal, el HP muestra la pantalla de bloqueo | Windows entra un instante en espera moderna | Es lo previsto: desbloquea desde el HP |
+| Al cerrar la tapa, el HP se congela y vuelve a `tty1` | Windows se suspendió: la tapa estaba en «Suspender» durante la sesión | `pantalla-hp estado` debe decir «Tapa: sin suspender por la sesión». Si dice otra cosa, la orden instalada es anterior: `preparar_windows.ps1` |
+| Con la sesión cerrada, cerrar la tapa no suspende el portátil | Quedó la tapa en «No hacer nada» de una sesión que no se cerró bien | `pantalla-hp off`, o cualquier `extender`/`principal`: la restauran con lo guardado en `tapa.conf` |
+| `No se ha podido restaurar la tapa; queda pendiente` | Windows rechazó el cambio con `powercfg` | Repite `pantalla-hp off`. A mano: *Opciones de energía › Elegir el comportamiento del cierre de la tapa* |
 | `Win+L` no bloquea desde el HP | Windows no acepta ese atajo de un teclado simulado | Bloquea desde Inicio |
 | La web de Apollo responde desde otro equipo | Falta una regla de bloqueo, o una actualización reactivó las reglas `Apollo` | `preparar_windows.ps1 -Check` lo cuenta como cambio; aplícalo como administrador |
 | Un script `.ps1` editado muestra acentos rotos o falla al cargar | Se guardó sin BOM | Guárdalo en UTF-8 **con BOM**. `make check` lo comprueba |

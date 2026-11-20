@@ -25,7 +25,8 @@ Prepara el HP como cliente de la pantalla extendida:
   3. Descarga Moonlight, verifica su SHA-256 y lo extrae en /opt/nomad-pantalla
   4. Instala el lanzador, el traductor de emisores, las unidades, los límites
      del usuario y el permiso de sudo, y retira la unidad sin instancia de la
-     versión anterior (nomad-pantalla.service)
+     versión anterior (nomad-pantalla.service). Crea /var/lib/nomad-pantalla,
+     donde el emisor deja la elección de audio de cada sesión
   5. Comprueba que no hay gestor de pantalla en el equipo
 
 Opciones:
@@ -79,6 +80,9 @@ if [[ -z "${PANTALLA_EMISOR_WINDOWS_IP:-}" ]]; then
 fi
 
 DIR_PANTALLA="/opt/nomad-pantalla"
+# Donde el emisor deja, por SSH y sin sudo, la elección de audio de cada sesión.
+# Es del administrador; el usuario de la pantalla solo la lee.
+DIR_SESION="/var/lib/nomad-pantalla"
 DIR_MOONLIGHT="${DIR_PANTALLA}/moonlight"
 # La unidad sin instancia de la versión anterior. Con las de ahora, seguiría
 # arrancable a mano contra una IP fija y fuera de la regla de sudo.
@@ -213,6 +217,13 @@ fi
 rm -f "${TMP_SUDOERS}"
 log_ok "sudoers validado con visudo."
 instalar_plantilla etc/sudoers-nomad-pantalla /etc/sudoers.d/nomad-pantalla 440 root:root
+
+log_paso "Carpeta de sesión"
+if [[ -d "${DIR_SESION}" && "$(stat -c '%U %a' "${DIR_SESION}" 2>/dev/null)" == "${ADMIN_USUARIO} 755" ]]; then
+    log_ok "${DIR_SESION} existe, de ${ADMIN_USUARIO} y con 755."
+else
+    ejecutar install -d -m 755 -o "${ADMIN_USUARIO}" -g "${ADMIN_USUARIO}" "${DIR_SESION}"
+fi
 
 # --- Paso 5: salvaguardas ----------------------------------------------------
 log_paso "Salvaguardas"

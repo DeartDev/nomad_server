@@ -632,6 +632,51 @@ prueba_arranque_para_la_sesion_huerfana_de_windows() {
     no_hay "sudo -n systemctl start nomad-pantalla@windows.service"
 }
 
+prueba_audio_por_defecto_es_hp_y_va_antes_del_arranque() {
+    lanzar extender
+    rc_es 0
+    local llamada
+    llamada="$(sed -n "$(linea "sudo -n systemctl start nomad-pantalla@fedora.service")p" "${CAJA}/llamadas")"
+    [[ "${llamada}" == *"echo hp > /var/lib/nomad-pantalla/audio ; sudo -n systemctl stop"* ]] \
+        || fallar "no deja el audio antes de arrancar: ${llamada}"
+}
+
+prueba_audio_portatil_se_deja_en_el_hp() {
+    lanzar principal --audio portatil
+    rc_es 0
+    hay "echo portatil > /var/lib/nomad-pantalla/audio"
+    dice "Audio: portatil"
+}
+
+prueba_audio_con_igual_tambien_vale() {
+    lanzar extender --audio=hp-usb
+    rc_es 0
+    hay "echo hp-usb > /var/lib/nomad-pantalla/audio"
+}
+
+prueba_audio_desconocido_no_toca_nada() {
+    lanzar extender --audio 'hp;reboot'
+    rc_no_es_cero
+    dice "Audio desconocido"
+    no_hay "ssh"
+    pantallas_intactas
+}
+
+prueba_audio_solo_vale_al_abrir_la_sesion() {
+    lanzar off --audio portatil
+    rc_no_es_cero
+    dice "solo vale con extender o principal"
+}
+
+prueba_hp_sin_carpeta_de_sesion_pide_ejecutar_18_pantalla() {
+    echo "test -w /var/lib/nomad-pantalla" > "${CAJA}/rechaza_sudo"
+    lanzar extender
+    rc_no_es_cero
+    dice "18_pantalla.sh"
+    pantallas_intactas
+    no_hay "sudo -n systemctl start"
+}
+
 prueba_sudoers_antiguo_pide_ejecutar_18_pantalla_en_el_hp() {
     # El HP con la versión anterior: ssh entra, pero sudo no conoce la instancia.
     echo "sudo -n -l" > "${CAJA}/rechaza_sudo"
@@ -1355,7 +1400,8 @@ renderizar_hp() {
         export PANTALLA_EMISOR_IP="${IP_EMISOR}" PANTALLA_EMISOR_WINDOWS_IP="${IP_WINDOWS-}" \
                PANTALLA_BITRATE=15000
         envsubst "$(formato_envsubst)" < "${RAIZ}/templates/etc/$1"
-    ) | sed "s|^MOONLIGHT=.*|MOONLIGHT=${CAJA}/moonlight|; s|^RESOLVER=.*|RESOLVER=${CAJA}/emisor.sh|" > "${CAJA}/$2"
+    ) | sed "s|^MOONLIGHT=.*|MOONLIGHT=${CAJA}/moonlight|; s|^RESOLVER=.*|RESOLVER=${CAJA}/emisor.sh|;
+             s|^ARCHIVO_AUDIO=.*|ARCHIVO_AUDIO=${CAJA}/audio|; s|^TARJETAS=.*|TARJETAS=${CAJA}/tarjetas|" > "${CAJA}/$2"
     chmod +x "${CAJA}/$2"
 }
 
@@ -1380,6 +1426,7 @@ preparar_lanzador() {
 #!/bin/bash
 echo "\$\$" > "${CAJA}/pid_moonlight"
 echo "\$*" > "${CAJA}/args_moonlight"
+echo "\${ALSA_CARD-}" > "${CAJA}/alsa_card"
 $1
 DOBLE
     chmod +x "${CAJA}/moonlight"
@@ -1440,6 +1487,61 @@ prueba_lanzador_pasa_sus_argumentos_a_moonlight() {
     if grep -nE '\$\{(PANTALLA|MOONLIGHT_V)[A-Z_]*\}' "${CAJA}/lanzar.sh" "${CAJA}/emisor.sh"; then
         fallar "quedan variables sin sustituir"
     fi
+}
+
+# Las dos tarjetas del HP real (2026-11-19): unos auriculares USB y la interna.
+TARJETAS_HP=' 0 [Audio          ]: USB-Audio - USB Audio
+                      Generic USB Audio at usb-0000:00:15.0-2.1.3, full speed
+ 1 [PCH            ]: HDA-Intel - HDA Intel PCH
+                      HDA Intel PCH at 0xa1410000 irq 137'
+
+prueba_lanzador_sin_eleccion_de_audio_usa_la_interna() {
+    preparar_lanzador 'exit 0'
+    echo "${TARJETAS_HP}" > "${CAJA}/tarjetas"
+    ejecutar_lanzador
+    rc_es 0
+    [[ "$(cat "${CAJA}/alsa_card")" == PCH ]] || fallar "ALSA_CARD: $(cat "${CAJA}/alsa_card")"
+    [[ "$(cat "${CAJA}/args_moonlight")" != *audio-on-host* ]] || fallar "no debía pedir audio en el emisor"
+    dice "tarjeta interna del HP"
+}
+
+prueba_lanzador_audio_portatil_pide_audio_on_host() {
+    preparar_lanzador 'exit 0'
+    echo portatil > "${CAJA}/audio"
+    ejecutar_lanzador windows
+    rc_es 0
+    [[ "$(cat "${CAJA}/args_moonlight")" == *" --capture-system-keys fullscreen --audio-on-host" ]] \
+        || fallar "falta --audio-on-host: $(cat "${CAJA}/args_moonlight")"
+}
+
+prueba_lanzador_audio_hp_usb_elige_la_tarjeta_usb() {
+    preparar_lanzador 'exit 0'
+    echo "${TARJETAS_HP}" > "${CAJA}/tarjetas"
+    echo hp-usb > "${CAJA}/audio"
+    ejecutar_lanzador
+    rc_es 0
+    [[ "$(cat "${CAJA}/alsa_card")" == Audio ]] || fallar "ALSA_CARD: $(cat "${CAJA}/alsa_card")"
+    dice "tarjeta USB del HP (Audio)"
+}
+
+prueba_lanzador_audio_hp_usb_sin_tarjeta_usb_usa_la_interna() {
+    preparar_lanzador 'exit 0'
+    echo "${TARJETAS_HP}" | tail -n 2 > "${CAJA}/tarjetas"
+    echo hp-usb > "${CAJA}/audio"
+    ejecutar_lanzador
+    rc_es 0
+    [[ "$(cat "${CAJA}/alsa_card")" == PCH ]] || fallar "ALSA_CARD: $(cat "${CAJA}/alsa_card")"
+    dice "no tiene ninguna"
+}
+
+prueba_lanzador_audio_desconocido_no_se_ejecuta() {
+    preparar_lanzador 'exit 0'
+    printf '%s\n' '$(touch ${CAJA}/inyectado)' > "${CAJA}/audio"
+    ejecutar_lanzador
+    rc_es 0
+    [[ ! -e "${CAJA}/inyectado" ]] || fallar "se ejecutó el contenido del archivo de audio"
+    [[ "$(cat "${CAJA}/alsa_card")" == PCH ]] || fallar "ALSA_CARD: $(cat "${CAJA}/alsa_card")"
+    dice "valor desconocido"
 }
 
 prueba_lanzador_windows_usa_su_ip() {
@@ -1754,7 +1856,8 @@ preparar_hp() {
     echo "pantalla video render audio" > "${CAJA}/usuario_grupos"
     echo "${SUDOERS_CUATRO}" > "${CAJA}/sudoers"
     # La unidad de la versión anterior, en la caja y no en /etc: 'antigua' la crea.
-    sed -i "s|^UNIDAD_SIN_INSTANCIA=.*|UNIDAD_SIN_INSTANCIA=${CAJA}/nomad-pantalla.service|" \
+    sed -i "s|^UNIDAD_SIN_INSTANCIA=.*|UNIDAD_SIN_INSTANCIA=${CAJA}/nomad-pantalla.service|;
+            s|^DIR_SESION=.*|DIR_SESION=${CAJA}/sesion|" \
         "${CAJA}/repo/scripts/18_pantalla.sh"
 
     cat > "${d}/id" <<'DOBLE'
@@ -1811,6 +1914,13 @@ ejecutar_hp() {
 }
 montar_hp()    { ejecutar_hp "${CAJA}/repo/scripts/18_pantalla.sh" --check; }
 verificar_hp() { ejecutar_hp "${CAJA}/repo/scripts/verificar_sistema.sh" --seccion pantalla; }
+
+prueba_hp_crea_la_carpeta_de_sesion_del_administrador() {
+    preparar_hp
+    montar_hp
+    rc_es 0
+    dice "ejecutaría: install -d -m 755 -o admin -g admin ${CAJA}/sesion"
+}
 
 prueba_hp_con_no_no_exige_el_resto_de_variables() {
     preparar_hp

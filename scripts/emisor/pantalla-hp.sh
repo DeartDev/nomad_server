@@ -5,7 +5,8 @@
 #  Propósito : desde el portátil, crear el monitor virtual, fijar la disposición,
 #              arrancar Sunshine y pedir al HP que arranque su unidad; y dejarlo
 #              todo como estaba al terminar, aunque nadie ejecute 'off'.
-#  Uso       : pantalla-hp extender|principal|off|estado|vincular
+#  Uso       : pantalla-hp extender|principal [--audio hp|hp-usb|portatil]
+#              pantalla-hp off|estado|vincular
 #  Capítulo  : docs/18_pantalla_extendida.md
 #
 #  Corre con tu usuario, en el portátil. ~/.local/bin/pantalla-hp es un enlace a
@@ -36,7 +37,7 @@ source "$(dirname "${SCRIPT}")/../lib/common.sh"
 
 mostrar_ayuda() {
     cat <<'AYUDA'
-Uso: pantalla-hp <orden>
+Uso: pantalla-hp <orden> [--audio hp|hp-usb|portatil]
 
 Órdenes:
   extender    El panel del HP es un segundo monitor, a la derecha de la interna.
@@ -46,6 +47,11 @@ Uso: pantalla-hp <orden>
   vincular    Vincula Moonlight con Sunshine. Paso único; pide dos contraseñas.
 
 Opciones:
+  --audio X      Por dónde sale el sonido, solo con extender o principal:
+                   hp        altavoces o jack del HP (si no se indica)
+                   hp-usb    un audio USB conectado al HP
+                   portatil  lo que este portátil tenga como salida
+                 No se recuerda: cada sesión empieza en 'hp'.
   -n, --check    Muestra lo que haría, sin tocar nada.
   -h, --help     Muestra esta ayuda.
 
@@ -64,6 +70,10 @@ I=eDP-1
 # portátil es uno solo, así que una sesión de Windows abierta es una huérfana.
 U_HP=nomad-pantalla@fedora.service
 U_HP_OTRA=nomad-pantalla@windows.service
+# Donde el HP lee la elección de audio de la sesión. La crea 18_pantalla.sh; se
+# escribe sin sudo, y el lanzador del HP solo acepta hp, hp-usb y portatil.
+DIR_SESION_HP=/var/lib/nomad-pantalla
+AUDIO=hp
 
 U_MONITOR=pantalla-hp-monitor
 U_SUNSHINE=pantalla-hp-sunshine
@@ -211,6 +221,12 @@ comprobar_hp() {
         die "El sudo de ${PANTALLA_HP_SSH} no permite arrancar ${U_HP} sin contraseña. Si el HP tiene la versión anterior, ejecuta allí: sudo ./scripts/18_pantalla.sh. No se ha tocado nada."
     elif (( rc != 0 )); then
         die "${PANTALLA_HP_SSH} no responde sin preguntas: revisa 'ssh-add -l' y la regla de sudo del HP. No se ha tocado nada."
+    fi
+    rc=0
+    timeout -k 2 "${LIMITE_SSH}" ssh "${SSH_SIN_PREGUNTAS[@]}" "${PANTALLA_HP_SSH}" \
+        test -w "${DIR_SESION_HP}" < /dev/null > /dev/null || rc=$?
+    if (( rc != 0 )); then
+        die "${PANTALLA_HP_SSH} no tiene ${DIR_SESION_HP}, donde se deja la elección de audio. Ejecuta allí: sudo ./scripts/18_pantalla.sh. No se ha tocado nada."
     fi
 }
 
@@ -367,10 +383,14 @@ levantar_pila() {
 # Moonlight de una sesión anterior, ya sin conexión. Se para antes, en la misma
 # llamada, y el 'stop' puede fallar sin más: decide el 'start'. Se para también
 # la sesión de Windows, por si quedó huérfana. Cada 'stop' va aparte: sudo
-# compara la orden entera, y la regla nombra una unidad por orden.
+# compara la orden entera, y la regla nombra una unidad por orden. El audio se
+# escribe antes, en la misma llamada: el lanzador lo lee al arrancar. 'echo' y no
+# 'printf': ssh junta los argumentos sin comillas. AUDIO ya está validado.
 pedir_hp() {
     log_paso "Unidad del HP"
+    log_info "Audio: ${AUDIO}."
     if ! timeout -k 2 "${LIMITE_SSH}" ssh "${SSH_SIN_PREGUNTAS[@]}" "${PANTALLA_HP_SSH}" \
+            echo "${AUDIO}" '>' "${DIR_SESION_HP}/audio" ';' \
             sudo -n systemctl stop "${U_HP}" ';' \
             sudo -n systemctl stop "${U_HP_OTRA}" ';' \
             sudo -n systemctl start "${U_HP}" < /dev/null; then
@@ -623,8 +643,26 @@ cargar_si_existe() {
 }
 
 procesar_argumentos_comunes "$@"
-(( ${#NOMAD_ARGS_RESTANTES[@]} == 1 )) || die "Indica una sola orden (usa --help)."
-ORDEN="${NOMAD_ARGS_RESTANTES[0]}"
+ARGUMENTOS=()
+AUDIO_DADO=0
+set -- ${NOMAD_ARGS_RESTANTES[@]+"${NOMAD_ARGS_RESTANTES[@]}"}
+while (( $# > 0 )); do
+    case "$1" in
+        --audio)   (( $# >= 2 )) || die "Falta el valor de --audio: hp, hp-usb o portatil."
+                   AUDIO="$2"; AUDIO_DADO=1; shift 2 ;;
+        --audio=*) AUDIO="${1#--audio=}"; AUDIO_DADO=1; shift ;;
+        *)         ARGUMENTOS+=("$1"); shift ;;
+    esac
+done
+(( ${#ARGUMENTOS[@]} == 1 )) || die "Indica una sola orden (usa --help)."
+ORDEN="${ARGUMENTOS[0]}"
+case "${AUDIO}" in
+    hp|hp-usb|portatil) ;;
+    *) die "Audio desconocido: '${AUDIO}'. Usa hp, hp-usb o portatil." ;;
+esac
+if (( AUDIO_DADO == 1 )) && [[ "${ORDEN}" != extender && "${ORDEN}" != principal ]]; then
+    die "--audio solo vale con extender o principal."
+fi
 
 case "${ORDEN}" in
     extender|principal|off|estado|vincular|--vigilar) ;;

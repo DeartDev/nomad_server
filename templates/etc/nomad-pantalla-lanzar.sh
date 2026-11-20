@@ -41,6 +41,19 @@
 #    sesión: el cortafuegos del HP no cambia.
 #
 #  La salida de Moonlight se sigue copiando entera al journal.
+#
+#  POR DÓNDE SALE EL SONIDO
+#
+#  El emisor lo elige en cada sesión ('pantalla-hp <modo> --audio ...') y lo
+#  deja por SSH, sin sudo, en /var/lib/nomad-pantalla/audio, una carpeta del
+#  administrador que crea 18_pantalla.sh. Este script solo acepta tres valores;
+#  cualquier otro, o ninguno, es 'hp':
+#
+#    hp        la tarjeta interna del HP (PCH): altavoces o jack.
+#    hp-usb    la primera tarjeta USB del HP (auriculares, altavoz USB). Si no
+#              hay ninguna, sale por la interna y lo dice en el journal.
+#    portatil  Moonlight pide al emisor que no le envíe el sonido
+#              (--audio-on-host): suena en lo que el portátil tenga como salida.
 # ===========================================================================
 # Sin 'set -e': 'wait' devuelve el código de Moonlight, y un sondeo que falla es
 # parte del funcionamiento normal.
@@ -65,6 +78,8 @@ INTERVALO_SONDEO=5     # s entre dos sondeos
 FALLOS_MAXIMOS=3       # sondeos fallidos seguidos que cierran la sesión
 LIMITE_CONEXION=3      # s: un portátil caído no rechaza, solo no contesta
 PLAZO_CIERRE=5         # s que tiene Moonlight para salir antes de SIGKILL
+ARCHIVO_AUDIO=/var/lib/nomad-pantalla/audio
+TARJETAS=/proc/asound/cards
 FIN_DE_SESION='Connection terminated'   # lo que escribe Moonlight 6.2.0 al perderla
 
 PID_MOONLIGHT=""
@@ -115,6 +130,33 @@ vigilar_emisor() {
     cerrar_moonlight "Sin respuesta de ${EMISOR}:${PUERTO_SONDEO} en ${FALLOS_MAXIMOS} sondeos seguidos"
 }
 
+# El nombre de la primera tarjeta USB, como lo usa ALSA_CARD:
+#  0 [Audio          ]: USB-Audio - USB Audio
+tarjeta_usb() {
+    sed -nE 's/^ *[0-9]+ \[([^] ]+) *\]: USB-Audio.*/\1/p' "${TARJETAS}" 2>/dev/null | head -n 1
+}
+
+# Lo lee una sola vez y como texto: no se ejecuta nada de lo que contenga.
+AUDIO="$(head -c 32 "${ARCHIVO_AUDIO}" 2>/dev/null | tr -d '[:space:]')"
+OPCIONES_AUDIO=()
+case "${AUDIO}" in
+    portatil)
+        OPCIONES_AUDIO=(--audio-on-host)
+        echo "Audio: en el portátil (--audio-on-host)." >&2 ;;
+    hp-usb)
+        TARJETA="$(tarjeta_usb)"
+        if [[ -n "${TARJETA}" ]]; then
+            export ALSA_CARD="${TARJETA}"
+            echo "Audio: tarjeta USB del HP (${TARJETA})." >&2
+        else
+            echo "Audio: se pidió una tarjeta USB y el HP no tiene ninguna; sale por la interna." >&2
+        fi ;;
+    hp|"")
+        echo "Audio: tarjeta interna del HP." >&2 ;;
+    *)
+        echo "Audio: valor desconocido en ${ARCHIVO_AUDIO}; sale por la interna del HP." >&2 ;;
+esac
+
 # En segundo plano: el proceso principal vuelve enseguida a esperar a Moonlight.
 trap 'cerrar_moonlight "Moonlight ha anunciado el fin de la conexión" &' USR1
 
@@ -123,6 +165,7 @@ trap 'cerrar_moonlight "Moonlight ha anunciado el fin de la conexión" &' USR1
     --packet-size 1024 --display-mode fullscreen \
     --video-decoder hardware --video-codec HEVC \
     --audio-config stereo --absolute-mouse --capture-system-keys fullscreen \
+    ${OPCIONES_AUDIO[@]+"${OPCIONES_AUDIO[@]}"} \
     > >(filtrar_salida) 2>&1 &
 PID_MOONLIGHT=$!
 

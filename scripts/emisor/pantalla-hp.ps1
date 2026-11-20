@@ -4,7 +4,8 @@
 #  Propósito : abrir y cerrar la sesión de pantalla extendida desde Windows 11:
 #              pide al HP que conecte con Apollo, coloca las pantallas y deja
 #              siempre la interna activa al terminar.
-#  Uso       : pantalla-hp extender|principal|off|estado|vincular|--help
+#  Uso       : pantalla-hp extender|principal [--audio hp|hp-usb|portatil]
+#              pantalla-hp off|estado|vincular|--help
 #  Capítulo  : docs/18_pantalla_extendida.md
 #
 #  Lo instala preparar_windows.ps1 en %LOCALAPPDATA%\nomad-pantalla, con
@@ -18,7 +19,12 @@
 #  - Apollo transmite la pantalla PRINCIPAL. Por eso extender deja la virtual
 #    como principal y la interna a su izquierda, y principal es
 #    'DisplaySwitch /external'.
-#  - Con la tapa cerrada la sesión sigue: no se toca la energía.
+#  - Al cerrar la tapa, Windows entra en espera moderna y la sesión se corta
+#    (medido el 2026-11-19; en noviembre salía en el mismo segundo). Durante la
+#    sesión la tapa no hace nada; al terminar se restaura lo que había, con
+#    'off', con el vigilante si la sesión acaba sola, o en la siguiente orden.
+#  - El audio lo elige cada sesión ('--audio'); se deja en el HP, que es quien
+#    decide dónde suena. No se recuerda.
 #
 #  Con -Biblioteca solo define las funciones: así lo cargan las pruebas
 #  (probar_pantalla_hp.ps1), que sustituyen las de bajo nivel por dobles.
@@ -36,6 +42,14 @@ $script:UrlPin = 'https://localhost:47990/pin'
 # si otro programa o una reserva de Windows los tenía al arrancar: en este
 # portátil el rango efímero TCP va de 1024 a 65535 y los incluye (2026-11-08).
 $script:PuertosApollo = 47984, 47989, 48010
+
+$script:ArchivoTapa = Join-Path $script:Directorio 'tapa.conf'
+$script:DirSesionHP = '/var/lib/nomad-pantalla'
+$script:Audios = 'hp', 'hp-usb', 'portatil'
+# El ajuste oculto «Acción al cerrar la tapa» (powercfg /qh). 0 = no hacer nada.
+$script:SubBotones = '4f971e89-eebd-4455-a8de-9e59040e7347'
+$script:AjusteTapa = '5ca83367-6e45-459f-a27b-476b1d01c936'
+$script:IntervaloVigia = 5    # s entre dos miradas del vigilante de la tapa
 
 $script:PlazoVirtual = 30     # s: lo que puede tardar Apollo en crear la pantalla virtual
 $script:PlazoRetirada = 20    # s: Apollo deja de ver al HP a los 10 s ('Ping Timeout')
@@ -232,6 +246,50 @@ function Get-PuertosSinEscuchar {
     return @($script:PuertosApollo | Where-Object { $escuchan -notcontains $_ })
 }
 
+# Las dos acciones de la tapa, con corriente y con batería, o $null si no se
+# pueden leer. Es un ajuste oculto: solo sale con /qh. Las líneas con el valor
+# acaban en 0x........, en cualquier idioma; la primera es la de corriente.
+function Get-AccionTapa {
+    $q = @(powercfg /qh SCHEME_CURRENT $script:SubBotones $script:AjusteTapa 2>$null)
+    $v = @($q | Where-Object { $_ -match '0x([0-9a-fA-F]{8})\s*$' } |
+        ForEach-Object { [Convert]::ToInt32(($_ -replace '.*0x', '').Trim(), 16) })
+    if ($v.Count -lt 2) { return $null }
+    return @{ AC = $v[-2]; DC = $v[-1] }
+}
+
+# No necesita administrador (medido con un token sin privilegios, 2026-11-19).
+function Set-AccionTapa {
+    param([int]$AC, [int]$DC)
+    powercfg /setacvalueindex SCHEME_CURRENT $script:SubBotones $script:AjusteTapa $AC 2>$null | Out-Null
+    $a = $LASTEXITCODE
+    powercfg /setdcvalueindex SCHEME_CURRENT $script:SubBotones $script:AjusteTapa $DC 2>$null | Out-Null
+    $d = $LASTEXITCODE
+    powercfg /setactive SCHEME_CURRENT 2>$null | Out-Null
+    return ($a -eq 0 -and $d -eq 0 -and $LASTEXITCODE -eq 0)
+}
+
+function Read-TapaGuardada {
+    if (-not (Test-Path $script:ArchivoTapa)) { return $null }
+    $t = @{}
+    foreach ($l in Get-Content $script:ArchivoTapa) { if ($l -match '^(AC|DC)=(\d+)$') { $t[$Matches[1]] = [int]$Matches[2] } }
+    if ($t.ContainsKey('AC') -and $t.ContainsKey('DC')) { return $t }
+    return $null
+}
+
+function Save-TapaGuardada {
+    param($Tapa)
+    New-Item -ItemType Directory -Force $script:Directorio | Out-Null
+    Set-Content -Encoding ASCII $script:ArchivoTapa @("AC=$($Tapa.AC)", "DC=$($Tapa.DC)")
+}
+
+function Remove-TapaGuardada { Remove-Item -Force $script:ArchivoTapa -ErrorAction SilentlyContinue }
+
+# Un proceso aparte y oculto, que sobrevive a esta consola.
+function Start-VigilanteTapa {
+    Start-Process -WindowStyle Hidden -FilePath 'powershell.exe' `
+        -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", 'vigilar-tapa' | Out-Null
+}
+
 function Wait-Segundos { param([double]$Segundos) Start-Sleep -Milliseconds ([int]($Segundos * 1000)) }
 
 function Start-Navegador { param([string]$Url) Start-Process $Url }
@@ -267,6 +325,73 @@ function Test-ApolloEscucha {
     }
 }
 
+# ---------------------------------------------------------------------------
+#  La tapa durante la sesión
+# ---------------------------------------------------------------------------
+
+$script:NombresTapa = @{ 0 = 'no hacer nada'; 1 = 'suspender'; 2 = 'hibernar'; 3 = 'apagar' }
+function Format-Tapa { param($Tapa) "corriente: $($script:NombresTapa[$Tapa.AC]); batería: $($script:NombresTapa[$Tapa.DC])" }
+
+# Guarda lo que había, solo si no hay ya algo guardado: si quedó de una sesión
+# anterior, lo guardado es lo bueno, y lo de ahora sería el 'no hacer nada'.
+function Suspend-Tapa {
+    if (-not (Read-TapaGuardada)) {
+        $actual = Get-AccionTapa
+        if (-not $actual) {
+            Escribir 'AVISO' 'No se ha podido leer la acción de la tapa: si la cierras, el portátil se suspenderá y la sesión se cortará.'
+            return
+        }
+        Save-TapaGuardada $actual
+    }
+    if (Set-AccionTapa 0 0) {
+        Escribir 'INFO' 'Tapa: durante la sesión, cerrarla no suspende el portátil.'
+    } else {
+        Escribir 'AVISO' 'Windows no ha aceptado el cambio de la tapa: si la cierras, la sesión se cortará.'
+    }
+}
+
+# Se puede repetir. Solo borra lo guardado si Windows aceptó la vuelta.
+function Restore-Tapa {
+    $guardada = Read-TapaGuardada
+    if (-not $guardada) { return $true }
+    if (Set-AccionTapa $guardada.AC $guardada.DC) {
+        Remove-TapaGuardada
+        Escribir 'OK' "Tapa restaurada ($(Format-Tapa $guardada))."
+        return $true
+    }
+    Escribir 'AVISO' "No se ha podido restaurar la tapa; queda pendiente para la próxima orden ($(Format-Tapa $guardada))."
+    return $false
+}
+
+# Una tapa que quedó en 'no hacer nada' sin sesión: una caída, o un vigilante que
+# no llegó a actuar. Se arregla antes de cualquier otra cosa.
+function Repair-Tapa {
+    if ((Read-TapaGuardada) -and -not (Get-Virtual)) {
+        Escribir 'AVISO' 'La tapa seguía sin suspender de una sesión anterior.'
+        [void](Restore-Tapa)
+    }
+}
+
+# Corre aparte: espera a que exista la pantalla virtual y, cuando desaparece
+# (por 'off', un corte o el HP que se va), restaura la tapa y termina. Si 'off'
+# ya la restauró, no queda nada guardado y termina también.
+function Invoke-VigilarTapa {
+    $vista = $false; $ausencias = 0
+    $limite = [int][Math]::Ceiling(($script:PlazoVirtual + 30) / $script:IntervaloVigia)
+    for ($i = 0; ; $i++) {
+        if (-not (Read-TapaGuardada)) { return 0 }
+        if (Get-Virtual) { $vista = $true; $ausencias = 0 }
+        else {
+            $ausencias++
+            # Dos miradas seguidas: un instante sin virtual no es el final.
+            if (($vista -and $ausencias -ge 2) -or (-not $vista -and $i -ge $limite)) { break }
+        }
+        Wait-Segundos $script:IntervaloVigia
+    }
+    [void](Restore-Tapa)
+    return 0
+}
+
 # Todo lo que puede fallar sin haber tocado nada va aquí, antes de pedir la
 # sesión: así un error nunca deja las pantallas movidas.
 function Test-Requisitos {
@@ -294,6 +419,9 @@ function Test-Requisitos {
         throw "El sudo de $hp no permite arrancar $($script:UHp) sin contraseña. Si el HP tiene la versión anterior, ejecuta allí: sudo ./scripts/18_pantalla.sh. No se ha tocado nada."
     } elseif ($rc -ne 0) {
         throw "$hp no responde sin preguntas: comprueba con 'ssh-add -l' que la clave está en el agente de Windows. No se ha tocado nada."
+    }
+    if ((Invoke-SshHP "test -w $($script:DirSesionHP)") -ne 0) {
+        throw "$hp no tiene $($script:DirSesionHP), donde se deja la elección de audio. Ejecuta allí: sudo ./scripts/18_pantalla.sh. No se ha tocado nada."
     }
 }
 
@@ -327,13 +455,15 @@ function Set-Modo {
 }
 
 function Open-Sesion {
-    param([string]$Modo)
+    param([string]$Modo, [string]$Audio = 'hp')
     Test-Requisitos
-    Escribir 'INFO' "Pidiendo la sesión al HP ($($script:UHp))."
-    # La de Fedora se para por si quedó huérfana, y la propia porque 'start'
-    # sobre una unidad activa no hace nada. Cada orden va aparte: sudo compara
-    # la orden entera.
-    $orden = "sudo -n systemctl stop $($script:UHpOtra) ; sudo -n systemctl stop $($script:UHp) ; sudo -n systemctl start $($script:UHp)"
+    Suspend-Tapa
+    if (Read-TapaGuardada) { Start-VigilanteTapa }
+    Escribir 'INFO' "Pidiendo la sesión al HP ($($script:UHp)). Audio: $Audio."
+    # El audio va primero: el lanzador del HP lo lee al arrancar. La de Fedora
+    # se para por si quedó huérfana, y la propia porque 'start' sobre una unidad
+    # activa no hace nada. Cada orden va aparte: sudo compara la orden entera.
+    $orden = "echo $Audio > $($script:DirSesionHP)/audio ; sudo -n systemctl stop $($script:UHpOtra) ; sudo -n systemctl stop $($script:UHp) ; sudo -n systemctl start $($script:UHp)"
     if ((Invoke-SshHP $orden) -ne 0) {
         [void](Close-Sesion)
         throw "$($script:Conf.HP_SSH) no ha arrancado $($script:UHp)."
@@ -367,12 +497,13 @@ function Close-Sesion {
     }
     [void](Wait-Condicion -Plazo $script:PlazoRetirada -Condicion { $null -eq (Get-Virtual) })
     Invoke-DisplaySwitch 'internal'
-    if (Wait-Condicion -Plazo $script:PlazoModo -Condicion { Test-InternaRestaurada }) {
-        Escribir 'OK' 'Pantalla interna activa y principal.'
-        return $true
-    }
-    Escribir 'ERROR' "La pantalla interna no ha vuelto. Pulsa Win+P y elige 'Solo pantalla de PC'."
-    return $false
+    $ok = Wait-Condicion -Plazo $script:PlazoModo -Condicion { Test-InternaRestaurada }
+    if ($ok) { Escribir 'OK' 'Pantalla interna activa y principal.' }
+    else { Escribir 'ERROR' "La pantalla interna no ha vuelto. Pulsa Win+P y elige 'Solo pantalla de PC'." }
+    # Después de la interna: con la tapa cerrada y sin pantalla, suspender ahora
+    # sería lo correcto, pero no antes de devolverle la imagen.
+    [void](Restore-Tapa)
+    return $ok
 }
 
 function Get-Estado {
@@ -387,6 +518,12 @@ function Get-Estado {
     foreach ($p in @(Get-Pantallas)) {
         $tipo = if ($p.Virtual) { 'virtual' } else { 'interna' }
         Escribir 'INFO' ("{0} ({1}): activa={2} principal={3} x={4}" -f $p.Nombre, $tipo, $p.Activa, $p.Principal, $p.X)
+    }
+    $guardada = Read-TapaGuardada
+    if ($guardada) { Escribir 'INFO' "Tapa: sin suspender por la sesión; al terminar vuelve a $(Format-Tapa $guardada)." }
+    else {
+        $tapa = Get-AccionTapa
+        if ($tapa) { Escribir 'INFO' "Tapa: $(Format-Tapa $tapa)." }
     }
     Escribir 'INFO' 'Sesiones en el HP (windows, fedora):'
     [void](Invoke-SshHP "systemctl is-active $($script:UHp) $($script:UHpOtra)")
@@ -415,6 +552,11 @@ Uso: pantalla-hp <orden>
 
   extender    el HP es un segundo monitor, a la derecha de la pantalla interna
   principal   el HP es la única pantalla: la interna se apaga
+              Las dos aceptan --audio hp|hp-usb|portatil (por defecto, hp):
+                hp        altavoces o jack del HP
+                hp-usb    un audio USB conectado al HP
+                portatil  la salida de este portátil (la que elijas en Windows)
+              Durante la sesión, cerrar la tapa no suspende el portátil.
   off         cierra la sesión y deja la pantalla interna activa
   estado      muestra Tailscale, Apollo, las pantallas y las sesiones del HP
   vincular    vincula el HP con Apollo (una vez): pide la contraseña de sudo
@@ -427,13 +569,23 @@ Configuración: %LOCALAPPDATA%\nomad-pantalla\pantalla-hp.conf
 
 # Devuelve el código de salida: 0 bien, 1 error, 2 uso incorrecto.
 function Invoke-PantallaHP {
-    param([string]$Orden)
+    param([string]$Orden, [string[]]$Resto = @())
     switch ($Orden) {
         { $_ -in '-h', '--help', '/?', 'ayuda' } { Show-Ayuda; return 0 }
+        'vigilar-tapa' { return (Invoke-VigilarTapa) }
         { $_ -in 'extender', 'principal', 'off', 'estado', 'vincular' } { break }
         '' { Escribir 'ERROR' 'Falta la orden.'; Show-Ayuda; return 2 }
         default { Escribir 'ERROR' "Orden desconocida: $Orden"; Show-Ayuda; return 2 }
     }
+    $audio = 'hp'
+    for ($i = 0; $i -lt $Resto.Count; $i++) {
+        $a = [string]$Resto[$i]
+        if ($a -eq '--audio' -and $i + 1 -lt $Resto.Count) { $audio = [string]$Resto[$i + 1]; $i++ }
+        elseif ($a -like '--audio=*') { $audio = $a.Substring(8) }
+        else { Escribir 'ERROR' "Argumento desconocido: $a"; Show-Ayuda; return 2 }
+        if ($Orden -notin 'extender', 'principal') { Escribir 'ERROR' '--audio solo vale con extender o principal.'; return 2 }
+    }
+    if ($audio -cnotin $script:Audios) { Escribir 'ERROR' "Audio desconocido: '$audio'. Usa hp, hp-usb o portatil."; return 2 }
     try {
         $script:Conf = Read-Conf
     } catch {
@@ -445,8 +597,8 @@ function Invoke-PantallaHP {
         switch ($Orden) {
             'off'      { if (Close-Sesion) { return 0 } else { return 1 } }
             'estado'   { return (Get-Estado) }
-            'vincular' { return (Invoke-Vincular) }
-            default    { Open-Sesion $Orden; return 0 }
+            'vincular' { Repair-Tapa; return (Invoke-Vincular) }
+            default    { Repair-Tapa; Open-Sesion $Orden $audio; return 0 }
         }
     } catch {
         Escribir 'ERROR' $_.Exception.Message
@@ -457,4 +609,5 @@ function Invoke-PantallaHP {
 if ($script:Argumentos -contains '-Biblioteca') { return }
 
 $orden = if ($script:Argumentos.Count -gt 0) { [string]$script:Argumentos[0] } else { '' }
-exit (Invoke-PantallaHP $orden)
+$resto = @(if ($script:Argumentos.Count -gt 1) { $script:Argumentos[1..($script:Argumentos.Count - 1)] })
+exit (Invoke-PantallaHP $orden $resto)

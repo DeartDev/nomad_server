@@ -38,6 +38,11 @@ function Initialize-Sim {
         IP               = $true
         Apollo           = $true
         SinEscuchar      = @()
+        Tapa             = @{ AC = 1; DC = 1 }
+        TapaGuardada     = $null
+        TapaFalla        = $false
+        SinCarpetaHP     = $false
+        AlEsperar        = $null
         InternaRebelde   = $false
         Esperas          = 0
     }
@@ -82,6 +87,7 @@ function Invoke-SshHP {
     $script:S.Llamadas.Add("$tipo $Orden")
     if ($script:S.SshFalla) { return 255 }
     if ($script:S.SudoRechaza -and $Orden -like 'sudo -n -l*') { return 1 }
+    if ($script:S.SinCarpetaHP -and $Orden -like 'test -w *') { return 1 }
     if ($Orden -like '*systemctl is-active*') {
         if (Get-Virtual) { return 0 } else { return 3 }
     }
@@ -122,7 +128,23 @@ function Set-Disposicion {
 function Test-IPLocal { param([string]$IP) $script:S.Llamadas.Add("ip $IP"); $script:S.IP }
 function Test-Apollo { $script:S.Apollo }
 function Get-PuertosSinEscuchar { $script:S.SinEscuchar }
-function Wait-Segundos { param([double]$Segundos) $script:S.Esperas++ }
+function Wait-Segundos {
+    param([double]$Segundos)
+    $script:S.Esperas++
+    if ($script:S.AlEsperar) { & $script:S.AlEsperar }
+}
+function Get-AccionTapa { if ($script:S.Tapa) { @{ AC = $script:S.Tapa.AC; DC = $script:S.Tapa.DC } } }
+function Set-AccionTapa {
+    param([int]$AC, [int]$DC)
+    $script:S.Llamadas.Add("tapa $AC $DC")
+    if ($script:S.TapaFalla) { return $false }
+    $script:S.Tapa = @{ AC = $AC; DC = $DC }
+    return $true
+}
+function Read-TapaGuardada { $script:S.TapaGuardada }
+function Save-TapaGuardada { param($Tapa) $script:S.TapaGuardada = $Tapa }
+function Remove-TapaGuardada { $script:S.TapaGuardada = $null }
+function Start-VigilanteTapa { $script:S.Llamadas.Add('vigilante-tapa') }
 function Start-Navegador { param([string]$Url) $script:S.Llamadas.Add("navegador $Url") }
 
 # ---------------------------------------------------------------------------
@@ -139,9 +161,11 @@ function Linea { param([string]$Texto)
 }
 function Hay { param([string]$T) if ((Linea $T) -eq 0) { Fallar "falta la llamada: $T" } }
 function NoHay { param([string]$T) if ((Linea $T) -ne 0) { Fallar "no debía haber: $T" } }
+# PowerShell no distingue mayúsculas en los nombres: '$a' sería '$A', [string],
+# y compararía '8' con '10' como texto.
 function Antes { param([string]$A, [string]$B)
-    $a = Linea $A; $b = Linea $B
-    if ($a -eq 0 -or $b -eq 0 -or $a -ge $b) { Fallar "'$A' (línea $a) debe ir antes que '$B' (línea $b)" }
+    $na = Linea $A; $nb = Linea $B
+    if ($na -eq 0 -or $nb -eq 0 -or $na -ge $nb) { Fallar "'$A' (línea $na) debe ir antes que '$B' (línea $nb)" }
 }
 function Dice { param([string]$T)
     if (-not (($script:S.Salida -join "`n").Contains($T))) { Fallar "la salida no dice: $T" }
@@ -159,7 +183,7 @@ function PantallasIntactas {
     NoHay 'sudo -n systemctl start nomad-pantalla@windows.service'
 }
 
-$ORDEN_ARRANQUE = 'sudo -n systemctl stop nomad-pantalla@fedora.service ; sudo -n systemctl stop nomad-pantalla@windows.service ; sudo -n systemctl start nomad-pantalla@windows.service'
+$ORDEN_ARRANQUE = 'echo hp > /var/lib/nomad-pantalla/audio ; sudo -n systemctl stop nomad-pantalla@fedora.service ; sudo -n systemctl stop nomad-pantalla@windows.service ; sudo -n systemctl start nomad-pantalla@windows.service'
 
 # ---------------------------------------------------------------------------
 #  Arranque
@@ -356,6 +380,135 @@ function Prueba-OffNoEsperaSinFin {
     RcEs $rc 0
     if ($script:S.Esperas -gt 60) { Fallar "esperó $($script:S.Esperas) veces" }
     InternaRestaurada
+}
+
+# ---------------------------------------------------------------------------
+#  La tapa
+# ---------------------------------------------------------------------------
+
+function Prueba-AbrirQuitaLaSuspensionDeLaTapaAntesDePedirAlHP {
+    $rc = Invoke-PantallaHP 'principal'
+    RcEs $rc 0
+    Antes 'tapa 0 0' 'sudo -n systemctl start nomad-pantalla@windows.service'
+    Hay 'vigilante-tapa'
+    if (-not $script:S.TapaGuardada -or $script:S.TapaGuardada.AC -ne 1) { Fallar 'no guardó la tapa de antes' }
+}
+
+function Prueba-OffRestauraLaTapaDespuesDeLaInterna {
+    Invoke-PantallaHP 'principal' | Out-Null
+    $script:S.Llamadas.Clear()
+    $rc = Invoke-PantallaHP 'off'
+    RcEs $rc 0
+    Antes 'displayswitch internal' 'tapa 1 1'
+    if ($script:S.TapaGuardada) { Fallar 'quedó la tapa guardada' }
+    InternaRestaurada
+}
+
+function Prueba-SesionQueFallaRestauraLaTapa {
+    $script:S.VirtualAlArrancar = $false
+    $rc = Invoke-PantallaHP 'extender'
+    RcNoCero $rc
+    if ($script:S.Tapa.AC -ne 1 -or $script:S.Tapa.DC -ne 1) { Fallar "la tapa quedó en $($script:S.Tapa.AC)/$($script:S.Tapa.DC)" }
+}
+
+function Prueba-RequisitoQueFallaNoTocaLaTapa {
+    $script:S.Apollo = $false
+    $rc = Invoke-PantallaHP 'extender'
+    RcNoCero $rc
+    NoHay 'tapa '
+    NoHay 'vigilante-tapa'
+}
+
+function Prueba-TapaQueQuedoDeOtraSesionSeRestauraConLoGuardado {
+    # Una caída dejó la tapa en 'no hacer nada': lo guardado es lo bueno.
+    $script:S.Tapa = @{ AC = 0; DC = 0 }
+    $script:S.TapaGuardada = @{ AC = 1; DC = 2 }
+    $rc = Invoke-PantallaHP 'extender'
+    RcEs $rc 0
+    Antes 'tapa 1 2' 'tapa 0 0'
+    if ($script:S.TapaGuardada.AC -ne 1 -or $script:S.TapaGuardada.DC -ne 2) { Fallar 'perdió lo guardado' }
+    Dice 'sesión anterior'
+}
+
+function Prueba-TapaQueWindowsRechazaAvisaYSigue {
+    $script:S.TapaFalla = $true
+    $rc = Invoke-PantallaHP 'principal'
+    RcEs $rc 0
+    Dice 'la sesión se cortará'
+}
+
+function Prueba-VigilanteRestauraLaTapaCuandoSeVaLaVirtual {
+    Set-SesionMontada
+    $script:S.Tapa = @{ AC = 0; DC = 0 }
+    $script:S.TapaGuardada = @{ AC = 1; DC = 1 }
+    # La sesión dura tres miradas y luego el HP se va.
+    $script:S.AlEsperar = { if ($script:S.Esperas -eq 3) { Remove-VirtualSim } }
+    $rc = Invoke-PantallaHP 'vigilar-tapa'
+    RcEs $rc 0
+    if ($script:S.Tapa.AC -ne 1) { Fallar 'no restauró la tapa' }
+    if ($script:S.Esperas -lt 3) { Fallar "terminó antes de que se fuera la virtual ($($script:S.Esperas))" }
+}
+
+function Prueba-VigilanteSinNadaGuardadoTerminaSinTocar {
+    Set-SesionMontada
+    $rc = Invoke-PantallaHP 'vigilar-tapa'
+    RcEs $rc 0
+    NoHay 'tapa '
+}
+
+function Prueba-VigilanteSinVirtualQueNuncaApareceRestauraTrasElPlazo {
+    $script:S.Tapa = @{ AC = 0; DC = 0 }
+    $script:S.TapaGuardada = @{ AC = 1; DC = 1 }
+    $rc = Invoke-PantallaHP 'vigilar-tapa'
+    RcEs $rc 0
+    if ($script:S.Tapa.AC -ne 1) { Fallar 'no restauró la tapa' }
+    if ($script:S.Esperas -gt 20) { Fallar "esperó $($script:S.Esperas) veces" }
+}
+
+# ---------------------------------------------------------------------------
+#  Audio
+# ---------------------------------------------------------------------------
+
+function Prueba-AudioPorDefectoEsHPYVaAntesDelArranque {
+    $rc = Invoke-PantallaHP 'extender'
+    RcEs $rc 0
+    Hay 'ssh echo hp > /var/lib/nomad-pantalla/audio ; sudo -n systemctl stop nomad-pantalla@fedora.service'
+}
+
+function Prueba-AudioPortatilSeDejaEnElHP {
+    $rc = Invoke-PantallaHP 'principal' @('--audio', 'portatil')
+    RcEs $rc 0
+    Hay 'echo portatil > /var/lib/nomad-pantalla/audio'
+}
+
+function Prueba-AudioConIgualTambienVale {
+    $rc = Invoke-PantallaHP 'extender' @('--audio=hp-usb')
+    RcEs $rc 0
+    Hay 'echo hp-usb > /var/lib/nomad-pantalla/audio'
+}
+
+function Prueba-AudioDesconocidoNoTocaNada {
+    $rc = Invoke-PantallaHP 'extender' @('--audio', 'hp;reboot')
+    RcEs $rc 2
+    NoHay 'ssh'
+    NoHay 'tapa '
+    PantallasIntactas
+    Dice 'Audio desconocido'
+}
+
+function Prueba-AudioSoloValeAlAbrirLaSesion {
+    $rc = Invoke-PantallaHP 'off' @('--audio', 'portatil')
+    RcEs $rc 2
+    Dice 'solo vale con extender o principal'
+}
+
+function Prueba-HPSinCarpetaDeSesionPideEjecutar18Pantalla {
+    $script:S.SinCarpetaHP = $true
+    $rc = Invoke-PantallaHP 'extender'
+    RcNoCero $rc
+    Dice '18_pantalla.sh'
+    PantallasIntactas
+    NoHay 'tapa '
 }
 
 # ---------------------------------------------------------------------------
